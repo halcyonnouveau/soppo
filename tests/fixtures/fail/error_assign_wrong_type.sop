@@ -1,0 +1,5 @@
+func test() int {
+    x := 42
+    x = "not an int"
+    return x
+}

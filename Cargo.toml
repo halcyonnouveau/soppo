@@ -1,0 +1,13 @@
+[package]
+name = "soppo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+logos = "0.15"
+miette = { version = "7.6", features = ["fancy"] }
+thiserror = "2.0"
+
+[dev-dependencies]
+insta = "1.44.1"

@@ -1,0 +1,53 @@
+package main
+
+import "fmt"
+
+type Color enum {
+    Red
+    Yellow
+    Green
+}
+
+type Result enum {
+    Ok int
+    Err string
+}
+
+func unwrapOr(r Result, defaultVal int) int {
+    return match r {
+    case Result.Ok(value):
+        value
+    case Result.Err(msg):
+        defaultVal
+    }
+}
+
+func test() int {
+    color := Color.Red
+
+    message := match color {
+    case Color.Red:
+        "Stop"
+    case Color.Yellow:
+        "Wait"
+    case Color.Green:
+        "Go"
+    }
+
+    return match message {
+    case "Go":
+        1
+    default:
+        0
+    }
+}
+
+func main() {
+    ok := Result.Ok(42)
+    err := Result.Err("failed")
+
+    result1 := unwrapOr(ok, 0)
+    result2 := unwrapOr(err, 99)
+
+   	fmt.Printf("%d %d %d\n", test(), result1, result2)
+}

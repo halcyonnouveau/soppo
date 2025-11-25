@@ -1,0 +1,125 @@
+---
+source: tests/e2e.rs
+expression: output
+---
+package main
+
+import "fmt"
+import "strings"
+
+const MAX_SIZE int = 100
+
+const PI float64 = 3.14159
+
+type UserId int
+
+type User struct {
+    id UserId
+    name string
+    age int
+    active bool
+}
+
+type Counter struct {
+    value int
+}
+
+func (c Counter) getValue() int {
+    return c.value
+}
+
+func (c Counter) increment() Counter {
+    c.value = (c.value + 1)
+    return c
+}
+
+func sum(numbers int) int {
+    total := 0
+    i := 0
+    for (i < 10) {
+        total = (total + numbers)
+        i = (i + 1)
+    }
+    return total
+}
+
+func processString(s string) string {
+    if (s == "") {
+        return "empty"
+    }
+    upper := strings.ToUpper(s)
+    return upper
+}
+
+func arrayOps() int {
+    arr := [5]int{1, 2, 3, 4, 5}
+    sum := 0
+    i := 0
+    for (i < 5) {
+        sum = (sum + arr[i])
+        i = (i + 1)
+    }
+    return sum
+}
+
+func createUser(name string, age int) User {
+    user := User{id: UserId(1), name: name, age: age, active: true}
+    return user
+}
+
+func checkAge(age int) string {
+    if (age < 18) {
+        return "minor"
+    } else {
+        if (age < 65) {
+            return "adult"
+        } else {
+            return "senior"
+        }
+    }
+}
+
+func validateInput(value int, enabled bool) bool {
+    return ((enabled && (value > 0)) && (value < MAX_SIZE))
+}
+
+func calculate(x int, y int) int {
+    a := (x + y)
+    b := (x - y)
+    c := (x * y)
+    d := (x / y)
+    e := (x % y)
+    result := ((((a + b) + c) + d) + e)
+    return result
+}
+
+func main() {
+    x := 42
+    y := 10
+    sum := (x + y)
+    radius := 5.0
+    area := ((PI * radius) * radius)
+    message := "Hello, World"
+    processed := processString(message)
+    isValid := validateInput(50, true)
+    user := createUser("Alice", 30)
+    category := checkAge(user.age)
+    counter := Counter{value: 0}
+    counter = counter.increment()
+    count := counter.getValue()
+    arraySum := arrayOps()
+    status := ""
+    if (y > 0) {
+        status = "success"
+    } else {
+        status = "failure"
+    }
+    fmt.Printf("Sum: %d\n", sum)
+    fmt.Printf("Area: %f\n", area)
+    fmt.Printf("Processed: %s\n", processed)
+    fmt.Printf("Valid: %t\n", isValid)
+    fmt.Printf("User: %s (%s)\n", user.name, category)
+    fmt.Printf("Count: %d\n", count)
+    fmt.Printf("Array sum: %d\n", arraySum)
+    fmt.Printf("Status: %s\n", status)
+}

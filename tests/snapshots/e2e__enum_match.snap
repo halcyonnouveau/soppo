@@ -1,0 +1,94 @@
+---
+source: tests/e2e.rs
+expression: output
+---
+package main
+
+import "fmt"
+
+type Color interface {
+    isColor()
+}
+
+type Red struct {}
+func (Red) isColor() {}
+func (Red) String() string { return "Red" }
+
+type Yellow struct {}
+func (Yellow) isColor() {}
+func (Yellow) String() string { return "Yellow" }
+
+type Green struct {}
+func (Green) isColor() {}
+func (Green) String() string { return "Green" }
+
+var (
+    ColorRed Color = Red{}
+    ColorYellow Color = Yellow{}
+    ColorGreen Color = Green{}
+)
+
+type Result interface {
+    isResult()
+}
+
+type Ok struct {
+    Value int
+}
+func (Ok) isResult() {}
+
+type Err struct {
+    Value string
+}
+func (Err) isResult() {}
+
+func ResultOk(value int) Result {
+    return Ok{Value: value}
+}
+func ResultErr(value string) Result {
+    return Err{Value: value}
+}
+
+func unwrapOr(r Result, defaultVal int) int {
+    var __result int
+    switch __v := r.(type) {
+    case Ok:
+        value := __v.Value
+        _ = value
+        __result = value
+    case Err:
+        msg := __v.Value
+        _ = msg
+        __result = defaultVal
+    }
+    return __result
+}
+
+func test() int {
+    color := ColorRed
+    var message string
+    switch color.(type) {
+    case Red:
+        message = "Stop"
+    case Yellow:
+        message = "Wait"
+    case Green:
+        message = "Go"
+    }
+    var __result int
+    switch message {
+    case "Go":
+        __result = 1
+    default:
+        __result = 0
+    }
+    return __result
+}
+
+func main() {
+    ok := ResultOk(42)
+    err := ResultErr("failed")
+    result1 := unwrapOr(ok, 0)
+    result2 := unwrapOr(err, 99)
+    fmt.Printf("%d %d %d\n", test(), result1, result2)
+}

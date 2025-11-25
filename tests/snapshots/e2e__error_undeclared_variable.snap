@@ -1,0 +1,15 @@
+---
+source: tests/e2e.rs
+expression: result.unwrap_err()
+---
+Error: soppo::undefined_variable
+
+  × Cannot find value `x` in this scope
+   ╭─[error_undeclared_variable.sop:2:5]
+ 1 │ func test() int {
+ 2 │     x = 42
+   ·     ┬
+   ·     ╰── not found in this scope
+ 3 │     return x
+   ╰────
+  help: Use `:=` to declare a new variable: `x := <value>`

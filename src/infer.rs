@@ -1,0 +1,1093 @@
+use crate::ast::{
+    BinOp, Block, ConstDecl, EnumVariant, Expr, ExprKind, FuncDecl, Stmt, StmtKind, TypeDecl,
+    TypeKind,
+};
+use crate::error::{Result, SoppoError};
+use crate::module::GlobalState;
+use crate::source::Span;
+use crate::ty::Type;
+use std::collections::HashMap;
+
+/// Type inference engine
+pub struct Infer {
+    /// Global state tracking all modules
+    global_state: GlobalState,
+
+    /// Current scope: variable name -> type
+    scopes: Vec<HashMap<String, Type>>,
+
+    /// Type variable substitutions (solutions)
+    substitutions: HashMap<i32, Type>,
+
+    /// Next fresh type variable ID
+    next_var: i32,
+
+    /// Expected return type for the current function (None if not in a function)
+    expected_return_type: Option<Type>,
+}
+
+impl Infer {
+    pub fn new() -> Self {
+        Self {
+            global_state: GlobalState::new(),
+            scopes: vec![HashMap::new()],
+            substitutions: HashMap::new(),
+            next_var: 0,
+            expected_return_type: None,
+        }
+    }
+
+    pub fn global_state(self) -> GlobalState {
+        self.global_state
+    }
+
+    /// Process imports and add package names to scope
+    pub fn process_imports(&mut self, imports: &[crate::ast::Import]) {
+        for import in imports {
+            // Extract package name from import path
+            // e.g., "fmt" from "fmt" or "strings" from "strings"
+            let package_name = import.path.trim_matches('"');
+
+            // Add package name to scope with a special "package" type
+            // This allows field access like fmt.Printf to work
+            self.insert_var(package_name.to_string(), Type::simple("_package"));
+        }
+    }
+
+    /// Generate a fresh type variable
+    pub fn fresh_ty_var(&mut self) -> Type {
+        let var = Type::var(self.next_var);
+        self.next_var += 1;
+        var
+    }
+
+    /// Push a new scope
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    /// Pop the current scope
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    /// Insert a variable into the current scope
+    fn insert_var(&mut self, name: String, ty: Type) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name, ty);
+        }
+    }
+
+    /// Lookup a variable in scopes (from innermost to outermost)
+    fn lookup_var(&self, name: &str) -> Option<Type> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(ty) = scope.get(name) {
+                return Some(ty.clone());
+            }
+        }
+        None
+    }
+
+    /// Add pattern bindings to the current scope
+    fn add_pattern_bindings(
+        &mut self,
+        pattern: &crate::ast::Pattern,
+        scrutinee_ty: &Type,
+    ) -> Result<()> {
+        use crate::ast::PatternKind;
+
+        match &pattern.kind {
+            PatternKind::Wildcard => {
+                // Wildcard doesn't bind anything
+                Ok(())
+            }
+            PatternKind::Variant(name) => {
+                // In the context of a tuple/struct pattern, this is a binding variable
+                // (e.g., Ok(value) where "value" is parsed as Variant)
+                // Add it to scope with the scrutinee type
+                self.insert_var(name.clone(), scrutinee_ty.clone());
+                Ok(())
+            }
+            PatternKind::Literal(_) => {
+                // Literal pattern doesn't bind anything
+                Ok(())
+            }
+            PatternKind::TuplePattern { name: _, elements } => {
+                // For tuple patterns like Ok(value), we need to extract the inner types
+                // For enum variants with associated data, look up the variant type
+                // For now, use fresh type variables for each element
+                for elem in elements {
+                    let elem_ty = self.fresh_ty_var();
+                    self.add_pattern_bindings(elem, &elem_ty)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Unify two types (solve constraint)
+    pub fn unify(&mut self, t1: &Type, t2: &Type, span: &Span) -> Result<()> {
+        let t1 = self.substitute(t1.clone());
+        let t2 = self.substitute(t2.clone());
+
+        match (&t1, &t2) {
+            // Never type unifies with anything (it's bottom type)
+            (Type::Never, _) | (_, Type::Never) => Ok(()),
+
+            // Same type variable
+            (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
+
+            // One is a type variable: create substitution
+            (Type::Var(a), ty) | (ty, Type::Var(a)) => {
+                // Occurs check: prevent infinite types like T = List[T]
+                if self.occurs(*a, ty) {
+                    return Err(SoppoError::Type {
+                        message: format!("Infinite type: ?{} = {}", a, ty),
+                        span: span.clone(),
+                    });
+                }
+                self.substitutions.insert(*a, ty.clone());
+                Ok(())
+            }
+
+            // Same constructor: unify arguments
+            (Type::Con { name: n1, args: a1 }, Type::Con { name: n2, args: a2 })
+                if n1.name == n2.name =>
+            {
+                if a1.len() != a2.len() {
+                    return Err(SoppoError::Type {
+                        message: format!(
+                            "Type constructor {} has wrong number of arguments",
+                            n1.name
+                        ),
+                        span: span.clone(),
+                    });
+                }
+                for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                    self.unify(arg1, arg2, span)?;
+                }
+                Ok(())
+            }
+
+            // Functions: unify args and return
+            (Type::Fun { args: a1, ret: r1 }, Type::Fun { args: a2, ret: r2 }) => {
+                if a1.len() != a2.len() {
+                    return Err(SoppoError::Type {
+                        message: format!(
+                            "Function has {} arguments, but expected {}",
+                            a2.len(),
+                            a1.len()
+                        ),
+                        span: span.clone(),
+                    });
+                }
+                for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                    self.unify(arg1, arg2, span)?;
+                }
+                self.unify(r1, r2, span)?;
+                Ok(())
+            }
+
+            // Mismatch
+            _ => Err(SoppoError::TypeMismatch {
+                expected: t1.clone(),
+                found: t2.clone(),
+                span: span.clone(),
+            }),
+        }
+    }
+
+    /// Check if type variable occurs in type (for occurs check)
+    fn occurs(&self, var: i32, ty: &Type) -> bool {
+        match ty {
+            Type::Var(v) => *v == var,
+            Type::Con { args, .. } => args.iter().any(|arg| self.occurs(var, arg)),
+            Type::Fun { args, ret } => {
+                args.iter().any(|arg| self.occurs(var, arg)) || self.occurs(var, ret)
+            }
+            Type::Never => false,
+        }
+    }
+
+    /// Apply substitutions to a type
+    pub fn substitute(&self, ty: Type) -> Type {
+        match ty {
+            Type::Var(v) => {
+                if let Some(subst) = self.substitutions.get(&v) {
+                    // Recursively substitute in case substitution contains more variables
+                    self.substitute(subst.clone())
+                } else {
+                    Type::Var(v)
+                }
+            }
+            Type::Con { name, args } => Type::Con {
+                name,
+                args: args.into_iter().map(|a| self.substitute(a)).collect(),
+            },
+            Type::Fun { args, ret } => Type::Fun {
+                args: args.into_iter().map(|a| self.substitute(a)).collect(),
+                ret: Box::new(self.substitute(*ret)),
+            },
+            Type::Never => Type::Never,
+        }
+    }
+
+    /// Infer the type of an expression
+    pub fn infer_expr(&mut self, expr: &Expr) -> Result<Type> {
+        match &expr.kind {
+            ExprKind::Integer(_) => Ok(Type::int()),
+
+            ExprKind::Float(_) => Ok(Type::simple("float64")),
+
+            ExprKind::String(_) => Ok(Type::string()),
+
+            ExprKind::Bool(_) => Ok(Type::bool()),
+
+            ExprKind::Ident(name) => {
+                self.lookup_var(name)
+                    .ok_or_else(|| SoppoError::UndefinedVariable {
+                        name: name.clone(),
+                        span: expr.span.clone(),
+                    })
+            }
+
+            ExprKind::Binary { op, left, right } => {
+                let left_ty = self.infer_expr(left)?;
+                let right_ty = self.infer_expr(right)?;
+
+                match op {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                        // Arithmetic: both must be same numeric type (int or float64), result is that type
+                        self.unify(&left_ty, &right_ty, &expr.span)?;
+                        // The result type is the same as the operand type
+                        Ok(self.substitute(left_ty))
+                    }
+                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                        // Comparison: both must be same type, result is bool
+                        self.unify(&left_ty, &right_ty, &expr.span)?;
+                        Ok(Type::bool())
+                    }
+                    BinOp::And | BinOp::Or => {
+                        // Logical: both must be bool, result is bool
+                        self.unify(&left_ty, &Type::bool(), &left.span)?;
+                        self.unify(&right_ty, &Type::bool(), &right.span)?;
+                        Ok(Type::bool())
+                    }
+                }
+            }
+
+            ExprKind::Call { func, args } => {
+                // Check if this is a type conversion: TypeName(value)
+                if let ExprKind::Ident(type_name) = &func.kind
+                    && self.global_state.has_type(type_name) {
+                        // This is a type conversion, not a function call
+                        // Type conversions take exactly one argument
+                        if args.len() != 1 {
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "Type conversion requires exactly 1 argument, but got {}",
+                                    args.len()
+                                ),
+                                span: expr.span.clone(),
+                            });
+                        }
+
+                        // Infer the argument type (we don't need to use it, just check it's valid)
+                        self.infer_expr(&args[0])?;
+
+                        // Return the target type
+                        return Ok(Type::simple(type_name));
+                    }
+
+                // Regular function call
+                let func_ty = self.infer_expr(func)?;
+                let func_ty = self.substitute(func_ty);
+
+                // Generate fresh type variable for result
+                let result_ty = self.fresh_ty_var();
+
+                // Infer argument types
+                let arg_tys: Result<Vec<_>> = args.iter().map(|arg| self.infer_expr(arg)).collect();
+                let arg_tys = arg_tys?;
+
+                // Unify with function type
+                let expected_func_ty = Type::fun(arg_tys, result_ty.clone());
+                self.unify(&func_ty, &expected_func_ty, &expr.span)?;
+
+                Ok(self.substitute(result_ty))
+            }
+
+            ExprKind::Field { expr, field } => {
+                // Check if this is an enum constructor like Color.Red or Result.Ok
+                if let ExprKind::Ident(type_name) = &expr.kind {
+                    // Check if type_name is a registered type
+                    if let Some(type_def) = self.global_state.lookup_type(type_name) {
+                        // Check if this is an enum variant
+                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
+                            // Find the variant
+                            for variant in variants {
+                                let variant_name = match variant {
+                                    crate::ast::EnumVariant::Unit { name, .. } => name,
+                                    crate::ast::EnumVariant::Single { name, .. } => name,
+                                    crate::ast::EnumVariant::Struct { name, .. } => name,
+                                };
+
+                                if variant_name == field {
+                                    // Found the variant
+                                    return match variant {
+                                        crate::ast::EnumVariant::Unit { .. } => {
+                                            // Unit variant: just returns the enum type
+                                            Ok(Type::simple(type_name))
+                                        }
+                                        crate::ast::EnumVariant::Single { ty, .. } => {
+                                            // Single variant: returns a constructor function
+                                            // Ok(int) -> fn(int) -> Result
+                                            let param_ty = Type::simple(&ty.name);
+                                            let return_ty = Type::simple(type_name);
+                                            Ok(Type::fun(vec![param_ty], return_ty))
+                                        }
+                                        crate::ast::EnumVariant::Struct { fields, .. } => {
+                                            // Struct variant: returns a constructor function
+                                            // taking all fields as parameters
+                                            let param_tys: Vec<Type> = fields
+                                                .iter()
+                                                .map(|f| Type::simple(&f.ty.name))
+                                                .collect();
+                                            let return_ty = Type::simple(type_name);
+                                            Ok(Type::fun(param_tys, return_ty))
+                                        }
+                                    };
+                                }
+                            }
+                        }
+                        // Not an enum, but still a type - might be for other purposes
+                        return Ok(Type::simple(type_name));
+                    }
+                }
+
+                // Otherwise it's a regular field access
+                let expr_ty = self.infer_expr(expr)?;
+                let expr_ty = self.substitute(expr_ty);
+
+                // Look up the struct type to validate field access
+                if let Type::Con { name, .. } = &expr_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&name.name)
+                        && let crate::module::TypeDefKind::Struct { fields } = &type_def.kind {
+                            // Check if the field exists
+                            if let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field) {
+                                return Ok(field_ty.clone());
+                            } else {
+                                // Field not found - check if it might be a method
+                                // If we can find a function with this name, return a type variable
+                                // and let the Call handler deal with it
+                                if self.global_state.lookup_function(field).is_some() {
+                                    return Ok(self.fresh_ty_var());
+                                }
+
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "Struct `{}` has no field named `{}`",
+                                        name.name, field
+                                    ),
+                                    span: expr.span.clone(),
+                                });
+                            }
+                        }
+
+                // If we can't determine the struct type, return a type variable
+                // (this allows field access on generic/unknown types)
+                Ok(self.fresh_ty_var())
+            }
+
+            ExprKind::Index { expr, index } => {
+                let array_ty = self.infer_expr(expr)?;
+                let array_ty = self.substitute(array_ty);
+                let index_ty = self.infer_expr(index)?;
+
+                // Index must be int
+                self.unify(&index_ty, &Type::int(), &index.span)?;
+
+                // Extract element type from array type
+                if let Type::Con { name, args } = &array_ty
+                    && name.name == "array" && args.len() == 1 {
+                        return Ok(args[0].clone());
+                    }
+
+                // If we can't determine the array type, return a type variable
+                Ok(self.fresh_ty_var())
+            }
+
+            ExprKind::ArrayLit { ty, elements } => {
+                // Infer element type from the first element or use the declared type
+                let elem_ty = if let Some(ty) = ty {
+                    Type::simple(&ty.name)
+                } else if !elements.is_empty() {
+                    self.infer_expr(&elements[0])?
+                } else {
+                    self.fresh_ty_var()
+                };
+
+                // All elements must have the same type
+                for elem in elements {
+                    let elem_ty_actual = self.infer_expr(elem)?;
+                    self.unify(&elem_ty, &elem_ty_actual, &elem.span)?;
+                }
+
+                // Return proper array type with element type
+                Ok(Type::array(elem_ty))
+            }
+
+            ExprKind::StructLit { ty, fields } => {
+                // Type check each field
+                for (_field_name, value) in fields {
+                    self.infer_expr(value)?;
+                }
+
+                // Return the struct type
+                Ok(Type::simple(&ty.name))
+            }
+
+            ExprKind::Block(block) => self.infer_block(block),
+
+            ExprKind::Match { scrutinee, arms } => {
+                // Infer the type of the scrutinee
+                let scrutinee_ty = self.infer_expr(scrutinee)?;
+                let scrutinee_ty = self.substitute(scrutinee_ty);
+
+                // All arms must return the same type
+                let result_ty = self.fresh_ty_var();
+
+                for arm in arms {
+                    // Create a new scope for pattern bindings
+                    self.push_scope();
+
+                    // Add pattern bindings to scope
+                    self.add_pattern_bindings(&arm.pattern, &scrutinee_ty)?;
+
+                    // Infer the body type with bindings in scope
+                    let body_ty = self.infer_expr(&arm.body)?;
+                    self.unify(&body_ty, &result_ty, &arm.body.span)?;
+
+                    // Pop the scope after processing the arm
+                    self.pop_scope();
+                }
+
+                Ok(self.substitute(result_ty))
+            }
+        }
+    }
+
+    /// Infer the type of a statement
+    /// Returns the type of the statement (unit for most, or the type of the expression)
+    pub fn infer_stmt(&mut self, stmt: &Stmt) -> Result<Type> {
+        match &stmt.kind {
+            StmtKind::Declare { name, value } => {
+                let value_ty = self.infer_expr(value)?;
+                self.insert_var(name.clone(), value_ty.clone());
+                Ok(Type::unit())
+            }
+
+            StmtKind::Assign { target, value } => {
+                let target_ty = self.infer_expr(target)?;
+                let value_ty = self.infer_expr(value)?;
+                self.unify(&target_ty, &value_ty, &stmt.span)?;
+                Ok(Type::unit())
+            }
+
+            StmtKind::For { condition, body } => {
+                // Check condition is bool
+                let cond_ty = self.infer_expr(condition)?;
+                self.unify(&Type::bool(), &cond_ty, &condition.span)?;
+
+                // Type check body
+                self.infer_block(body)?;
+
+                Ok(Type::unit())
+            }
+
+            StmtKind::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                // Check condition is bool
+                let cond_ty = self.infer_expr(condition)?;
+                self.unify(&Type::bool(), &cond_ty, &condition.span)?;
+
+                // Type check then block
+                let then_ty = self.infer_block(then_block)?;
+
+                // Type check else block if present
+                let else_ty = if let Some(else_block) = else_block {
+                    self.infer_block(else_block)?
+                } else {
+                    Type::unit()
+                };
+
+                // If both branches diverge (return never), the if statement also diverges
+                if matches!(then_ty, Type::Never) && matches!(else_ty, Type::Never) {
+                    Ok(Type::never())
+                } else {
+                    Ok(Type::unit())
+                }
+            }
+
+            StmtKind::Return { value } => {
+                if let Some(expr) = value {
+                    let value_ty = self.infer_expr(expr)?;
+                    // Check against expected return type
+                    if let Some(expected) = &self.expected_return_type {
+                        self.unify(&expected.clone(), &value_ty, &expr.span)?;
+                    }
+                }
+                // Return statements are diverging - they never produce a value
+                Ok(Type::never())
+            }
+
+            StmtKind::Expr(expr) => self.infer_expr(expr),
+        }
+    }
+
+    /// Infer the type of a block
+    /// The type of a block is the type of its last expression (if any), otherwise unit
+    pub fn infer_block(&mut self, block: &Block) -> Result<Type> {
+        self.push_scope();
+
+        let mut last_ty = Type::unit();
+
+        for stmt in &block.stmts {
+            last_ty = self.infer_stmt(stmt)?;
+        }
+
+        self.pop_scope();
+
+        Ok(last_ty)
+    }
+
+    /// Infer and check a function declaration
+    pub fn infer_func_decl(&mut self, func: &FuncDecl) -> Result<()> {
+        self.push_scope();
+
+        // Set expected return type for this function
+        let old_expected_return = self.expected_return_type.clone();
+        if let Some(ret_ty_ast) = &func.return_type {
+            self.expected_return_type = Some(Type::simple(&ret_ty_ast.name));
+        } else {
+            self.expected_return_type = Some(Type::unit());
+        }
+
+        // Add receiver parameter to scope (for methods)
+        if let Some(receiver) = &func.receiver {
+            let receiver_ty = Type::simple(&receiver.ty.name);
+            self.insert_var(receiver.name.clone(), receiver_ty);
+        }
+
+        // Add parameters to scope
+        for param in &func.params {
+            // For now, we expect type annotations on parameters
+            // Convert AST type to Type (simplified - just use the name)
+            let param_ty = Type::simple(&param.ty.name);
+            self.insert_var(param.name.clone(), param_ty);
+        }
+
+        // Infer body type
+        let body_ty = self.infer_block(&func.body)?;
+
+        // Check against declared return type
+        if let Some(ret_ty_ast) = &func.return_type {
+            let declared_ret_ty = Type::simple(&ret_ty_ast.name);
+            self.unify(&body_ty, &declared_ret_ty, &func.span)?;
+        }
+
+        self.pop_scope();
+
+        // Restore old expected return type
+        self.expected_return_type = old_expected_return;
+
+        // Register function in global state
+        let func_ty = if let Some(ret_ty_ast) = &func.return_type {
+            let param_tys: Vec<Type> = func
+                .params
+                .iter()
+                .map(|p| Type::simple(&p.ty.name))
+                .collect();
+            let ret_ty = Type::simple(&ret_ty_ast.name);
+            Type::fun(param_tys, ret_ty)
+        } else {
+            Type::fun(
+                func.params
+                    .iter()
+                    .map(|p| Type::simple(&p.ty.name))
+                    .collect(),
+                Type::unit(),
+            )
+        };
+
+        // Store function type in outermost scope so it can be called
+        if let Some(scope) = self.scopes.first_mut() {
+            scope.insert(func.name.clone(), func_ty);
+        }
+
+        // Register function in global state so it can be looked up for method calls
+        self.global_state.register_function(func);
+
+        Ok(())
+    }
+
+    /// Type check a const declaration
+    pub fn infer_const_decl(&mut self, const_decl: &ConstDecl) -> Result<()> {
+        // Infer the type of the value
+        let value_ty = self.infer_expr(&const_decl.value)?;
+
+        // Check it matches the declared type
+        let declared_ty = Type::simple(&const_decl.ty.name);
+        self.unify(&declared_ty, &value_ty, &const_decl.value.span)?;
+
+        // Add constant to the global scope
+        if let Some(scope) = self.scopes.first_mut() {
+            scope.insert(const_decl.name.clone(), declared_ty);
+        }
+
+        Ok(())
+    }
+
+    /// Type check an enum/struct declaration
+    pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> Result<()> {
+        match &type_decl.kind {
+            TypeKind::Alias { .. } => {
+                // Type aliases don't need special type checking
+                // Just register the type in global state
+                self.global_state.register_type(type_decl);
+                Ok(())
+            }
+
+            TypeKind::Enum { variants } => {
+                // Register the enum type in the global state
+                self.global_state.register_type(type_decl);
+
+                // Register each variant as a constructor function
+                for variant in variants {
+                    match variant {
+                        EnumVariant::Unit { name, .. } => {
+                            // Unit variants are just values of the enum type
+                            // They act like constructors with no arguments
+                            let enum_ty = Type::simple(&type_decl.name);
+                            if let Some(scope) = self.scopes.first_mut() {
+                                scope.insert(name.clone(), enum_ty);
+                            }
+                        }
+                        EnumVariant::Single { name, ty, .. } => {
+                            // Single value variants are functions: T -> EnumType
+                            let value_ty = Type::simple(&ty.name);
+                            let enum_ty = Type::simple(&type_decl.name);
+                            let constructor_ty = Type::fun(vec![value_ty], enum_ty);
+                            if let Some(scope) = self.scopes.first_mut() {
+                                scope.insert(name.clone(), constructor_ty);
+                            }
+                        }
+                        EnumVariant::Struct { name, fields, .. } => {
+                            // Struct variants are functions: (field1, field2, ...) -> EnumType
+                            let field_tys: Vec<Type> =
+                                fields.iter().map(|f| Type::simple(&f.ty.name)).collect();
+                            let enum_ty = Type::simple(&type_decl.name);
+                            let constructor_ty = Type::fun(field_tys, enum_ty);
+                            if let Some(scope) = self.scopes.first_mut() {
+                                scope.insert(name.clone(), constructor_ty);
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            TypeKind::Struct { fields } => {
+                // Register the struct type with proper field types
+                self.global_state.register_type(type_decl);
+
+                // Store field types for later field access validation
+                let field_types: Vec<(String, Type)> = fields
+                    .iter()
+                    .map(|f| (f.name.clone(), Type::simple(&f.ty.name)))
+                    .collect();
+
+                // Update the registered type with actual field types
+                if let Some(type_def) = self
+                    .global_state
+                    .current_module_mut()
+                    .types
+                    .get_mut(&type_decl.name)
+                {
+                    type_def.kind = crate::module::TypeDefKind::Struct {
+                        fields: field_types,
+                    };
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
+impl Default for Infer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::Parser;
+    use crate::source::FileId;
+
+    fn infer_expr_helper(source: &str) -> Result<Type> {
+        let mut parser = Parser::new(source, FileId(0));
+        let expr = parser.parse_expr()?;
+        let mut infer = Infer::new();
+        let ty = infer.infer_expr(&expr)?;
+        Ok(infer.substitute(ty))
+    }
+
+    #[test]
+    fn test_infer_integer() {
+        let ty = infer_expr_helper("42").unwrap();
+        assert_eq!(ty, Type::int());
+    }
+
+    #[test]
+    fn test_infer_string() {
+        let ty = infer_expr_helper(r#""hello""#).unwrap();
+        assert_eq!(ty, Type::string());
+    }
+
+    #[test]
+    fn test_infer_bool() {
+        let ty = infer_expr_helper("true").unwrap();
+        assert_eq!(ty, Type::bool());
+    }
+
+    #[test]
+    fn test_infer_arithmetic() {
+        let ty = infer_expr_helper("1 + 2").unwrap();
+        assert_eq!(ty, Type::int());
+
+        let ty = infer_expr_helper("10 * 5").unwrap();
+        assert_eq!(ty, Type::int());
+    }
+
+    #[test]
+    fn test_infer_comparison() {
+        let ty = infer_expr_helper("1 < 2").unwrap();
+        assert_eq!(ty, Type::bool());
+
+        let ty = infer_expr_helper("5 == 5").unwrap();
+        assert_eq!(ty, Type::bool());
+    }
+
+    #[test]
+    fn test_infer_complex_expr() {
+        let ty = infer_expr_helper("(1 + 2) * 3").unwrap();
+        assert_eq!(ty, Type::int());
+
+        let ty = infer_expr_helper("(1 + 2) < (3 * 4)").unwrap();
+        assert_eq!(ty, Type::bool());
+    }
+
+    #[test]
+    fn test_type_error_arithmetic() {
+        // Can't add string to int
+        let result = infer_expr_helper(r#"1 + "hello""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unification() {
+        let mut infer = Infer::new();
+
+        // Unify two type variables
+        let t1 = infer.fresh_ty_var();
+        let t2 = infer.fresh_ty_var();
+        infer.unify(&t1, &Type::int(), &Span::dummy()).unwrap();
+        infer.unify(&t2, &t1, &Span::dummy()).unwrap();
+
+        let t2_subst = infer.substitute(t2);
+        assert_eq!(t2_subst, Type::int());
+    }
+
+    #[test]
+    fn test_occurs_check() {
+        let mut infer = Infer::new();
+
+        // Create a type variable
+        let t = infer.fresh_ty_var();
+
+        // Try to unify with a type containing itself: T = Option[T]
+        let option_t = Type::con_with_args(
+            crate::source::Symbol {
+                module: crate::source::ModuleId::empty(),
+                name: "Option".to_string(),
+                span: Span::dummy(),
+            },
+            vec![t.clone()],
+        );
+
+        let result = infer.unify(&t, &option_t, &Span::dummy());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_infer_let_stmt() {
+        let source = "{ x := 42\nx }";
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        let mut infer = Infer::new();
+        let ty = infer.infer_block(&block).unwrap();
+
+        assert_eq!(ty, Type::int());
+    }
+
+    #[test]
+    fn test_infer_multiple_lets() {
+        let source = "{ x := 42\ny := x\ny }";
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        let mut infer = Infer::new();
+        let ty = infer.infer_block(&block).unwrap();
+
+        assert_eq!(ty, Type::int());
+    }
+
+    #[test]
+    fn test_infer_return_stmt() {
+        let source = "{ return 42 }";
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        let mut infer = Infer::new();
+        let ty = infer.infer_block(&block).unwrap();
+
+        // Return statements are diverging, so the block returns Never
+        assert_eq!(ty, Type::never());
+    }
+
+    #[test]
+    fn test_infer_function() {
+        let source = "func add(x int, y int) int { return x + y }";
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser.parse_func_decl().unwrap();
+
+        let mut infer = Infer::new();
+        let result = infer.infer_func_decl(&func);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_infer_function_type_error() {
+        // Function returns string but declares int
+        let source = r#"func bad() int { return "hello" }"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser.parse_func_decl().unwrap();
+
+        let mut infer = Infer::new();
+        let result = infer.infer_func_decl(&func);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_function_call_in_scope() {
+        let source = r#"
+            func add(x int, y int) int { return x + y }
+            func main() int { return add(1, 2) }
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        let mut infer = Infer::new();
+
+        // Infer both functions
+        for decl in &file.decls {
+            if let crate::ast::Decl::Func(func) = decl {
+                infer.infer_func_decl(func).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_variable_shadowing() {
+        let source = "{ x := 42\n{ x := true\nx } }";
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        let mut infer = Infer::new();
+        let ty = infer.infer_block(&block).unwrap();
+
+        // Inner block shadows x with bool, so result is bool
+        assert_eq!(ty, Type::bool());
+    }
+
+    #[test]
+    fn test_struct_field_access() {
+        // Test that field access on struct returns correct type
+        let source = r#"
+            type User struct {
+                name string
+                age int
+            }
+            func test(u User) string {
+                return u.name
+            }
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        let mut infer = Infer::new();
+
+        // Register struct type
+        for decl in &file.decls {
+            if let crate::ast::Decl::Type(type_decl) = decl {
+                infer.infer_type_decl(type_decl).unwrap();
+            }
+        }
+
+        // Type check function
+        for decl in &file.decls {
+            if let crate::ast::Decl::Func(func) = decl {
+                let result = infer.infer_func_decl(func);
+                assert!(result.is_ok(), "Function should type check: {:?}", result);
+            }
+        }
+    }
+
+    #[test]
+    fn test_struct_invalid_field_access() {
+        // Test that accessing non-existent field produces error
+        let source = r#"
+            type User struct {
+                name string
+                age int
+            }
+            func test(u User) string {
+                return u.email
+            }
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        let mut infer = Infer::new();
+
+        // Register struct type
+        for decl in &file.decls {
+            if let crate::ast::Decl::Type(type_decl) = decl {
+                infer.infer_type_decl(type_decl).unwrap();
+            }
+        }
+
+        // Type check function - should fail
+        for decl in &file.decls {
+            if let crate::ast::Decl::Func(func) = decl {
+                let result = infer.infer_func_decl(func);
+                assert!(result.is_err(), "Should error on invalid field access");
+            }
+        }
+    }
+
+    #[test]
+    fn test_struct_field_type_checking() {
+        // Test that field types are properly enforced
+        let source = r#"
+            type Point struct {
+                x int
+                y int
+            }
+            func test(p Point) int {
+                return p.x + p.y
+            }
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        let mut infer = Infer::new();
+
+        // Register struct type
+        for decl in &file.decls {
+            if let crate::ast::Decl::Type(type_decl) = decl {
+                infer.infer_type_decl(type_decl).unwrap();
+            }
+        }
+
+        // Type check function
+        for decl in &file.decls {
+            if let crate::ast::Decl::Func(func) = decl {
+                let result = infer.infer_func_decl(func);
+                assert!(
+                    result.is_ok(),
+                    "Addition of int fields should work: {:?}",
+                    result
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_array_literal_type() {
+        // Test that array literals have proper array type
+        let source = "[5]int{1, 2, 3, 4, 5}";
+        let mut parser = Parser::new(source, FileId(0));
+        let expr = parser.parse_expr().unwrap();
+
+        let mut infer = Infer::new();
+        let ty = infer.infer_expr(&expr).unwrap();
+
+        // Should be array[int]
+        if let Type::Con { name, args } = ty {
+            assert_eq!(name.name, "array");
+            assert_eq!(args.len(), 1);
+            assert_eq!(args[0], Type::int());
+        } else {
+            panic!("Expected array type, got: {:?}", ty);
+        }
+    }
+
+    #[test]
+    fn test_array_index_type() {
+        // Test that indexing an array returns the element type
+        let source = r#"{
+                arr := [3]int{1, 2, 3}
+                arr[0]
+            }"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        let mut infer = Infer::new();
+        let ty = infer.infer_block(&block).unwrap();
+
+        // Should be int (the element type)
+        assert_eq!(ty, Type::int());
+    }
+
+    #[test]
+    fn test_array_element_type_checking() {
+        // Test that all array elements must have the same type
+        let source = r#"{
+                arr := [3]int{1, 2, 3}
+                x := arr[0]
+                y := arr[1]
+                x + y
+            }"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        let mut infer = Infer::new();
+        let result = infer.infer_block(&block);
+
+        // Should succeed - adding two ints from array
+        assert!(
+            result.is_ok(),
+            "Array element arithmetic should work: {:?}",
+            result
+        );
+    }
+}

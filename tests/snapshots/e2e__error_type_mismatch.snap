@@ -1,0 +1,15 @@
+---
+source: tests/e2e.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_mismatch
+
+  × Mismatched types
+   ╭─[error_type_mismatch.sop:2:12]
+ 1 │ func bad() int {
+ 2 │     return "hello"
+   ·            ───┬───
+   ·               ╰── expected `int`, found `string`
+ 3 │ }
+   ╰────
+  help: Change this expression to produce `int`, or change the expected type
