@@ -8,43 +8,43 @@ type Color enum {
     Green
 }
 
-type Result enum {
+type MyResult enum {
     Ok int
     Err string
 }
 
-func unwrapOr(r Result, defaultVal int) int {
-    return match r {
-    case Result.Ok(value):
-        value
-    case Result.Err(msg):
-        defaultVal
+func unwrapOr(r MyResult, defaultVal int) int {
+    var result int
+    match r {
+    case MyResult.Ok(value):
+        result = value
+    case MyResult.Err(msg):
+        result = defaultVal
     }
+    return result
 }
 
 func test() int {
     color := Color.Red
 
-    message := match color {
+    var message string
+    match color {
     case Color.Red:
-        "Stop"
+        message = "Stop"
     case Color.Yellow:
-        "Wait"
+        message = "Wait"
     case Color.Green:
-        "Go"
+        return 1
     }
 
-    return match message {
-    case "Go":
-        1
-    default:
-        0
-    }
+   	fmt.Printf("%s\n", message)
+
+    return 0
 }
 
 func main() {
-    ok := Result.Ok(42)
-    err := Result.Err("failed")
+    ok := MyResult.Ok(42)
+    err := MyResult.Err("failed")
 
     result1 := unwrapOr(ok, 0)
     result2 := unwrapOr(err, 99)

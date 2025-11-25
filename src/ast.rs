@@ -124,10 +124,16 @@ pub struct Stmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StmtKind {
-    // x := value (declaration)
-    Declare {
+    // x := value (short declaration with inference)
+    Decl {
         name: String,
         value: Expr,
+    },
+    // var x type or var x type = value (explicit type declaration)
+    VarDecl {
+        name: String,
+        ty: Type,
+        value: Option<Expr>,
     },
     // x = value or x.y = value (assignment)
     Assign {
@@ -145,6 +151,10 @@ pub enum StmtKind {
     },
     Return {
         value: Option<Expr>,
+    },
+    Match {
+        scrutinee: Expr,
+        arms: Vec<Arm>,
     },
     Expr(Expr),
 }
@@ -189,10 +199,6 @@ pub enum ExprKind {
         fields: Vec<(String, Expr)>, // field_name: value pairs
     },
     Block(Block),
-    Match {
-        scrutinee: Box<Expr>,
-        arms: Vec<Arm>,
-    },
 }
 
 /// Binary operator
@@ -217,7 +223,7 @@ pub enum BinOp {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Arm {
     pub pattern: Pattern,
-    pub body: Expr,
+    pub body: Block,
     pub span: Span,
 }
 
@@ -230,12 +236,16 @@ pub struct Pattern {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatternKind {
-    Wildcard,
+    /// Catch-all case: default
+    Default,
+    /// Unit variant with no data: Color.Red
     Variant(String),
+    /// Literal value: 42, "hello", true
     Literal(Literal),
-    TuplePattern {
+    /// Variant with data extraction: Result.Ok(value)
+    Destructor {
         name: String,
-        elements: Vec<Pattern>,
+        binding: String,
     },
 }
 

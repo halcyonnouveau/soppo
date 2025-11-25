@@ -28,40 +28,40 @@ var (
     ColorGreen Color = Green{}
 )
 
-type Result interface {
-    isResult()
+type MyResult interface {
+    isMyResult()
 }
 
 type Ok struct {
     Value int
 }
-func (Ok) isResult() {}
+func (Ok) isMyResult() {}
 
 type Err struct {
     Value string
 }
-func (Err) isResult() {}
+func (Err) isMyResult() {}
 
-func ResultOk(value int) Result {
+func MyResultOk(value int) MyResult {
     return Ok{Value: value}
 }
-func ResultErr(value string) Result {
+func MyResultErr(value string) MyResult {
     return Err{Value: value}
 }
 
-func unwrapOr(r Result, defaultVal int) int {
-    var __result int
+func unwrapOr(r MyResult, defaultVal int) int {
+    var result int
     switch __v := r.(type) {
     case Ok:
         value := __v.Value
         _ = value
-        __result = value
+        result = value
     case Err:
         msg := __v.Value
         _ = msg
-        __result = defaultVal
+        result = defaultVal
     }
-    return __result
+    return result
 }
 
 func test() int {
@@ -73,21 +73,15 @@ func test() int {
     case Yellow:
         message = "Wait"
     case Green:
-        message = "Go"
+        return 1
     }
-    var __result int
-    switch message {
-    case "Go":
-        __result = 1
-    default:
-        __result = 0
-    }
-    return __result
+    fmt.Printf("%s\n", message)
+    return 0
 }
 
 func main() {
-    ok := ResultOk(42)
-    err := ResultErr("failed")
+    ok := MyResultOk(42)
+    err := MyResultErr("failed")
     result1 := unwrapOr(ok, 0)
     result2 := unwrapOr(err, 99)
     fmt.Printf("%d %d %d\n", test(), result1, result2)

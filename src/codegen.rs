@@ -153,7 +153,10 @@ impl Codegen {
                 // Generate the interface with generics if present
                 let generic_params = self.format_generic_brackets(&type_decl.generics);
 
-                self.emit_line(&format!("type {}{} interface {{", type_decl.name, generic_params));
+                self.emit_line(&format!(
+                    "type {}{} interface {{",
+                    type_decl.name, generic_params
+                ));
                 self.indent();
                 self.emit_line(&format!("is{}()", type_decl.name));
                 self.dedent();
@@ -173,7 +176,10 @@ impl Codegen {
                             };
 
                             self.emit_line(&format!("type {}{} struct {{}}", name, generic_params));
-                            self.emit_line(&format!("func ({}{}) is{}() {{}}", name, generic_names, type_decl.name));
+                            self.emit_line(&format!(
+                                "func ({}{}) is{}() {{}}",
+                                name, generic_names, type_decl.name
+                            ));
                             self.emit_line(&format!(
                                 "func ({}) String() string {{ return \"{}\" }}",
                                 name, name
@@ -194,7 +200,10 @@ impl Codegen {
                             self.emit_line(&format!("Value {}", self.go_type(&ty.name)));
                             self.dedent();
                             self.emit_line("}");
-                            self.emit_line(&format!("func ({}{}) is{}() {{}}", name, generic_names, type_decl.name));
+                            self.emit_line(&format!(
+                                "func ({}{}) is{}() {{}}",
+                                name, generic_names, type_decl.name
+                            ));
                             self.emit_line("");
                         }
                         EnumVariant::Struct { name, fields, .. } => {
@@ -217,14 +226,20 @@ impl Codegen {
                             }
                             self.dedent();
                             self.emit_line("}");
-                            self.emit_line(&format!("func ({}{}) is{}() {{}}", name, generic_names, type_decl.name));
+                            self.emit_line(&format!(
+                                "func ({}{}) is{}() {{}}",
+                                name, generic_names, type_decl.name
+                            ));
                             self.emit_line("");
                         }
                     }
                 }
 
                 // Generate constructors for unit variants and functions for variants with data
-                let unit_variants: Vec<_> = variants.iter().filter(|v| matches!(v, EnumVariant::Unit { .. })).collect();
+                let unit_variants: Vec<_> = variants
+                    .iter()
+                    .filter(|v| matches!(v, EnumVariant::Unit { .. }))
+                    .collect();
 
                 if !unit_variants.is_empty() && type_decl.generics.is_empty() {
                     // Only generate var block for non-generic unit variants
@@ -256,23 +271,29 @@ impl Codegen {
 
                             self.emit_line(&format!(
                                 "func {}{}{}(value {}) {}{} {{",
-                                type_decl.name, name,
+                                type_decl.name,
+                                name,
                                 generic_params,
                                 self.go_type(&ty.name),
                                 type_decl.name,
                                 generic_names
                             ));
                             self.indent();
-                            self.emit_line(&format!("return {}{}{{Value: value}}", name, generic_names));
+                            self.emit_line(&format!(
+                                "return {}{}{{Value: value}}",
+                                name, generic_names
+                            ));
                             self.dedent();
                             self.emit_line("}");
                         }
                         EnumVariant::Struct { name, fields, .. } => {
                             // Generate constructor with all fields as parameters
-                            let params: Vec<String> = fields.iter()
+                            let params: Vec<String> = fields
+                                .iter()
                                 .map(|f| format!("{} {}", f.name, self.go_type(&f.ty.name)))
                                 .collect();
-                            let field_inits: Vec<String> = fields.iter()
+                            let field_inits: Vec<String> = fields
+                                .iter()
                                 .map(|f| format!("{}: {}", f.name, f.name))
                                 .collect();
 
@@ -285,26 +306,35 @@ impl Codegen {
 
                             self.emit_line(&format!(
                                 "func {}{}{}({}) {}{} {{",
-                                type_decl.name, name,
+                                type_decl.name,
+                                name,
                                 generic_params,
                                 params.join(", "),
                                 type_decl.name,
                                 generic_names
                             ));
                             self.indent();
-                            self.emit_line(&format!("return {}{}{{ {} }}", name, generic_names, field_inits.join(", ")));
+                            self.emit_line(&format!(
+                                "return {}{}{{ {} }}",
+                                name,
+                                generic_names,
+                                field_inits.join(", ")
+                            ));
                             self.dedent();
                             self.emit_line("}");
                         }
                         EnumVariant::Unit { name, .. } => {
                             // For generic unit variants, generate a constructor function
                             if !type_decl.generics.is_empty() {
-                                let generic_params = self.format_generic_brackets(&type_decl.generics);
-                                let generic_names = format!("[{}]", self.format_generic_names(&type_decl.generics));
+                                let generic_params =
+                                    self.format_generic_brackets(&type_decl.generics);
+                                let generic_names =
+                                    format!("[{}]", self.format_generic_names(&type_decl.generics));
 
                                 self.emit_line(&format!(
                                     "func {}{}{}() {}{} {{",
-                                    type_decl.name, name,
+                                    type_decl.name,
+                                    name,
                                     generic_params,
                                     type_decl.name,
                                     generic_names
@@ -322,7 +352,10 @@ impl Codegen {
                 // Generate struct type with generics if present
                 let generic_params = self.format_generic_brackets(&type_decl.generics);
 
-                self.emit_line(&format!("type {}{} struct {{", type_decl.name, generic_params));
+                self.emit_line(&format!(
+                    "type {}{} struct {{",
+                    type_decl.name, generic_params
+                ));
                 self.indent();
                 for field in fields {
                     self.emit_line(&format!("{} {}", field.name, self.go_type(&field.ty.name)));
@@ -401,183 +434,25 @@ impl Codegen {
         self.emit("}");
     }
 
-    /// Generate a match expression as assignment to a variable
-    fn gen_match_as_assignment(&mut self, var_name: &str, scrutinee: &Expr, arms: &[crate::ast::Arm]) {
-        // Check if this is a type switch or value switch
-        let is_type_switch = arms.iter().any(|arm| {
-            matches!(
-                &arm.pattern.kind,
-                crate::ast::PatternKind::Variant(_)
-                    | crate::ast::PatternKind::TuplePattern { .. }
-            )
-        });
-
-        self.emit_indent();
-        if is_type_switch {
-            self.emit("switch __v := ");
-            self.gen_expr(scrutinee);
-            self.emit(".(type) {\n");
-        } else {
-            self.emit("switch ");
-            self.gen_expr(scrutinee);
-            self.emit(" {\n");
-        }
-
-        for arm in arms {
-            self.emit_indent();
-
-            // Emit pattern
-            if matches!(&arm.pattern.kind, crate::ast::PatternKind::Wildcard) {
-                self.emit("default:\n");
-            } else {
-                self.emit("case ");
-                match &arm.pattern.kind {
-                    crate::ast::PatternKind::Variant(name) => {
-                        // Extract just the variant name from qualified names like "Color.Red"
-                        let variant_name = name.rsplit('.').next().unwrap_or(name);
-                        self.emit(variant_name);
-                    }
-                    crate::ast::PatternKind::Literal(lit) => match lit {
-                        crate::ast::Literal::Integer(n) => self.emit(&n.to_string()),
-                        crate::ast::Literal::String(s) => {
-                            self.emit(&format!("\"{}\"", s))
-                        }
-                        crate::ast::Literal::Bool(b) => self.emit(&b.to_string()),
-                    },
-                    crate::ast::PatternKind::TuplePattern { name, .. } => {
-                        // Extract just the variant name from qualified names like "Result.Ok"
-                        let variant_name = name.rsplit('.').next().unwrap_or(name);
-                        self.emit(variant_name);
-                    }
-                    crate::ast::PatternKind::Wildcard => unreachable!(),
-                }
-                self.emit(":\n");
-            }
-            self.indent();
-
-            // Extract pattern bindings for tuple patterns
-            if let crate::ast::PatternKind::TuplePattern { name: _, elements } = &arm.pattern.kind {
-                for elem in elements.iter() {
-                    if let crate::ast::PatternKind::Variant(binding_name) = &elem.kind {
-                        self.emit_indent();
-                        self.emit(&format!("{} := __v.Value\n", binding_name));
-                        self.emit_indent();
-                        self.emit(&format!("_ = {}\n", binding_name));
-                    }
-                }
-            }
-
-            // Emit assignment to variable
-            match &arm.body.kind {
-                ExprKind::Block(block) => {
-                    for stmt in &block.stmts {
-                        self.gen_stmt(stmt);
-                    }
-                }
-                _ => {
-                    self.emit_indent();
-                    self.emit(&format!("{} = ", var_name));
-                    self.gen_expr(&arm.body);
-                    self.emit("\n");
-                }
-            }
-
-            self.dedent();
-        }
-
-        self.emit_indent();
-        self.emit("}\n");
-    }
-
     /// Generate a statement
     fn gen_stmt(&mut self, stmt: &Stmt) {
         match &stmt.kind {
-            StmtKind::Declare { name, value } => {
-                // Special case: match expression becomes var + switch
-                if let ExprKind::Match { scrutinee, arms } = &value.kind {
-                    // Declare variable (we'd need type inference here, using string for now)
-                    self.emit_indent();
-                    self.emit(&format!("var {} string\n", name));
-                    self.emit_indent();
+            StmtKind::Decl { name, value } => {
+                self.emit_indent();
+                self.emit(&format!("{} := ", name));
+                self.gen_expr(value);
+                self.emit("\n");
+            }
 
-                    // Check if this is a type switch (matching on enum variants) or value switch (literals)
-                    let is_type_switch = arms.iter().any(|arm| {
-                        matches!(
-                            &arm.pattern.kind,
-                            crate::ast::PatternKind::Variant(_)
-                                | crate::ast::PatternKind::TuplePattern { .. }
-                        )
-                    });
-
-                    if is_type_switch {
-                        self.emit("switch ");
-                        self.gen_expr(scrutinee);
-                        self.emit(".(type) {\n");
-                    } else {
-                        self.emit("switch ");
-                        self.gen_expr(scrutinee);
-                        self.emit(" {\n");
-                    }
-
-                    for arm in arms {
-                        self.emit_indent();
-
-                        // Emit pattern
-                        if matches!(&arm.pattern.kind, crate::ast::PatternKind::Wildcard) {
-                            self.emit("default:\n");
-                        } else {
-                            self.emit("case ");
-                            match &arm.pattern.kind {
-                                crate::ast::PatternKind::Variant(var_name) => {
-                                    // Extract just the variant name from qualified names
-                                    let variant_name = var_name.rsplit('.').next().unwrap_or(var_name);
-                                    self.emit(variant_name);
-                                }
-                                crate::ast::PatternKind::Literal(lit) => match lit {
-                                    crate::ast::Literal::Integer(n) => self.emit(&n.to_string()),
-                                    crate::ast::Literal::String(s) => {
-                                        self.emit(&format!("\"{}\"", s))
-                                    }
-                                    crate::ast::Literal::Bool(b) => self.emit(&b.to_string()),
-                                },
-                                crate::ast::PatternKind::TuplePattern {
-                                    name: var_name, ..
-                                } => {
-                                    self.emit(var_name);
-                                }
-                                crate::ast::PatternKind::Wildcard => unreachable!(),
-                            }
-                            self.emit(":\n");
-                        }
-                        self.indent();
-
-                        // Emit assignment to variable
-                        match &arm.body.kind {
-                            ExprKind::Block(block) => {
-                                // For block bodies, emit statements without braces
-                                for stmt in &block.stmts {
-                                    self.gen_stmt(stmt);
-                                }
-                            }
-                            _ => {
-                                self.emit_indent();
-                                self.emit(&format!("{} = ", name));
-                                self.gen_expr(&arm.body);
-                                self.emit("\n");
-                            }
-                        }
-
-                        self.dedent();
-                    }
-
-                    self.emit_indent();
-                    self.emit("}\n");
+            StmtKind::VarDecl { name, ty, value } => {
+                self.emit_indent();
+                if let Some(expr) = value {
+                    self.emit(&format!("var {} {} = ", name, self.go_type(&ty.name)));
+                    self.gen_expr(expr);
                 } else {
-                    self.emit_indent();
-                    self.emit(&format!("{} := ", name));
-                    self.gen_expr(value);
-                    self.emit("\n");
+                    self.emit(&format!("var {} {}", name, self.go_type(&ty.name)));
                 }
+                self.emit("\n");
             }
 
             StmtKind::Assign { target, value } => {
@@ -616,134 +491,105 @@ impl Codegen {
             }
 
             StmtKind::Return { value } => {
+                self.emit_indent();
                 if let Some(expr) = value {
-                    // Check if returning a match expression
-                    if let ExprKind::Match { scrutinee, arms } = &expr.kind {
-                        // Generate match as assignment to temp variable, then return it
-                        // var __result T
-                        // switch ... { case X: __result = ... }
-                        // return __result
-
-                        self.emit_indent();
-                        // Declare result variable with function's return type
-                        if let Some(ret_type) = &self.current_func_return_type {
-                            self.emit(&format!("var __result {}\n", ret_type));
-                        } else {
-                            self.emit("var __result interface{}\n");
-                        }
-
-                        // Generate the match as assignment to __result
-                        self.gen_match_as_assignment("__result", scrutinee, arms);
-
-                        self.emit_indent();
-                        self.emit("return __result\n");
-                    } else {
-                        self.emit_indent();
-                        self.emit("return ");
-                        self.gen_expr(expr);
-                        self.emit("\n");
-                    }
+                    self.emit("return ");
+                    self.gen_expr(expr);
+                    self.emit("\n");
                 } else {
-                    self.emit_indent();
                     self.emit("return\n");
                 }
             }
 
-            StmtKind::Expr(expr) => {
-                // Special case: match expressions in statement context
-                // Should be plain switch statements, not IIFEs
-                if let ExprKind::Match { scrutinee, arms } = &expr.kind {
-                    self.emit_indent();
+            StmtKind::Match { scrutinee, arms } => {
+                self.emit_indent();
 
-                    // Check if this is a type switch or value switch
-                    let is_type_switch = arms.iter().any(|arm| {
-                        matches!(
-                            &arm.pattern.kind,
-                            crate::ast::PatternKind::Variant(_)
-                                | crate::ast::PatternKind::TuplePattern { .. }
-                        )
-                    });
+                // Check if this is a type switch or value switch
+                let is_type_switch = arms.iter().any(|arm| {
+                    matches!(
+                        &arm.pattern.kind,
+                        crate::ast::PatternKind::Variant(_)
+                            | crate::ast::PatternKind::Destructor { .. }
+                    )
+                });
 
-                    if is_type_switch {
+                // Check if any arm needs the bound variable (Destructor patterns)
+                let needs_binding = arms.iter().any(|arm| {
+                    matches!(&arm.pattern.kind, crate::ast::PatternKind::Destructor { .. })
+                });
+
+                if is_type_switch {
+                    if needs_binding {
                         self.emit("switch __v := ");
-                        self.gen_expr(scrutinee);
-                        self.emit(".(type) {\n");
                     } else {
                         self.emit("switch ");
-                        self.gen_expr(scrutinee);
-                        self.emit(" {\n");
                     }
-
-                    for arm in arms {
-                        self.emit_indent();
-
-                        // Emit pattern - wildcard is special (default:, not case default:)
-                        if matches!(&arm.pattern.kind, crate::ast::PatternKind::Wildcard) {
-                            self.emit("default:\n");
-                        } else {
-                            self.emit("case ");
-                            match &arm.pattern.kind {
-                                crate::ast::PatternKind::Variant(name) => {
-                                    self.emit(name);
-                                }
-                                crate::ast::PatternKind::Literal(lit) => match lit {
-                                    crate::ast::Literal::Integer(n) => self.emit(&n.to_string()),
-                                    crate::ast::Literal::String(s) => {
-                                        self.emit(&format!("\"{}\"", s))
-                                    }
-                                    crate::ast::Literal::Bool(b) => self.emit(&b.to_string()),
-                                },
-                                crate::ast::PatternKind::TuplePattern { name, .. } => {
-                                    // Extract just the variant name from qualified names
-                                    let variant_name = name.rsplit('.').next().unwrap_or(name);
-                                    self.emit(variant_name);
-                                }
-                                crate::ast::PatternKind::Wildcard => unreachable!(),
-                            }
-                            self.emit(":\n");
-                        }
-                        self.indent();
-
-                        // Extract pattern bindings for tuple patterns
-                        if let crate::ast::PatternKind::TuplePattern { name: _, elements } = &arm.pattern.kind {
-                            // __v is already the concrete type from the switch statement
-                            // Extract bound variables from the pattern
-                            for elem in elements.iter() {
-                                if let crate::ast::PatternKind::Variant(binding_name) = &elem.kind {
-                                    self.emit_indent();
-                                    self.emit(&format!("{} := __v.Value\n", binding_name));
-                                    // Add blank assignment to avoid unused variable warnings
-                                    self.emit_indent();
-                                    self.emit(&format!("_ = {}\n", binding_name));
-                                }
-                            }
-                        }
-
-                        // Emit body directly
-                        match &arm.body.kind {
-                            ExprKind::Block(block) => {
-                                // For block bodies, emit statements without braces
-                                for stmt in &block.stmts {
-                                    self.gen_stmt(stmt);
-                                }
-                            }
-                            _ => {
-                                self.emit_indent();
-                                self.gen_expr(&arm.body);
-                                self.emit("\n");
-                            }
-                        }
-
-                        self.dedent();
-                    }
-
-                    self.emit_indent();
-                    self.emit("}\n");
+                    self.gen_expr(scrutinee);
+                    self.emit(".(type) {\n");
                 } else {
-                    self.emit_indent();
-                    self.gen_expr(expr);
-                    self.emit("\n");
+                    self.emit("switch ");
+                    self.gen_expr(scrutinee);
+                    self.emit(" {\n");
                 }
+
+                for arm in arms {
+                    self.emit_indent();
+
+                    // Emit pattern - default is special (default:, not case default:)
+                    if matches!(&arm.pattern.kind, crate::ast::PatternKind::Default) {
+                        self.emit("default:\n");
+                    } else {
+                        self.emit("case ");
+                        match &arm.pattern.kind {
+                            crate::ast::PatternKind::Variant(name) => {
+                                // Extract just the variant name from qualified names
+                                let variant_name = name.rsplit('.').next().unwrap_or(name);
+                                self.emit(variant_name);
+                            }
+                            crate::ast::PatternKind::Literal(lit) => match lit {
+                                crate::ast::Literal::Integer(n) => self.emit(&n.to_string()),
+                                crate::ast::Literal::String(s) => self.emit(&format!("\"{}\"", s)),
+                                crate::ast::Literal::Bool(b) => self.emit(&b.to_string()),
+                            },
+                            crate::ast::PatternKind::Destructor { name, .. } => {
+                                // Extract just the variant name from qualified names
+                                let variant_name = name.rsplit('.').next().unwrap_or(name);
+                                self.emit(variant_name);
+                            }
+                            crate::ast::PatternKind::Default => unreachable!(),
+                        }
+                        self.emit(":\n");
+                    }
+                    self.indent();
+
+                    // Extract pattern bindings for destructor patterns
+                    if let crate::ast::PatternKind::Destructor { name: _, binding } =
+                        &arm.pattern.kind
+                    {
+                        // __v is already the concrete type from the switch statement
+                        self.emit_indent();
+                        self.emit(&format!("{} := __v.Value\n", binding));
+                        // Add blank assignment to avoid unused variable warnings
+                        self.emit_indent();
+                        self.emit(&format!("_ = {}\n", binding));
+                    }
+
+                    // Emit arm body statements
+                    for arm_stmt in &arm.body.stmts {
+                        self.gen_stmt(arm_stmt);
+                    }
+
+                    self.dedent();
+                }
+
+                self.emit_indent();
+                self.emit("}\n");
+            }
+
+            StmtKind::Expr(expr) => {
+                self.emit_indent();
+                self.gen_expr(expr);
+                self.emit("\n");
             }
         }
     }
@@ -860,13 +706,6 @@ impl Codegen {
 
             ExprKind::Block(block) => {
                 self.gen_block(block);
-            }
-
-            ExprKind::Match { .. } => {
-                // Match expressions should only appear in Let statements (handled in gen_stmt)
-                // or as statement-level expressions (also handled in gen_stmt)
-                // If we get here, it's an error - match in unsupported position
-                self.emit("/* ERROR: match in unsupported position */");
             }
         }
     }

@@ -21,7 +21,10 @@ fn compile_soppo_file(input_file: &str) -> Result<String, String> {
         if !vet_output.status.success() {
             let vet_error = String::from_utf8_lossy(&vet_output.stderr);
             fs::remove_file(&output_file).ok();
-            panic!("Generated Go code failed go vet:\n{}", vet_error);
+            panic!(
+                "Generated Go code failed go vet:\n{}\n\nGenerated code:\n{}",
+                vet_error, go_code
+            );
         }
 
         fs::remove_file(&output_file).ok();

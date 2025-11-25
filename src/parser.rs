@@ -92,6 +92,18 @@ impl Parser {
         }
     }
 
+    /// Skip statement terminators (newlines and semicolons)
+    fn skip_terminators(&mut self) {
+        while matches!(self.peek(), Some(Token::Newline) | Some(Token::Semicolon)) {
+            self.advance();
+        }
+    }
+
+    /// Check if current token is a statement terminator
+    fn is_terminator(&self) -> bool {
+        matches!(self.peek(), Some(Token::Newline) | Some(Token::Semicolon))
+    }
+
     /// Expect a specific token, error if not present
     fn expect(&mut self, expected: Token) -> Result<Span> {
         match self.advance() {
@@ -171,8 +183,6 @@ impl Parser {
                 Ok(expr)
             }
 
-            Token::Match => self.parse_match_expr(span),
-
             Token::LBracket => {
                 // Array literal: [size]type{elements}
                 // Parse the size (which is an expression)
@@ -221,12 +231,12 @@ impl Parser {
         }
     }
 
-    /// Parse match expression
-    fn parse_match_expr(&mut self, start_span: Span) -> Result<Expr> {
-        let scrutinee = Box::new(self.parse_expr()?);
+    /// Parse match statement
+    fn parse_match_stmt(&mut self, start_span: Span) -> Result<Stmt> {
+        let scrutinee = self.parse_expr()?;
         self.expect(Token::LBrace)?;
-        // Skip newlines after opening brace
-        while self.consume(&Token::Newline) {}
+        // Skip terminators after opening brace
+        self.skip_terminators();
 
         let mut arms = Vec::new();
 
@@ -234,14 +244,14 @@ impl Parser {
             let arm = self.parse_match_arm()?;
             arms.push(arm);
 
-            // Skip newlines between arms
-            while self.consume(&Token::Newline) {}
+            // Skip terminators between arms
+            self.skip_terminators();
         }
 
         let end_span = self.expect(Token::RBrace)?;
 
-        Ok(Expr {
-            kind: ExprKind::Match { scrutinee, arms },
+        Ok(Stmt {
+            kind: StmtKind::Match { scrutinee, arms },
             span: Span::with_bytes(
                 start_span.start,
                 end_span.end,
@@ -260,7 +270,7 @@ impl Parser {
                 let span = self.peek_span();
                 self.advance(); // consume 'default'
                 Pattern {
-                    kind: PatternKind::Wildcard,
+                    kind: PatternKind::Default,
                     span,
                 }
             } else {
@@ -273,58 +283,34 @@ impl Parser {
         };
 
         self.expect(Token::Colon)?;
-        // Skip newlines after colon
-        while self.consume(&Token::Newline) {}
+        // Skip terminators after colon
+        self.skip_terminators();
 
-        // Parse statements/expressions until we hit the next case, default, or closing brace
+        // Parse statements until we hit the next case, default, or closing brace
         let mut stmts = Vec::new();
         let body_start = self.peek_span();
 
-        while !matches!(
-            self.peek(),
-            Some(Token::Case) | Some(Token::RBrace) | Some(Token::Newline) | None
-        ) {
+        while !matches!(self.peek(), Some(Token::Case) | Some(Token::RBrace) | None) {
             // Check if it's 'default' - this is a bit hacky but works for now
             if let Some(Token::Ident(s)) = self.peek()
-                && s == "default" {
-                    break;
-                }
+                && s == "default"
+            {
+                break;
+            }
 
             stmts.push(self.parse_stmt()?);
+            // Skip terminators between statements in arm
+            self.skip_terminators();
         }
 
-        // If we only have one statement and it's an expression, use it directly
-        // Otherwise, wrap in a block
-        let body = if stmts.len() == 1 {
-            if let StmtKind::Expr(expr) = &stmts[0].kind {
-                expr.clone()
-            } else {
-                // It's a statement like return, wrap in block
-                let body_end = stmts
-                    .last()
-                    .map(|s| s.span.clone())
-                    .unwrap_or(body_start.clone());
-                Expr {
-                    kind: ExprKind::Block(Block {
-                        stmts,
-                        span: body_end.clone(),
-                    }),
-                    span: body_end,
-                }
-            }
-        } else {
-            // Multiple statements, wrap in block
-            let body_end = stmts
-                .last()
-                .map(|s| s.span.clone())
-                .unwrap_or(body_start.clone());
-            Expr {
-                kind: ExprKind::Block(Block {
-                    stmts,
-                    span: body_end.clone(),
-                }),
-                span: body_end,
-            }
+        let body_end = stmts
+            .last()
+            .map(|s| s.span.clone())
+            .unwrap_or(body_start.clone());
+
+        let body = Block {
+            stmts,
+            span: body_end.clone(),
         };
 
         let span = Span::with_bytes(
@@ -351,7 +337,7 @@ impl Parser {
 
         match tok {
             Token::Underscore => Ok(Pattern {
-                kind: PatternKind::Wildcard,
+                kind: PatternKind::Default,
                 span,
             }),
 
@@ -408,24 +394,32 @@ impl Parser {
                     name = format!("{}.{}", name, field_name);
                 }
 
-                // Check if it's a tuple pattern: Variant(x, y) or Type.Variant(x, y)
+                // Check if it's a destructor pattern: Result.Ok(value)
                 if self.consume(&Token::LParen) {
-                    let mut elements = Vec::new();
-
-                    if !matches!(self.peek(), Some(Token::RParen)) {
-                        loop {
-                            elements.push(self.parse_pattern()?);
-
-                            if !self.consume(&Token::Comma) {
-                                break;
-                            }
+                    // Parse the single binding variable
+                    let binding = match self.advance() {
+                        Some((Token::Ident(binding), _)) => binding,
+                        Some((tok, span)) => {
+                            return Err(SoppoError::Parse {
+                                message: format!(
+                                    "Expected binding variable in pattern, found {:?}",
+                                    tok
+                                ),
+                                span,
+                            });
                         }
-                    }
+                        None => {
+                            return Err(SoppoError::Parse {
+                                message: "Expected binding variable in pattern".to_string(),
+                                span: Span::dummy(),
+                            });
+                        }
+                    };
 
                     let end_span = self.expect(Token::RParen)?;
 
                     Ok(Pattern {
-                        kind: PatternKind::TuplePattern { name, elements },
+                        kind: PatternKind::Destructor { name, binding },
                         span: Span::with_bytes(
                             current_span.start,
                             end_span.end,
@@ -560,7 +554,10 @@ impl Parser {
                             1
                         };
 
-                        let is_struct_lit = match (self.peek_at(pos_after_brace), self.peek_at(pos_after_brace + 1)) {
+                        let is_struct_lit = match (
+                            self.peek_at(pos_after_brace),
+                            self.peek_at(pos_after_brace + 1),
+                        ) {
                             (Some(Token::RBrace), _) => true,                    // {}
                             (Some(Token::Ident(_)), Some(Token::Colon)) => true, // { foo: ...
                             _ => false,
@@ -571,8 +568,8 @@ impl Parser {
                         }
 
                         self.advance(); // consume {
-                        // Skip newlines after opening brace
-                        while self.consume(&Token::Newline) {}
+                        // Skip terminators after opening brace
+                        self.skip_terminators();
 
                         let mut fields = Vec::new();
 
@@ -607,8 +604,8 @@ impl Parser {
                                     break;
                                 }
 
-                                // Skip newlines after comma
-                                while self.consume(&Token::Newline) {}
+                                // Skip terminators after comma
+                                self.skip_terminators();
 
                                 // Allow trailing comma
                                 if matches!(self.peek(), Some(Token::RBrace)) {
@@ -730,7 +727,7 @@ impl Parser {
                                 target.span.byte_start,
                                 value.span.byte_end,
                             ),
-                            kind: StmtKind::Declare { name, value },
+                            kind: StmtKind::Decl { name, value },
                         })
                     } else {
                         Err(SoppoError::Parse {
@@ -758,6 +755,53 @@ impl Parser {
                         kind: StmtKind::Expr(target),
                     })
                 }
+            }
+
+            Some(Token::Var) => {
+                // var name type or var name type = value
+                self.advance(); // consume 'var'
+
+                // Parse the variable name
+                let (name, name_span) = match self.advance() {
+                    Some((Token::Ident(name), span)) => (name, span),
+                    Some((tok, span)) => {
+                        return Err(SoppoError::Parse {
+                            message: format!("Expected variable name, found {:?}", tok),
+                            span,
+                        });
+                    }
+                    None => {
+                        return Err(SoppoError::Parse {
+                            message: "Expected variable name".to_string(),
+                            span: Span::dummy(),
+                        });
+                    }
+                };
+
+                self.validate_identifier(&name, &name_span)?;
+
+                // Parse the type
+                let ty = self.parse_type()?;
+
+                // Check for optional initializer
+                let (value, end_span) = if self.consume(&Token::Assign) {
+                    let expr = self.parse_expr()?;
+                    let span = expr.span.clone();
+                    (Some(expr), span)
+                } else {
+                    (None, ty.span.clone())
+                };
+
+                Ok(Stmt {
+                    span: Span::with_bytes(
+                        start_span.start,
+                        end_span.end,
+                        self.file,
+                        start_span.byte_start,
+                        end_span.byte_end,
+                    ),
+                    kind: StmtKind::VarDecl { name, ty, value },
+                })
             }
 
             Some(Token::LBrace) => {
@@ -858,6 +902,11 @@ impl Parser {
                 })
             }
 
+            Some(Token::Match) => {
+                self.advance();
+                self.parse_match_stmt(start_span)
+            }
+
             _ => {
                 let expr = self.parse_expr()?;
                 Ok(Stmt {
@@ -871,15 +920,15 @@ impl Parser {
     /// Parse a block of statements
     pub fn parse_block(&mut self) -> Result<Block> {
         let start_span = self.expect(Token::LBrace)?;
-        // Skip newlines after opening brace
-        while self.consume(&Token::Newline) {}
+        // Skip terminators after opening brace
+        self.skip_terminators();
 
         let mut stmts = Vec::new();
 
         while !matches!(self.peek(), Some(Token::RBrace) | None) {
             stmts.push(self.parse_stmt()?);
-            // Skip newlines between statements
-            while self.consume(&Token::Newline) {}
+            // Skip terminators between statements
+            self.skip_terminators();
         }
 
         let end_span = self.expect(Token::RBrace)?;
@@ -981,10 +1030,7 @@ impl Parser {
                     Some((Token::Ident(name), span)) => (name, span),
                     Some((tok, span)) => {
                         return Err(SoppoError::Parse {
-                            message: format!(
-                                "Expected generic parameter name, found {:?}",
-                                tok
-                            ),
+                            message: format!("Expected generic parameter name, found {:?}", tok),
                             span,
                         });
                     }
@@ -1016,7 +1062,11 @@ impl Parser {
                     }
                 };
 
-                generics.push(Generic { name, constraint, span });
+                generics.push(Generic {
+                    name,
+                    constraint,
+                    span,
+                });
 
                 if !self.consume(&Token::Comma) {
                     break;
@@ -1134,8 +1184,8 @@ impl Parser {
         let (kind, end_span) = if self.consume(&Token::Enum) {
             // Parse enum
             self.expect(Token::LBrace)?;
-            // Skip newlines after opening brace
-            while self.consume(&Token::Newline) {}
+            // Skip terminators after opening brace
+            self.skip_terminators();
 
             let mut variants = Vec::new();
 
@@ -1143,8 +1193,8 @@ impl Parser {
                 let variant = self.parse_enum_variant()?;
                 variants.push(variant);
 
-                // Newline as separator (like Go struct fields)
-                while self.consume(&Token::Newline) {}
+                // Terminators as separator (like Go struct fields)
+                self.skip_terminators();
             }
 
             let end_span = self.expect(Token::RBrace)?;
@@ -1152,8 +1202,8 @@ impl Parser {
         } else if self.consume(&Token::Struct) {
             // Parse struct
             self.expect(Token::LBrace)?;
-            // Skip newlines after opening brace
-            while self.consume(&Token::Newline) {}
+            // Skip terminators after opening brace
+            self.skip_terminators();
 
             let mut fields = Vec::new();
 
@@ -1161,8 +1211,8 @@ impl Parser {
                 let field = self.parse_field()?;
                 fields.push(field);
 
-                // Newline as separator (like Go struct fields)
-                while self.consume(&Token::Newline) {}
+                // Terminators as separator (like Go struct fields)
+                self.skip_terminators();
             }
 
             let end_span = self.expect(Token::RBrace)?;
@@ -1235,13 +1285,16 @@ impl Parser {
                     end_span.byte_end,
                 ),
             })
-        } else if matches!(self.peek(), Some(Token::Newline)) {
-            // Newline after variant name - unit variant (like Go struct embedded field on its own line)
+        } else if self.is_terminator() {
+            // Terminator after variant name - unit variant (like Go struct embedded field on its own line)
             Ok(EnumVariant::Unit {
                 name,
                 span: name_span,
             })
-        } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)) {
+        } else if matches!(
+            self.peek(),
+            Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+        ) {
             // Array or pointer type follows
             let ty = self.parse_type()?;
 
@@ -1358,8 +1411,8 @@ impl Parser {
                     });
                 }
             };
-            // Skip newlines after package declaration
-            while self.consume(&Token::Newline) {}
+            // Skip terminators after package declaration
+            self.skip_terminators();
             name
         } else {
             "main".to_string()
@@ -1371,8 +1424,8 @@ impl Parser {
             match self.advance() {
                 Some((Token::String(path), span)) => {
                     imports.push(Import { path, span });
-                    // Skip newlines after import
-                    while self.consume(&Token::Newline) {}
+                    // Skip terminators after import
+                    self.skip_terminators();
                 }
                 Some((tok, span)) => {
                     return Err(SoppoError::Parse {
@@ -1392,8 +1445,8 @@ impl Parser {
         let mut decls = Vec::new();
 
         while self.peek().is_some() {
-            // Skip newlines between declarations
-            while self.consume(&Token::Newline) {}
+            // Skip terminators between declarations
+            self.skip_terminators();
 
             if self.peek().is_none() {
                 break;
@@ -1531,40 +1584,40 @@ mod tests {
     #[test]
     fn test_parse_match() {
         let source = r#"match x {
-            case Ok(value): value
-            case Err(_): 0
+            case Ok(value):
+                result = value
+            case Err(msg):
+                result = 0
         }"#;
-        let expr = parse_expr_helper(source).unwrap();
+        let mut parser = Parser::new(source, FileId(0));
+        let stmt = parser.parse_stmt().unwrap();
 
-        match expr.kind {
-            ExprKind::Match { scrutinee, arms } => {
+        match stmt.kind {
+            StmtKind::Match { scrutinee, arms } => {
                 assert!(matches!(scrutinee.kind, ExprKind::Ident(s) if s == "x"));
                 assert_eq!(arms.len(), 2);
 
-                // First arm: Ok(value) -> value
+                // First arm: Ok(value) -> result = value
                 match &arms[0].pattern.kind {
-                    PatternKind::TuplePattern { name, elements } => {
+                    PatternKind::Destructor { name, binding } => {
                         assert_eq!(name, "Ok");
-                        assert_eq!(elements.len(), 1);
-                        assert!(matches!(
-                            &elements[0].kind,
-                            PatternKind::Variant(s) if s == "value"
-                        ));
+                        assert_eq!(binding, "value");
                     }
-                    _ => panic!("Expected tuple pattern"),
+                    _ => panic!("Expected destructor pattern"),
                 }
+                // Arm body is now a Block
+                assert_eq!(arms[0].body.stmts.len(), 1);
 
-                // Second arm: Err(_) -> 0
+                // Second arm: Err(msg) -> result = 0
                 match &arms[1].pattern.kind {
-                    PatternKind::TuplePattern { name, elements } => {
+                    PatternKind::Destructor { name, binding } => {
                         assert_eq!(name, "Err");
-                        assert_eq!(elements.len(), 1);
-                        assert!(matches!(&elements[0].kind, PatternKind::Wildcard));
+                        assert_eq!(binding, "msg");
                     }
-                    _ => panic!("Expected tuple pattern"),
+                    _ => panic!("Expected destructor pattern"),
                 }
             }
-            _ => panic!("Expected match expression"),
+            _ => panic!("Expected match statement"),
         }
     }
 
@@ -1575,7 +1628,7 @@ mod tests {
         let stmt = parser.parse_stmt().unwrap();
 
         match stmt.kind {
-            StmtKind::Declare { name, value } => {
+            StmtKind::Decl { name, value } => {
                 assert_eq!(name, "x");
                 assert!(matches!(value.kind, ExprKind::Integer(42)));
             }
@@ -1604,8 +1657,8 @@ mod tests {
         let block = parser.parse_block().unwrap();
 
         assert_eq!(block.stmts.len(), 3);
-        assert!(matches!(block.stmts[0].kind, StmtKind::Declare { .. }));
-        assert!(matches!(block.stmts[1].kind, StmtKind::Declare { .. }));
+        assert!(matches!(block.stmts[0].kind, StmtKind::Decl { .. }));
+        assert!(matches!(block.stmts[1].kind, StmtKind::Decl { .. }));
         assert!(matches!(block.stmts[2].kind, StmtKind::Return { .. }));
     }
 
@@ -1698,5 +1751,41 @@ mod tests {
         assert_eq!(file.decls.len(), 2);
         assert!(matches!(file.decls[0], Decl::Type(_)));
         assert!(matches!(file.decls[1], Decl::Func(_)));
+    }
+
+    #[test]
+    fn test_parse_semicolons_as_statement_separators() {
+        // Semicolons should work the same as newlines
+        let source = "{ x := 1; y := 2; return x }";
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        assert_eq!(block.stmts.len(), 3);
+        assert!(matches!(block.stmts[0].kind, StmtKind::Decl { .. }));
+        assert!(matches!(block.stmts[1].kind, StmtKind::Decl { .. }));
+        assert!(matches!(block.stmts[2].kind, StmtKind::Return { .. }));
+    }
+
+    #[test]
+    fn test_parse_mixed_semicolons_and_newlines() {
+        let source = "{ x := 1;\ny := 2\nz := 3; return x }";
+        let mut parser = Parser::new(source, FileId(0));
+        let block = parser.parse_block().unwrap();
+
+        assert_eq!(block.stmts.len(), 4);
+        assert!(matches!(block.stmts[0].kind, StmtKind::Decl { .. }));
+        assert!(matches!(block.stmts[1].kind, StmtKind::Decl { .. }));
+        assert!(matches!(block.stmts[2].kind, StmtKind::Decl { .. }));
+        assert!(matches!(block.stmts[3].kind, StmtKind::Return { .. }));
+    }
+
+    #[test]
+    fn test_parse_function_with_semicolons() {
+        let source = "func add(x int, y int) int { c := x + y; return c }";
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser.parse_func_decl().unwrap();
+
+        assert_eq!(func.name, "add");
+        assert_eq!(func.body.stmts.len(), 2);
     }
 }

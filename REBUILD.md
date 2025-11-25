@@ -20,7 +20,7 @@ Source Code → Lexer → Parser → AST → Type Inference → Codegen → Go C
 - ✅ Newline-based parsing (Go-style, no semicolons)
 - ✅ Type inference (Hindley-Milner with unification)
 - ✅ Enum codegen (interface + variant types + constructors)
-- ✅ Match expressions → Go type switches
+- ✅ Match statements → Go type switches
 - ✅ Generic type constraints (`[T any, E any]`)
 - ✅ Keyword validation (Go + Soppo reserved words)
 - ✅ Pattern matching with qualified names (`Result.Ok(value)`)
@@ -30,13 +30,7 @@ Source Code → Lexer → Parser → AST → Type Inference → Codegen → Go C
 - 🔄 Generic type inference (instantiation, generalization)
 
 ### TODO (Next Session)
-- **Add semicolon support to lexer**: Currently `;` is not a valid token. Go allows explicit semicolons and auto-inserts them after certain tokens (identifiers, literals, `)`, `]`, `}`, `break`, `continue`, `fallthrough`, `return`) when followed by newline. We should:
-  1. Add `Semicolon` token to lexer.rs
-  2. Update parser to treat semicolons same as newlines (statement terminators)
-  3. This makes `c.value = c.value + 1;` valid (currently fails)
-
 - **Struct variant destructuring in match**: Support `case Shape.Circle{radius: r}:` pattern matching for enum struct variants. See DESIGN.md for syntax.
-
 - **Exhaustiveness checking**: Ensure all enum variants are handled in match expressions.
 
 ### Not Yet Implemented
@@ -90,12 +84,14 @@ type Result[T any, E any] enum {
 }
 
 func unwrapOr(r Result, defaultVal int) int {
-    return match r {
+    var result int
+    match r {
     case Result.Ok(value):
-        value
+        result = value
     case Result.Err(msg):
-        defaultVal
+        result = defaultVal
     }
+    return result
 }
 ```
 

@@ -51,33 +51,44 @@ func (Green) isColor() {}
 
 ## Pattern Matching
 
-Uses qualified names (`Type.Variant`) and parentheses for data extraction:
+Match is a statement (like Go's switch), not an expression. Uses qualified names (`Type.Variant`) and parentheses for data extraction:
 
 ```go
-// Match expression (returns value)
-result := match opt {
-case Option.Some(value):
-    value * 2
-case Option.None:
-    0
-}
-
-// Match on simple enums
-action := match color {
+// Match on enums - assign within each arm
+var action string
+match color {
 case Color.Red:
-    "stop"
+    action = "stop"
 case Color.Green:
-    "go"
+    action = "go"
 case Color.Yellow:
-    "slow"
+    action = "slow"
 }
 
-// Struct variant destructuring
-area := match shape {
+// Extract data from variants
+var result int
+match opt {
+case Option.Some(value):
+    result = value * 2
+case Option.None:
+    result = 0
+}
+
+// Struct variant destructuring (planned)
+var area float64
+match shape {
 case Shape.Circle{radius: r}:
-    3.14 * r * r
+    area = 3.14 * r * r
 case Shape.Rectangle{width: w, height: h}:
-    w * h
+    area = w * h
+}
+
+// Match with side effects only (no assignment needed)
+match event {
+case Event.Click(x, y):
+    handleClick(x, y)
+case Event.KeyPress(key):
+    handleKey(key)
 }
 ```
 
@@ -143,8 +154,10 @@ All enum variants must be handled:
 ```go
 // ERROR: non-exhaustive match, missing: Yellow
 match color {
-case Color.Red: ...
-case Color.Green: ...
+case Color.Red:
+    doRed()
+case Color.Green:
+    doGreen()
 }
 ```
 

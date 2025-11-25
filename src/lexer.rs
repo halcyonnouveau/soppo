@@ -39,6 +39,8 @@ pub enum Token {
     Enum,
     #[token("struct")]
     Struct,
+    #[token("var")]
+    Var,
 
     // Identifiers and literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", priority = 1, callback = |lex| lex.slice().to_string())]
@@ -116,6 +118,8 @@ pub enum Token {
     Pipe,
     #[token("_", priority = 2)]
     Underscore,
+    #[token(";")]
+    Semicolon,
 }
 
 pub struct Lexer<'a> {
@@ -257,5 +261,25 @@ mod tests {
         let (_, foo_span) = &tokens[2];
         assert_eq!(foo_span.start.line, 2);
         assert_eq!(foo_span.start.col, 1);
+    }
+
+    #[test]
+    fn test_semicolon() {
+        let source = "x = 1; y = 2";
+        let mut lexer = Lexer::new(source, FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("x".to_string()),
+                Token::Assign,
+                Token::Integer(1),
+                Token::Semicolon,
+                Token::Ident("y".to_string()),
+                Token::Assign,
+                Token::Integer(2)
+            ]
+        );
     }
 }

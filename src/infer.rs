@@ -97,8 +97,8 @@ impl Infer {
         use crate::ast::PatternKind;
 
         match &pattern.kind {
-            PatternKind::Wildcard => {
-                // Wildcard doesn't bind anything
+            PatternKind::Default => {
+                // Default doesn't bind anything
                 Ok(())
             }
             PatternKind::Variant(name) => {
@@ -112,14 +112,12 @@ impl Infer {
                 // Literal pattern doesn't bind anything
                 Ok(())
             }
-            PatternKind::TuplePattern { name: _, elements } => {
-                // For tuple patterns like Ok(value), we need to extract the inner types
+            PatternKind::Destructor { name: _, binding } => {
+                // For destructor patterns like Ok(value), we need to extract the inner type
                 // For enum variants with associated data, look up the variant type
-                // For now, use fresh type variables for each element
-                for elem in elements {
-                    let elem_ty = self.fresh_ty_var();
-                    self.add_pattern_bindings(elem, &elem_ty)?;
-                }
+                // For now, use a fresh type variable for the binding
+                let binding_ty = self.fresh_ty_var();
+                self.insert_var(binding.clone(), binding_ty);
                 Ok(())
             }
         }
@@ -279,25 +277,26 @@ impl Infer {
             ExprKind::Call { func, args } => {
                 // Check if this is a type conversion: TypeName(value)
                 if let ExprKind::Ident(type_name) = &func.kind
-                    && self.global_state.has_type(type_name) {
-                        // This is a type conversion, not a function call
-                        // Type conversions take exactly one argument
-                        if args.len() != 1 {
-                            return Err(SoppoError::Type {
-                                message: format!(
-                                    "Type conversion requires exactly 1 argument, but got {}",
-                                    args.len()
-                                ),
-                                span: expr.span.clone(),
-                            });
-                        }
-
-                        // Infer the argument type (we don't need to use it, just check it's valid)
-                        self.infer_expr(&args[0])?;
-
-                        // Return the target type
-                        return Ok(Type::simple(type_name));
+                    && self.global_state.has_type(type_name)
+                {
+                    // This is a type conversion, not a function call
+                    // Type conversions take exactly one argument
+                    if args.len() != 1 {
+                        return Err(SoppoError::Type {
+                            message: format!(
+                                "Type conversion requires exactly 1 argument, but got {}",
+                                args.len()
+                            ),
+                            span: expr.span.clone(),
+                        });
                     }
+
+                    // Infer the argument type (we don't need to use it, just check it's valid)
+                    self.infer_expr(&args[0])?;
+
+                    // Return the target type
+                    return Ok(Type::simple(type_name));
+                }
 
                 // Regular function call
                 let func_ty = self.infer_expr(func)?;
@@ -372,27 +371,28 @@ impl Infer {
                 // Look up the struct type to validate field access
                 if let Type::Con { name, .. } = &expr_ty
                     && let Some(type_def) = self.global_state.lookup_type(&name.name)
-                        && let crate::module::TypeDefKind::Struct { fields } = &type_def.kind {
-                            // Check if the field exists
-                            if let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field) {
-                                return Ok(field_ty.clone());
-                            } else {
-                                // Field not found - check if it might be a method
-                                // If we can find a function with this name, return a type variable
-                                // and let the Call handler deal with it
-                                if self.global_state.lookup_function(field).is_some() {
-                                    return Ok(self.fresh_ty_var());
-                                }
-
-                                return Err(SoppoError::Type {
-                                    message: format!(
-                                        "Struct `{}` has no field named `{}`",
-                                        name.name, field
-                                    ),
-                                    span: expr.span.clone(),
-                                });
-                            }
+                    && let crate::module::TypeDefKind::Struct { fields } = &type_def.kind
+                {
+                    // Check if the field exists
+                    if let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field) {
+                        return Ok(field_ty.clone());
+                    } else {
+                        // Field not found - check if it might be a method
+                        // If we can find a function with this name, return a type variable
+                        // and let the Call handler deal with it
+                        if self.global_state.lookup_function(field).is_some() {
+                            return Ok(self.fresh_ty_var());
                         }
+
+                        return Err(SoppoError::Type {
+                            message: format!(
+                                "Struct `{}` has no field named `{}`",
+                                name.name, field
+                            ),
+                            span: expr.span.clone(),
+                        });
+                    }
+                }
 
                 // If we can't determine the struct type, return a type variable
                 // (this allows field access on generic/unknown types)
@@ -409,9 +409,11 @@ impl Infer {
 
                 // Extract element type from array type
                 if let Type::Con { name, args } = &array_ty
-                    && name.name == "array" && args.len() == 1 {
-                        return Ok(args[0].clone());
-                    }
+                    && name.name == "array"
+                    && args.len() == 1
+                {
+                    return Ok(args[0].clone());
+                }
 
                 // If we can't determine the array type, return a type variable
                 Ok(self.fresh_ty_var())
@@ -448,32 +450,6 @@ impl Infer {
             }
 
             ExprKind::Block(block) => self.infer_block(block),
-
-            ExprKind::Match { scrutinee, arms } => {
-                // Infer the type of the scrutinee
-                let scrutinee_ty = self.infer_expr(scrutinee)?;
-                let scrutinee_ty = self.substitute(scrutinee_ty);
-
-                // All arms must return the same type
-                let result_ty = self.fresh_ty_var();
-
-                for arm in arms {
-                    // Create a new scope for pattern bindings
-                    self.push_scope();
-
-                    // Add pattern bindings to scope
-                    self.add_pattern_bindings(&arm.pattern, &scrutinee_ty)?;
-
-                    // Infer the body type with bindings in scope
-                    let body_ty = self.infer_expr(&arm.body)?;
-                    self.unify(&body_ty, &result_ty, &arm.body.span)?;
-
-                    // Pop the scope after processing the arm
-                    self.pop_scope();
-                }
-
-                Ok(self.substitute(result_ty))
-            }
         }
     }
 
@@ -481,9 +457,19 @@ impl Infer {
     /// Returns the type of the statement (unit for most, or the type of the expression)
     pub fn infer_stmt(&mut self, stmt: &Stmt) -> Result<Type> {
         match &stmt.kind {
-            StmtKind::Declare { name, value } => {
+            StmtKind::Decl { name, value } => {
                 let value_ty = self.infer_expr(value)?;
                 self.insert_var(name.clone(), value_ty.clone());
+                Ok(Type::unit())
+            }
+
+            StmtKind::VarDecl { name, ty, value } => {
+                let declared_ty = Type::simple(&ty.name);
+                if let Some(expr) = value {
+                    let value_ty = self.infer_expr(expr)?;
+                    self.unify(&declared_ty, &value_ty, &expr.span)?;
+                }
+                self.insert_var(name.clone(), declared_ty);
                 Ok(Type::unit())
             }
 
@@ -542,6 +528,28 @@ impl Infer {
                 }
                 // Return statements are diverging - they never produce a value
                 Ok(Type::never())
+            }
+
+            StmtKind::Match { scrutinee, arms } => {
+                // Infer the type of the scrutinee
+                let scrutinee_ty = self.infer_expr(scrutinee)?;
+                let scrutinee_ty = self.substitute(scrutinee_ty);
+
+                for arm in arms {
+                    // Create a new scope for pattern bindings
+                    self.push_scope();
+
+                    // Add pattern bindings to scope
+                    self.add_pattern_bindings(&arm.pattern, &scrutinee_ty)?;
+
+                    // Type check the arm body
+                    self.infer_block(&arm.body)?;
+
+                    // Pop the scope after processing the arm
+                    self.pop_scope();
+                }
+
+                Ok(Type::unit())
             }
 
             StmtKind::Expr(expr) => self.infer_expr(expr),
