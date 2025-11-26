@@ -13,6 +13,15 @@ type MyResult enum {
     Err string
 }
 
+type Material enum {
+    Wood string
+    Metal string
+}
+
+type TriangleProps struct {
+    material Material
+}
+
 type Shape enum {
     Circle struct {
         radius float64
@@ -21,6 +30,7 @@ type Shape enum {
         width float64
         height float64
     }
+    Triangle TriangleProps
 }
 
 func area(s Shape) float64 {
@@ -30,6 +40,30 @@ func area(s Shape) float64 {
         result = 3.14 * r * r
     case Shape.Rectangle{width: w, height: h}:
         result = w * h
+    case Shape.Triangle(p):
+        result = 0.0
+    }
+    return result
+}
+
+func testNestedMatch() string {
+    mat := Material.Wood("oak")
+    props := TriangleProps{material: mat}
+    shape := Shape.Triangle(props)
+
+    var result string
+    match shape {
+    case Shape.Circle{radius: r, ...}:
+        result = "circle"
+    case Shape.Rectangle{width: w, height: h}:
+        result = "rectangle"
+    case Shape.Triangle(p):
+        match p.material {
+        case Material.Wood(name):
+            result = name
+        case Material.Metal(name):
+            result = name
+        }
     }
     return result
 }
@@ -73,5 +107,7 @@ func main() {
     circle := Shape.Circle{radius: 5.0}
     rect := Shape.Rectangle{width: 3.0, height: 4.0}
 
-   	fmt.Printf("%d %d %d %f %f\n", test(), result1, result2, area(circle), area(rect))
+    nested := testNestedMatch()
+
+   	fmt.Printf("%d %d %d %f %f %s\n", test(), result1, result2, area(circle), area(rect), nested)
 }

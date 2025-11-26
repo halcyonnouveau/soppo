@@ -49,6 +49,31 @@ func MyResultErr(value string) MyResult {
     return MyResult_Err{Value: value}
 }
 
+type Material interface {
+    isMaterial()
+}
+
+type Material_Wood struct {
+    Value string
+}
+func (Material_Wood) isMaterial() {}
+
+type Material_Metal struct {
+    Value string
+}
+func (Material_Metal) isMaterial() {}
+
+func MaterialWood(value string) Material {
+    return Material_Wood{Value: value}
+}
+func MaterialMetal(value string) Material {
+    return Material_Metal{Value: value}
+}
+
+type TriangleProps struct {
+    material Material
+}
+
 type Shape interface {
     isShape()
 }
@@ -64,6 +89,14 @@ type Shape_Rectangle struct {
 }
 func (Shape_Rectangle) isShape() {}
 
+type Shape_Triangle struct {
+    Value TriangleProps
+}
+func (Shape_Triangle) isShape() {}
+
+func ShapeTriangle(value TriangleProps) Shape {
+    return Shape_Triangle{Value: value}
+}
 
 func area(s Shape) float64 {
     var result float64
@@ -78,6 +111,43 @@ func area(s Shape) float64 {
         h := __v.height
         _ = h
         result = (w * h)
+    case Shape_Triangle:
+        p := __v.Value
+        _ = p
+        result = 0.0
+    }
+    return result
+}
+
+func testNestedMatch() string {
+    mat := MaterialWood("oak")
+    props := TriangleProps{material: mat}
+    shape := ShapeTriangle(props)
+    var result string
+    switch __v := shape.(type) {
+    case Shape_Circle:
+        r := __v.radius
+        _ = r
+        result = "circle"
+    case Shape_Rectangle:
+        w := __v.width
+        _ = w
+        h := __v.height
+        _ = h
+        result = "rectangle"
+    case Shape_Triangle:
+        p := __v.Value
+        _ = p
+        switch __v := p.material.(type) {
+        case Material_Wood:
+            name := __v.Value
+            _ = name
+            result = name
+        case Material_Metal:
+            name := __v.Value
+            _ = name
+            result = name
+        }
     }
     return result
 }
@@ -119,5 +189,6 @@ func main() {
     result2 := unwrapOr(err, 99)
     circle := Shape_Circle{radius: 5.0}
     rect := Shape_Rectangle{width: 3.0, height: 4.0}
-    fmt.Printf("%d %d %d %f %f\n", test(), result1, result2, area(circle), area(rect))
+    nested := testNestedMatch()
+    fmt.Printf("%d %d %d %f %f %s\n", test(), result1, result2, area(circle), area(rect), nested)
 }
