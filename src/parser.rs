@@ -429,6 +429,84 @@ impl Parser {
                         ),
                     })
                 }
+                // Check if it's a struct destructor pattern: Shape.Circle{radius: r, ...}
+                else if self.consume(&Token::LBrace) {
+                    let mut fields = Vec::new();
+                    let mut rest = false;
+
+                    // Parse field bindings
+                    if !matches!(self.peek(), Some(Token::RBrace)) {
+                        loop {
+                            // Check for ... (rest pattern)
+                            if self.consume(&Token::DotDotDot) {
+                                rest = true;
+                                break;
+                            }
+
+                            // Parse field_name: binding_name
+                            let field_name = match self.advance() {
+                                Some((Token::Ident(name), _)) => name,
+                                Some((tok, span)) => {
+                                    return Err(SoppoError::Parse {
+                                        message: format!(
+                                            "Expected field name in struct pattern, found {:?}",
+                                            tok
+                                        ),
+                                        span,
+                                    });
+                                }
+                                None => {
+                                    return Err(SoppoError::Parse {
+                                        message: "Expected field name in struct pattern"
+                                            .to_string(),
+                                        span: Span::dummy(),
+                                    });
+                                }
+                            };
+
+                            self.expect(Token::Colon)?;
+
+                            let binding_name = match self.advance() {
+                                Some((Token::Ident(name), _)) => name,
+                                Some((tok, span)) => {
+                                    return Err(SoppoError::Parse {
+                                        message: format!(
+                                            "Expected binding name in struct pattern, found {:?}",
+                                            tok
+                                        ),
+                                        span,
+                                    });
+                                }
+                                None => {
+                                    return Err(SoppoError::Parse {
+                                        message: "Expected binding name in struct pattern"
+                                            .to_string(),
+                                        span: Span::dummy(),
+                                    });
+                                }
+                            };
+
+                            fields.push((field_name, binding_name));
+
+                            if !self.consume(&Token::Comma) {
+                                break;
+                            }
+                        }
+                    }
+
+                    let end_span = self.expect(Token::RBrace)?;
+
+                    Ok(Pattern {
+                        kind: PatternKind::StructDestructor { name, fields, rest },
+                        span: Span::with_bytes(
+                            current_span.start,
+                            end_span.end,
+                            self.file,
+                            current_span.byte_start,
+                            end_span.byte_end,
+                        ),
+                    })
+                }
                 // Just a variant name
                 else {
                     Ok(Pattern {
@@ -538,11 +616,29 @@ impl Parser {
                     };
                 }
 
-                // Struct literal: Type{field: value, ...}
+                // Struct literal: Type{field: value, ...} or Type.Variant{field: value, ...}
                 Some(Token::LBrace) => {
-                    // Only parse as struct literal if expr is an identifier (type name)
-                    // AND the content looks like field initialization (not a block)
-                    if let ExprKind::Ident(type_name) = &expr.kind {
+                    // Extract type name from identifier or field access chain
+                    let type_name = match &expr.kind {
+                        ExprKind::Ident(name) => Some(name.clone()),
+                        ExprKind::Field { .. } => {
+                            // Convert field access chain to dotted type name (e.g., Shape.Circle)
+                            fn extract_type_path(e: &Expr) -> Option<String> {
+                                match &e.kind {
+                                    ExprKind::Ident(name) => Some(name.clone()),
+                                    ExprKind::Field { expr, field } => {
+                                        extract_type_path(expr)
+                                            .map(|base| format!("{}.{}", base, field))
+                                    }
+                                    _ => None,
+                                }
+                            }
+                            extract_type_path(&expr)
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(type_name) = type_name {
                         // Peek ahead to see if this looks like a struct literal
                         // Struct literals have pattern: { ident: expr, ... }
                         // Blocks have pattern: { stmt; ... }
@@ -626,7 +722,7 @@ impl Parser {
                             ),
                             kind: ExprKind::StructLit {
                                 ty: Type {
-                                    name: type_name.clone(),
+                                    name: type_name,
                                     args: Vec::new(),
                                     span: expr.span.clone(),
                                 },
@@ -1257,19 +1353,25 @@ impl Parser {
         };
 
         // Check for data: Single Type or Struct { fields }
-        if self.consume(&Token::LBrace) {
+        // Optional `struct` keyword before `{`
+        let has_struct_keyword = self.consume(&Token::Struct);
+        if has_struct_keyword || self.consume(&Token::LBrace) {
+            // If we consumed `struct`, now consume the `{`
+            if has_struct_keyword {
+                self.expect(Token::LBrace)?;
+            }
+            // Skip terminators after opening brace
+            self.skip_terminators();
+
             // Struct variant
             let mut fields = Vec::new();
 
-            if !matches!(self.peek(), Some(Token::RBrace)) {
-                loop {
-                    let field = self.parse_field()?;
-                    fields.push(field);
+            while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                let field = self.parse_field()?;
+                fields.push(field);
 
-                    if !self.consume(&Token::Comma) {
-                        break;
-                    }
-                }
+                // Terminators as separator (like Go struct fields)
+                self.skip_terminators();
             }
 
             let end_span = self.expect(Token::RBrace)?;

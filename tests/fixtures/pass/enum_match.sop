@@ -13,6 +13,27 @@ type MyResult enum {
     Err string
 }
 
+type Shape enum {
+    Circle struct {
+        radius float64
+    }
+    Rectangle struct {
+        width float64
+        height float64
+    }
+}
+
+func area(s Shape) float64 {
+    var result float64
+    match s {
+    case Shape.Circle{radius: r, ...}:
+        result = 3.14 * r * r
+    case Shape.Rectangle{width: w, height: h}:
+        result = w * h
+    }
+    return result
+}
+
 func unwrapOr(r MyResult, defaultVal int) int {
     var result int
     match r {
@@ -49,5 +70,8 @@ func main() {
     result1 := unwrapOr(ok, 0)
     result2 := unwrapOr(err, 99)
 
-   	fmt.Printf("%d %d %d\n", test(), result1, result2)
+    circle := Shape.Circle{radius: 5.0}
+    rect := Shape.Rectangle{width: 3.0, height: 4.0}
+
+   	fmt.Printf("%d %d %d %f %f\n", test(), result1, result2, area(circle), area(rect))
 }

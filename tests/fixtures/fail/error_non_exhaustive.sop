@@ -1,0 +1,17 @@
+type Color enum {
+    Red
+    Yellow
+    Green
+}
+
+func test() {
+    color := Color.Red
+
+    var message string
+    match color {
+    case Color.Red:
+        message = "Stop"
+    case Color.Yellow:
+        message = "Wait"
+    }
+}

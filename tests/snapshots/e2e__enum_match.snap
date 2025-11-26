@@ -10,53 +10,86 @@ type Color interface {
     isColor()
 }
 
-type Red struct {}
-func (Red) isColor() {}
-func (Red) String() string { return "Red" }
+type Color_Red struct {}
+func (Color_Red) isColor() {}
+func (Color_Red) String() string { return "Red" }
 
-type Yellow struct {}
-func (Yellow) isColor() {}
-func (Yellow) String() string { return "Yellow" }
+type Color_Yellow struct {}
+func (Color_Yellow) isColor() {}
+func (Color_Yellow) String() string { return "Yellow" }
 
-type Green struct {}
-func (Green) isColor() {}
-func (Green) String() string { return "Green" }
+type Color_Green struct {}
+func (Color_Green) isColor() {}
+func (Color_Green) String() string { return "Green" }
 
 var (
-    ColorRed Color = Red{}
-    ColorYellow Color = Yellow{}
-    ColorGreen Color = Green{}
+    ColorRed Color = Color_Red{}
+    ColorYellow Color = Color_Yellow{}
+    ColorGreen Color = Color_Green{}
 )
 
 type MyResult interface {
     isMyResult()
 }
 
-type Ok struct {
+type MyResult_Ok struct {
     Value int
 }
-func (Ok) isMyResult() {}
+func (MyResult_Ok) isMyResult() {}
 
-type Err struct {
+type MyResult_Err struct {
     Value string
 }
-func (Err) isMyResult() {}
+func (MyResult_Err) isMyResult() {}
 
 func MyResultOk(value int) MyResult {
-    return Ok{Value: value}
+    return MyResult_Ok{Value: value}
 }
 func MyResultErr(value string) MyResult {
-    return Err{Value: value}
+    return MyResult_Err{Value: value}
+}
+
+type Shape interface {
+    isShape()
+}
+
+type Shape_Circle struct {
+    radius float64
+}
+func (Shape_Circle) isShape() {}
+
+type Shape_Rectangle struct {
+    width float64
+    height float64
+}
+func (Shape_Rectangle) isShape() {}
+
+
+func area(s Shape) float64 {
+    var result float64
+    switch __v := s.(type) {
+    case Shape_Circle:
+        r := __v.radius
+        _ = r
+        result = ((3.14 * r) * r)
+    case Shape_Rectangle:
+        w := __v.width
+        _ = w
+        h := __v.height
+        _ = h
+        result = (w * h)
+    }
+    return result
 }
 
 func unwrapOr(r MyResult, defaultVal int) int {
     var result int
     switch __v := r.(type) {
-    case Ok:
+    case MyResult_Ok:
         value := __v.Value
         _ = value
         result = value
-    case Err:
+    case MyResult_Err:
         msg := __v.Value
         _ = msg
         result = defaultVal
@@ -68,11 +101,11 @@ func test() int {
     color := ColorRed
     var message string
     switch color.(type) {
-    case Red:
+    case Color_Red:
         message = "Stop"
-    case Yellow:
+    case Color_Yellow:
         message = "Wait"
-    case Green:
+    case Color_Green:
         return 1
     }
     fmt.Printf("%s\n", message)
@@ -84,5 +117,7 @@ func main() {
     err := MyResultErr("failed")
     result1 := unwrapOr(ok, 0)
     result2 := unwrapOr(err, 99)
-    fmt.Printf("%d %d %d\n", test(), result1, result2)
+    circle := Shape_Circle{radius: 5.0}
+    rect := Shape_Rectangle{width: 3.0, height: 4.0}
+    fmt.Printf("%d %d %d %f %f\n", test(), result1, result2, area(circle), area(rect))
 }

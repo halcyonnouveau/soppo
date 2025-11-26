@@ -243,9 +243,12 @@ pub enum PatternKind {
     /// Literal value: 42, "hello", true
     Literal(Literal),
     /// Variant with data extraction: Result.Ok(value)
-    Destructor {
-        name: String,
-        binding: String,
+    Destructor { name: String, binding: String },
+    /// Struct variant destructuring: Shape.Circle{radius: r, ...}
+    StructDestructor {
+        name: String,                  // e.g., "Shape.Circle"
+        fields: Vec<(String, String)>, // (field_name, binding_name) pairs
+        rest: bool,                    // true if `...` was used to ignore remaining fields
     },
 }
 

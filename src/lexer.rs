@@ -112,6 +112,8 @@ pub enum Token {
     Assign,
     #[token(":=")]
     ColonAssign,
+    #[token("...")]
+    DotDotDot,
     #[token(".")]
     Dot,
     #[token("|")]

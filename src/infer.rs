@@ -1,12 +1,12 @@
 use crate::ast::{
-    BinOp, Block, ConstDecl, EnumVariant, Expr, ExprKind, FuncDecl, Stmt, StmtKind, TypeDecl,
-    TypeKind,
+    BinOp, Block, ConstDecl, EnumVariant, Expr, ExprKind, FuncDecl, PatternKind, Stmt, StmtKind,
+    TypeDecl, TypeKind,
 };
 use crate::error::{Result, SoppoError};
 use crate::module::GlobalState;
 use crate::source::Span;
 use crate::ty::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Type inference engine
 pub struct Infer {
@@ -112,12 +112,95 @@ impl Infer {
                 // Literal pattern doesn't bind anything
                 Ok(())
             }
-            PatternKind::Destructor { name: _, binding } => {
-                // For destructor patterns like Ok(value), we need to extract the inner type
-                // For enum variants with associated data, look up the variant type
-                // For now, use a fresh type variable for the binding
+            PatternKind::Destructor { name, binding } => {
+                // For destructor patterns like Ok(value), extract the inner type from variant
+                let variant_name = name.rsplit('.').next().unwrap_or(name);
+
+                // Try to find the actual type from the enum variant
+                if let Type::Con {
+                    name: type_name, ..
+                } = scrutinee_ty
+                {
+                    if let Some(type_def) = self.global_state.lookup_type(&type_name.name) {
+                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
+                            for variant in variants {
+                                if let EnumVariant::Single {
+                                    name: vname, ty, ..
+                                } = variant
+                                {
+                                    if vname == variant_name {
+                                        let binding_ty = Type::simple(&ty.name);
+                                        self.insert_var(binding.clone(), binding_ty);
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Fallback to fresh type variable if we can't determine the type
                 let binding_ty = self.fresh_ty_var();
                 self.insert_var(binding.clone(), binding_ty);
+                Ok(())
+            }
+            PatternKind::StructDestructor {
+                name,
+                fields,
+                rest: _,
+            } => {
+                // For struct destructor patterns like Circle{radius: r, ...}
+                let variant_name = name.rsplit('.').next().unwrap_or(name);
+
+                // Collect field types first to avoid borrow conflicts
+                let mut bindings: Vec<(String, Type)> = Vec::new();
+                let mut found_variant = false;
+
+                // Look up the struct variant to get field types
+                if let Type::Con {
+                    name: type_name, ..
+                } = scrutinee_ty
+                {
+                    if let Some(type_def) = self.global_state.lookup_type(&type_name.name) {
+                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
+                            for variant in variants {
+                                if let EnumVariant::Struct {
+                                    name: vname,
+                                    fields: variant_fields,
+                                    ..
+                                } = variant
+                                {
+                                    if vname == variant_name {
+                                        found_variant = true;
+                                        // Collect field types
+                                        for (field_name, binding_name) in fields {
+                                            if let Some(field) = variant_fields
+                                                .iter()
+                                                .find(|f| &f.name == field_name)
+                                            {
+                                                let field_ty = Type::simple(&field.ty.name);
+                                                bindings.push((binding_name.clone(), field_ty));
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Insert bindings after borrows are released
+                if found_variant {
+                    for (binding_name, field_ty) in bindings {
+                        self.insert_var(binding_name, field_ty);
+                    }
+                } else {
+                    // Fallback: add bindings with fresh type variables
+                    for (_field_name, binding_name) in fields {
+                        let binding_ty = self.fresh_ty_var();
+                        self.insert_var(binding_name.clone(), binding_ty);
+                    }
+                }
                 Ok(())
             }
         }
@@ -445,6 +528,16 @@ impl Infer {
                     self.infer_expr(value)?;
                 }
 
+                // Check if this is an enum variant (e.g., Shape.Circle)
+                // If so, return the enum type, not the variant
+                if ty.name.contains('.') {
+                    let parts: Vec<&str> = ty.name.split('.').collect();
+                    if parts.len() == 2 {
+                        let enum_name = parts[0];
+                        return Ok(Type::simple(enum_name));
+                    }
+                }
+
                 // Return the struct type
                 Ok(Type::simple(&ty.name))
             }
@@ -547,6 +640,62 @@ impl Infer {
 
                     // Pop the scope after processing the arm
                     self.pop_scope();
+                }
+
+                // Exhaustiveness check for enum types
+                if let Type::Con { name, .. } = &scrutinee_ty {
+                    if let Some(type_def) = self.global_state.lookup_type(&name.name) {
+                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
+                            // Check if any arm is Default (catch-all)
+                            let has_default = arms
+                                .iter()
+                                .any(|arm| matches!(&arm.pattern.kind, PatternKind::Default));
+
+                            if !has_default {
+                                // Collect covered variants from patterns
+                                let covered: HashSet<String> = arms
+                                    .iter()
+                                    .filter_map(|arm| match &arm.pattern.kind {
+                                        PatternKind::Variant(v) => {
+                                            // Extract variant name from qualified name like "Color.Red"
+                                            Some(v.rsplit('.').next().unwrap_or(v).to_string())
+                                        }
+                                        PatternKind::Destructor { name, .. } => Some(
+                                            name.rsplit('.').next().unwrap_or(name).to_string(),
+                                        ),
+                                        PatternKind::StructDestructor { name, .. } => Some(
+                                            name.rsplit('.').next().unwrap_or(name).to_string(),
+                                        ),
+                                        _ => None,
+                                    })
+                                    .collect();
+
+                                // Find missing variants
+                                let missing: Vec<String> = variants
+                                    .iter()
+                                    .filter_map(|v| {
+                                        let vname = match v {
+                                            EnumVariant::Unit { name, .. } => name,
+                                            EnumVariant::Single { name, .. } => name,
+                                            EnumVariant::Struct { name, .. } => name,
+                                        };
+                                        if !covered.contains(vname) {
+                                            Some(vname.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+
+                                if !missing.is_empty() {
+                                    return Err(SoppoError::NonExhaustive {
+                                        missing,
+                                        span: stmt.span.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Ok(Type::unit())

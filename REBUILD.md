@@ -25,18 +25,23 @@ Source Code → Lexer → Parser → AST → Type Inference → Codegen → Go C
 - ✅ Keyword validation (Go + Soppo reserved words)
 - ✅ Pattern matching with qualified names (`Result.Ok(value)`)
 - ✅ Snapshot testing with `insta`
+- ✅ Struct variant destructuring in match (`case Shape.Circle{radius: r, ...}:`)
+- ✅ Exhaustiveness checking for match expressions
+- ✅ Namespaced enum variant types (`Color_Red`, `Shape_Circle`) to avoid collisions
 
 ### In Progress
 - 🔄 Generic type inference (instantiation, generalization)
-
-### TODO (Next Session)
-- **Struct variant destructuring in match**: Support `case Shape.Circle{radius: r}:` pattern matching for enum struct variants. See DESIGN.md for syntax.
-- **Exhaustiveness checking**: Ensure all enum variants are handled in match expressions.
 
 ### Not Yet Implemented
 - Standard library (Result, Option as prelude)
 - `.d.sop` definition files for Go interop
 - `?` operator for error propagation
+
+### Future `...` Support
+Currently `...` is only used in struct destructuring patterns to ignore remaining fields. Go uses `...` in several other contexts that we should eventually support:
+- **Variadic function parameters**: `func sum(nums ...int) int`
+- **Slice spreading in function calls**: `sum(slice...)`
+- **Array length inference**: `arr := [...]int{1, 2, 3}`
 
 ## Key Design Decisions
 

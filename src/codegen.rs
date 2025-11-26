@@ -163,11 +163,12 @@ impl Codegen {
                 self.emit_line("}");
                 self.emit_line("");
 
-                // Generate each variant as a type
+                // Generate each variant as a type with namespaced name (EnumName_VariantName)
                 for variant in variants {
                     match variant {
                         EnumVariant::Unit { name, .. } => {
                             // Unit variant: empty struct with generics if present
+                            let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
                             let generic_names = if !type_decl.generics.is_empty() {
                                 format!("[{}]", self.format_generic_names(&type_decl.generics))
@@ -175,19 +176,20 @@ impl Codegen {
                                 String::new()
                             };
 
-                            self.emit_line(&format!("type {}{} struct {{}}", name, generic_params));
+                            self.emit_line(&format!("type {}{} struct {{}}", full_name, generic_params));
                             self.emit_line(&format!(
                                 "func ({}{}) is{}() {{}}",
-                                name, generic_names, type_decl.name
+                                full_name, generic_names, type_decl.name
                             ));
                             self.emit_line(&format!(
                                 "func ({}) String() string {{ return \"{}\" }}",
-                                name, name
+                                full_name, name
                             ));
                             self.emit_line("");
                         }
                         EnumVariant::Single { name, ty, .. } => {
                             // Single value variant: struct with Value field and generics if present
+                            let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
                             let generic_names = if !type_decl.generics.is_empty() {
                                 format!("[{}]", self.format_generic_names(&type_decl.generics))
@@ -195,19 +197,20 @@ impl Codegen {
                                 String::new()
                             };
 
-                            self.emit_line(&format!("type {}{} struct {{", name, generic_params));
+                            self.emit_line(&format!("type {}{} struct {{", full_name, generic_params));
                             self.indent();
                             self.emit_line(&format!("Value {}", self.go_type(&ty.name)));
                             self.dedent();
                             self.emit_line("}");
                             self.emit_line(&format!(
                                 "func ({}{}) is{}() {{}}",
-                                name, generic_names, type_decl.name
+                                full_name, generic_names, type_decl.name
                             ));
                             self.emit_line("");
                         }
                         EnumVariant::Struct { name, fields, .. } => {
                             // Struct variant: struct with all fields and generics if present
+                            let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
                             let generic_names = if !type_decl.generics.is_empty() {
                                 format!("[{}]", self.format_generic_names(&type_decl.generics))
@@ -215,7 +218,7 @@ impl Codegen {
                                 String::new()
                             };
 
-                            self.emit_line(&format!("type {}{} struct {{", name, generic_params));
+                            self.emit_line(&format!("type {}{} struct {{", full_name, generic_params));
                             self.indent();
                             for field in fields {
                                 self.emit_line(&format!(
@@ -228,7 +231,7 @@ impl Codegen {
                             self.emit_line("}");
                             self.emit_line(&format!(
                                 "func ({}{}) is{}() {{}}",
-                                name, generic_names, type_decl.name
+                                full_name, generic_names, type_decl.name
                             ));
                             self.emit_line("");
                         }
@@ -243,13 +246,16 @@ impl Codegen {
 
                 if !unit_variants.is_empty() && type_decl.generics.is_empty() {
                     // Only generate var block for non-generic unit variants
+                    // Var names don't use underscore (to avoid collision with type names)
                     self.emit_line("var (");
                     self.indent();
                     for variant in unit_variants {
                         if let EnumVariant::Unit { name, .. } = variant {
+                            let type_name = format!("{}_{}", type_decl.name, name);
+                            let var_name = format!("{}{}", type_decl.name, name);
                             self.emit_line(&format!(
-                                "{}{} {} = {}{{}}",
-                                type_decl.name, name, type_decl.name, name
+                                "{} {} = {}{{}}",
+                                var_name, type_decl.name, type_name
                             ));
                         }
                     }
@@ -261,7 +267,10 @@ impl Codegen {
                 for variant in variants {
                     match variant {
                         EnumVariant::Single { name, ty, .. } => {
-                            // Generate: func ResultOk[T any, E any](value T) Result[T, E] { return Ok[T, E]{Value: value} }
+                            // Generate: func MyResultOk[T any, E any](value T) MyResult[T, E] { return MyResult_Ok[T, E]{Value: value} }
+                            // Function name without underscore, type name with underscore
+                            let func_name = format!("{}{}", type_decl.name, name);
+                            let type_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
                             let generic_names = if !type_decl.generics.is_empty() {
                                 format!("[{}]", self.format_generic_names(&type_decl.generics))
@@ -270,9 +279,8 @@ impl Codegen {
                             };
 
                             self.emit_line(&format!(
-                                "func {}{}{}(value {}) {}{} {{",
-                                type_decl.name,
-                                name,
+                                "func {}{}(value {}) {}{} {{",
+                                func_name,
                                 generic_params,
                                 self.go_type(&ty.name),
                                 type_decl.name,
@@ -281,66 +289,34 @@ impl Codegen {
                             self.indent();
                             self.emit_line(&format!(
                                 "return {}{}{{Value: value}}",
-                                name, generic_names
+                                type_name, generic_names
                             ));
                             self.dedent();
                             self.emit_line("}");
                         }
-                        EnumVariant::Struct { name, fields, .. } => {
-                            // Generate constructor with all fields as parameters
-                            let params: Vec<String> = fields
-                                .iter()
-                                .map(|f| format!("{} {}", f.name, self.go_type(&f.ty.name)))
-                                .collect();
-                            let field_inits: Vec<String> = fields
-                                .iter()
-                                .map(|f| format!("{}: {}", f.name, f.name))
-                                .collect();
-
-                            let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = if !type_decl.generics.is_empty() {
-                                format!("[{}]", self.format_generic_names(&type_decl.generics))
-                            } else {
-                                String::new()
-                            };
-
-                            self.emit_line(&format!(
-                                "func {}{}{}({}) {}{} {{",
-                                type_decl.name,
-                                name,
-                                generic_params,
-                                params.join(", "),
-                                type_decl.name,
-                                generic_names
-                            ));
-                            self.indent();
-                            self.emit_line(&format!(
-                                "return {}{}{{ {} }}",
-                                name,
-                                generic_names,
-                                field_inits.join(", ")
-                            ));
-                            self.dedent();
-                            self.emit_line("}");
+                        EnumVariant::Struct { .. } => {
+                            // No constructor for struct variants - use struct literal syntax directly
                         }
                         EnumVariant::Unit { name, .. } => {
                             // For generic unit variants, generate a constructor function
+                            // Function name without underscore, type name with underscore
                             if !type_decl.generics.is_empty() {
+                                let func_name = format!("{}{}", type_decl.name, name);
+                                let type_name = format!("{}_{}", type_decl.name, name);
                                 let generic_params =
                                     self.format_generic_brackets(&type_decl.generics);
                                 let generic_names =
                                     format!("[{}]", self.format_generic_names(&type_decl.generics));
 
                                 self.emit_line(&format!(
-                                    "func {}{}{}() {}{} {{",
-                                    type_decl.name,
-                                    name,
+                                    "func {}{}() {}{} {{",
+                                    func_name,
                                     generic_params,
                                     type_decl.name,
                                     generic_names
                                 ));
                                 self.indent();
-                                self.emit_line(&format!("return {}{}{{}}", name, generic_names));
+                                self.emit_line(&format!("return {}{}{{}}", type_name, generic_names));
                                 self.dedent();
                                 self.emit_line("}");
                             }
@@ -510,12 +486,17 @@ impl Codegen {
                         &arm.pattern.kind,
                         crate::ast::PatternKind::Variant(_)
                             | crate::ast::PatternKind::Destructor { .. }
+                            | crate::ast::PatternKind::StructDestructor { .. }
                     )
                 });
 
-                // Check if any arm needs the bound variable (Destructor patterns)
+                // Check if any arm needs the bound variable (Destructor or StructDestructor patterns)
                 let needs_binding = arms.iter().any(|arm| {
-                    matches!(&arm.pattern.kind, crate::ast::PatternKind::Destructor { .. })
+                    matches!(
+                        &arm.pattern.kind,
+                        crate::ast::PatternKind::Destructor { .. }
+                            | crate::ast::PatternKind::StructDestructor { .. }
+                    )
                 });
 
                 if is_type_switch {
@@ -542,9 +523,9 @@ impl Codegen {
                         self.emit("case ");
                         match &arm.pattern.kind {
                             crate::ast::PatternKind::Variant(name) => {
-                                // Extract just the variant name from qualified names
-                                let variant_name = name.rsplit('.').next().unwrap_or(name);
-                                self.emit(variant_name);
+                                // Convert qualified name (Color.Red) to namespaced (Color_Red)
+                                let full_name = name.replace('.', "_");
+                                self.emit(&full_name);
                             }
                             crate::ast::PatternKind::Literal(lit) => match lit {
                                 crate::ast::Literal::Integer(n) => self.emit(&n.to_string()),
@@ -552,9 +533,14 @@ impl Codegen {
                                 crate::ast::Literal::Bool(b) => self.emit(&b.to_string()),
                             },
                             crate::ast::PatternKind::Destructor { name, .. } => {
-                                // Extract just the variant name from qualified names
-                                let variant_name = name.rsplit('.').next().unwrap_or(name);
-                                self.emit(variant_name);
+                                // Convert qualified name (MyResult.Ok) to namespaced (MyResult_Ok)
+                                let full_name = name.replace('.', "_");
+                                self.emit(&full_name);
+                            }
+                            crate::ast::PatternKind::StructDestructor { name, .. } => {
+                                // Convert qualified name (Shape.Circle) to namespaced (Shape_Circle)
+                                let full_name = name.replace('.', "_");
+                                self.emit(&full_name);
                             }
                             crate::ast::PatternKind::Default => unreachable!(),
                         }
@@ -572,6 +558,20 @@ impl Codegen {
                         // Add blank assignment to avoid unused variable warnings
                         self.emit_indent();
                         self.emit(&format!("_ = {}\n", binding));
+                    }
+
+                    // Extract pattern bindings for struct destructor patterns
+                    if let crate::ast::PatternKind::StructDestructor { fields, .. } =
+                        &arm.pattern.kind
+                    {
+                        // __v is already the concrete type from the switch statement
+                        for (field_name, binding_name) in fields {
+                            self.emit_indent();
+                            self.emit(&format!("{} := __v.{}\n", binding_name, field_name));
+                            // Add blank assignment to avoid unused variable warnings
+                            self.emit_indent();
+                            self.emit(&format!("_ = {}\n", binding_name));
+                        }
                     }
 
                     // Emit arm body statements
@@ -648,7 +648,7 @@ impl Codegen {
                 if let ExprKind::Ident(type_name) = &expr.kind {
                     // Check if it's a registered type (enum)
                     if self.global_state.has_type(type_name) {
-                        // Enum constructors: Color.Red → ColorRed
+                        // Enum values: Color.Red → ColorRed (var or function)
                         self.emit(&format!("{}{}", type_name, field));
                     } else {
                         // Regular field access (like fmt.Printf)
@@ -691,7 +691,13 @@ impl Codegen {
 
             ExprKind::StructLit { ty, fields } => {
                 // Generate Type{field: value, ...}
-                self.emit(self.go_type(&ty.name));
+                // For enum variants like Shape.Circle, convert to Shape_Circle
+                let type_name = if ty.name.contains('.') {
+                    ty.name.replace('.', "_")
+                } else {
+                    ty.name.clone()
+                };
+                self.emit(self.go_type(&type_name));
                 self.emit("{");
                 for (i, (field_name, value)) in fields.iter().enumerate() {
                     if i > 0 {

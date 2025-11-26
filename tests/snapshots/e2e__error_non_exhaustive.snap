@@ -1,0 +1,19 @@
+---
+source: tests/e2e.rs
+expression: result.unwrap_err()
+---
+Error: soppo::non_exhaustive
+
+  × Non-exhaustive match
+    ╭─[error_non_exhaustive.sop:11:5]
+ 10 │         var message string
+ 11 │ ╭─▶     match color {
+ 12 │ │       case Color.Red:
+ 13 │ │           message = "Stop"
+ 14 │ │       case Color.Yellow:
+ 15 │ │           message = "Wait"
+ 16 │ ├─▶     }
+    · ╰──── missing variants: Green
+ 17 │     }
+    ╰────
+  help: Ensure all enum variants are handled, or add a `default` case

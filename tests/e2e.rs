@@ -75,3 +75,10 @@ fn test_enum_match() {
         .expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_error_non_exhaustive() {
+    let result = compile_soppo_file("tests/fixtures/fail/error_non_exhaustive.sop");
+    assert!(result.is_err(), "Expected non-exhaustive match error");
+    insta::assert_snapshot!(result.unwrap_err());
+}
