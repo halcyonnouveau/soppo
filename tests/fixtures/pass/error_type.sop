@@ -1,0 +1,14 @@
+package main
+
+import "fmt"
+import "errors"
+
+func handleError(err error) string {
+    return err.Error()
+}
+
+func main() {
+    err := errors.New("something went wrong")
+    msg := handleError(err)
+    fmt.Println(msg)
+}

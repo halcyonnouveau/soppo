@@ -56,6 +56,11 @@ impl Type {
         Type::simple("float")
     }
 
+    /// Built-in type: error (Go's error interface)
+    pub fn error() -> Self {
+        Type::simple("error")
+    }
+
     /// Create a generic type with string name and type arguments
     pub fn generic(name: &str, args: Vec<Type>) -> Self {
         Type::Con {

@@ -745,6 +745,15 @@ impl Infer {
                 let expr_ty = self.infer_expr(field_expr)?;
                 let expr_ty = self.substitute(expr_ty);
 
+                // Handle built-in error type's Error() method
+                if let Type::Con { name, .. } = &expr_ty
+                    && name.name == "error"
+                    && field == "Error"
+                {
+                    // error.Error() returns string
+                    return Ok(Type::fun(vec![], Type::string()));
+                }
+
                 // Look up the struct type to validate field access
                 if let Type::Con { name, .. } = &expr_ty
                     && let Some(type_def) = self.global_state.lookup_type(&name.name)

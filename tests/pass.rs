@@ -29,3 +29,10 @@ fn test_generics() {
         compile_soppo_file("tests/fixtures/pass/generics.sop").expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_error_type() {
+    let output = compile_soppo_file("tests/fixtures/pass/error_type.sop")
+        .expect("Compilation should succeed");
+    insta::assert_snapshot!(output);
+}
