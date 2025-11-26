@@ -1,0 +1,5 @@
+import "strings"
+
+func main() {
+    strings.HasPrefix(123, "prefix")
+}

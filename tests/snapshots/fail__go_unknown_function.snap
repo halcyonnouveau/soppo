@@ -1,0 +1,14 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: `DoesNotExist` not found in package `fmt`
+   ╭─[go_unknown_function.sop:4:9]
+ 3 │ func main() {
+ 4 │     fmt.DoesNotExist("hello")
+   ·         ──────┬─────
+   ·               ╰── error occurred here
+ 5 │ }
+   ╰────

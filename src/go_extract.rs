@@ -1,0 +1,812 @@
+//! Go package extraction via tree-sitter.
+//!
+//! This module uses tree-sitter-go to parse Go source files and extract
+//! type signatures for functions, types, and constants.
+
+use miette::{Diagnostic, Result};
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use thiserror::Error;
+use tree_sitter::{Parser, Tree};
+
+#[derive(Error, Diagnostic, Debug)]
+pub enum ExtractError {
+    #[error("Failed to read file: {0}")]
+    ReadFile(String),
+
+    #[error("Failed to parse Go source: {0}")]
+    Parse(String),
+
+    #[error("Failed to initialize parser")]
+    ParserInit,
+}
+
+/// Extracted information from a Go package
+#[derive(Debug, Default, Clone)]
+pub struct GoPackage {
+    /// Package name
+    pub name: String,
+    /// Exported functions
+    pub functions: HashMap<String, FuncDef>,
+    /// Exported types
+    pub types: HashMap<String, TypeDef>,
+    /// Exported constants
+    pub constants: HashMap<String, ConstDef>,
+    /// Soppo type definitions recovered from marker comments
+    pub soppo_types: HashMap<String, SoppoTypeDef>,
+}
+
+/// Function definition
+#[derive(Debug, Clone)]
+pub struct FuncDef {
+    pub name: String,
+    pub generics: Vec<String>,
+    pub params: Vec<Param>,
+    pub return_type: String,
+}
+
+/// Function parameter
+#[derive(Debug, Clone)]
+pub struct Param {
+    pub name: String,
+    pub ty: String,
+}
+
+/// Type definition
+#[derive(Debug, Clone)]
+pub struct TypeDef {
+    pub name: String,
+    pub generics: Vec<String>,
+    pub kind: String, // "struct", "interface", "alias"
+    pub fields: Vec<Field>,
+}
+
+/// Struct field
+#[derive(Debug, Clone)]
+pub struct Field {
+    pub name: String,
+    pub ty: String,
+}
+
+/// Constant definition
+#[derive(Debug, Clone)]
+pub struct ConstDef {
+    pub name: String,
+    pub ty: String,
+}
+
+/// Soppo type definition recovered from marker comments
+#[derive(Debug, Clone)]
+pub struct SoppoTypeDef {
+    pub kind: String, // "enum"
+    pub name: String,
+    pub generics: Vec<String>,
+    pub variants: Vec<Variant>,
+}
+
+/// Enum variant
+#[derive(Debug, Clone)]
+pub struct Variant {
+    pub name: String,
+    pub fields: Vec<Field>,
+}
+
+/// Extract Go package information from a file or directory
+pub fn extract(path: &Path) -> Result<GoPackage> {
+    let mut pkg = GoPackage::default();
+
+    if path.is_dir() {
+        extract_dir(path, &mut pkg)?;
+    } else {
+        extract_file(path, &mut pkg)?;
+    }
+
+    Ok(pkg)
+}
+
+fn extract_dir(dir: &Path, pkg: &mut GoPackage) -> Result<()> {
+    let entries = fs::read_dir(dir).map_err(|e| ExtractError::ReadFile(e.to_string()))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| ExtractError::ReadFile(e.to_string()))?;
+        let path = entry.path();
+
+        if path.is_file()
+            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.ends_with(".go")
+            && !name.ends_with("_test.go")
+        {
+            extract_file(&path, pkg)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_file(path: &Path, pkg: &mut GoPackage) -> Result<()> {
+    let source = fs::read_to_string(path).map_err(|e| ExtractError::ReadFile(e.to_string()))?;
+
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_go::LANGUAGE.into())
+        .map_err(|_| ExtractError::ParserInit)?;
+
+    let tree = parser
+        .parse(&source, None)
+        .ok_or(ExtractError::Parse("Failed to parse".to_string()))?;
+
+    // Extract soppo markers from comments first
+    extract_soppo_markers(&source, pkg);
+
+    // Extract declarations
+    extract_declarations(&tree, &source, pkg);
+
+    Ok(())
+}
+
+fn extract_soppo_markers(source: &str, pkg: &mut GoPackage) {
+    // Look for /*soppo:enum ... */ block comments
+    let mut i = 0;
+    let bytes = source.as_bytes();
+
+    while i < bytes.len().saturating_sub(2) {
+        if bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            // Found start of block comment
+            if let Some(end) = source[i..].find("*/") {
+                let comment = &source[i + 2..i + end];
+                if let Some(rest) = comment.strip_prefix("soppo:enum")
+                    && let Some(soppo_type) = parse_soppo_enum(rest.trim())
+                {
+                    pkg.soppo_types.insert(soppo_type.name.clone(), soppo_type);
+                }
+                i += end + 2;
+            } else {
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn parse_soppo_enum(text: &str) -> Option<SoppoTypeDef> {
+    // Format: Name[T, E] {\n    Variant1 Type\n    Variant2\n}
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
+
+    let header = lines[0].trim().trim_end_matches('{').trim();
+
+    let mut st = SoppoTypeDef {
+        kind: "enum".to_string(),
+        name: String::new(),
+        generics: Vec::new(),
+        variants: Vec::new(),
+    };
+
+    // Parse name and generics
+    if let Some(bracket_idx) = header.find('[') {
+        st.name = header[..bracket_idx].to_string();
+        let generics_str = header[bracket_idx + 1..].trim_end_matches(']');
+        for g in generics_str.split(',') {
+            let parts: Vec<&str> = g.split_whitespace().collect();
+            if !parts.is_empty() {
+                st.generics.push(parts[0].to_string());
+            }
+        }
+    } else {
+        st.name = header.to_string();
+    }
+
+    // Parse variants
+    for line in &lines[1..] {
+        let line = line.trim();
+        if line.is_empty() || line == "}" {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+        let mut v = Variant {
+            name: parts[0].to_string(),
+            fields: Vec::new(),
+        };
+        if parts.len() > 1 {
+            v.fields.push(Field {
+                name: "Value".to_string(),
+                ty: parts[1].to_string(),
+            });
+        }
+        st.variants.push(v);
+    }
+
+    Some(st)
+}
+
+fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
+    let root = tree.root_node();
+
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        match child.kind() {
+            "package_clause" => {
+                // Extract package name - tree-sitter-go uses "package_identifier" child
+                let mut cursor2 = child.walk();
+                for pkg_child in child.children(&mut cursor2) {
+                    if pkg_child.kind() == "package_identifier" && pkg.name.is_empty() {
+                        pkg.name = node_text(pkg_child, source).to_string();
+                    }
+                }
+            }
+            "function_declaration" => {
+                if let Some(func) = extract_function(child, source)
+                    && is_exported(&func.name)
+                {
+                    pkg.functions.insert(func.name.clone(), func);
+                }
+            }
+            "type_declaration" => {
+                extract_type_specs(child, source, pkg);
+            }
+            "const_declaration" => {
+                extract_const_specs(child, source, pkg);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_function(node: tree_sitter::Node, source: &str) -> Option<FuncDef> {
+    let name_node = node.child_by_field_name("name")?;
+    let name = node_text(name_node, source).to_string();
+
+    let mut func = FuncDef {
+        name,
+        generics: Vec::new(),
+        params: Vec::new(),
+        return_type: String::new(),
+    };
+
+    // Extract type parameters (generics)
+    if let Some(type_params) = node.child_by_field_name("type_parameters") {
+        extract_type_params(type_params, source, &mut func.generics);
+    }
+
+    // Extract parameters
+    if let Some(params) = node.child_by_field_name("parameters") {
+        extract_params(params, source, &mut func.params);
+    }
+
+    // Extract return type
+    if let Some(result) = node.child_by_field_name("result") {
+        func.return_type = extract_type_string(result, source);
+    }
+
+    Some(func)
+}
+
+fn extract_type_params(node: tree_sitter::Node, source: &str, generics: &mut Vec<String>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_parameter_declaration" {
+            // Get the name(s) from this declaration
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "identifier" {
+                    generics.push(node_text(inner_child, source).to_string());
+                }
+            }
+        }
+    }
+}
+
+fn extract_params(node: tree_sitter::Node, source: &str, params: &mut Vec<Param>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "parameter_declaration" => {
+                let mut names = Vec::new();
+                let mut ty = String::new();
+
+                let mut inner_cursor = child.walk();
+                for inner_child in child.children(&mut inner_cursor) {
+                    match inner_child.kind() {
+                        "identifier" => {
+                            names.push(node_text(inner_child, source).to_string());
+                        }
+                        _ if is_type_node(inner_child.kind()) => {
+                            ty = extract_type_string(inner_child, source);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // If we have names, add params with those names
+                // If no names, add a single unnamed param
+                if names.is_empty() {
+                    params.push(Param {
+                        name: String::new(),
+                        ty,
+                    });
+                } else {
+                    for name in names {
+                        params.push(Param {
+                            name,
+                            ty: ty.clone(),
+                        });
+                    }
+                }
+            }
+            "variadic_parameter_declaration" => {
+                let mut name = String::new();
+                let mut ty = String::new();
+
+                let mut inner_cursor = child.walk();
+                for inner_child in child.children(&mut inner_cursor) {
+                    match inner_child.kind() {
+                        "identifier" => {
+                            name = node_text(inner_child, source).to_string();
+                        }
+                        _ if is_type_node(inner_child.kind()) => {
+                            // The type is already handled - get the raw text for variadic
+                            ty = format!("...{}", extract_type_string(inner_child, source));
+                        }
+                        _ => {}
+                    }
+                }
+
+                params.push(Param { name, ty });
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_type_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_spec"
+            && let Some(type_def) = extract_type_spec(child, source)
+            && is_exported(&type_def.name)
+        {
+            pkg.types.insert(type_def.name.clone(), type_def);
+        }
+    }
+}
+
+fn extract_type_spec(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
+    let name_node = node.child_by_field_name("name")?;
+    let name = node_text(name_node, source).to_string();
+
+    let mut type_def = TypeDef {
+        name,
+        generics: Vec::new(),
+        kind: "alias".to_string(),
+        fields: Vec::new(),
+    };
+
+    // Extract type parameters
+    if let Some(type_params) = node.child_by_field_name("type_parameters") {
+        extract_type_params(type_params, source, &mut type_def.generics);
+    }
+
+    // Extract the actual type
+    if let Some(type_node) = node.child_by_field_name("type") {
+        match type_node.kind() {
+            "struct_type" => {
+                type_def.kind = "struct".to_string();
+                extract_struct_fields(type_node, source, &mut type_def.fields);
+            }
+            "interface_type" => {
+                type_def.kind = "interface".to_string();
+            }
+            _ => {
+                type_def.kind = "alias".to_string();
+            }
+        }
+    }
+
+    Some(type_def)
+}
+
+fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec<Field>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "field_declaration_list" {
+            let mut inner_cursor = child.walk();
+            for field_decl in child.children(&mut inner_cursor) {
+                if field_decl.kind() == "field_declaration" {
+                    let mut names = Vec::new();
+                    let mut ty = String::new();
+
+                    let mut field_cursor = field_decl.walk();
+                    for field_child in field_decl.children(&mut field_cursor) {
+                        match field_child.kind() {
+                            "field_identifier" => {
+                                names.push(node_text(field_child, source).to_string());
+                            }
+                            _ if is_type_node(field_child.kind()) => {
+                                ty = extract_type_string(field_child, source);
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // Handle embedded fields (no names)
+                    if names.is_empty() && !ty.is_empty() {
+                        fields.push(Field {
+                            name: ty.clone(),
+                            ty,
+                        });
+                    } else {
+                        for name in names {
+                            fields.push(Field {
+                                name,
+                                ty: ty.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn extract_const_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "const_spec" {
+            extract_const_spec(child, source, pkg);
+        }
+    }
+}
+
+fn extract_const_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+    let mut names = Vec::new();
+    let mut ty = String::new();
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "identifier" => {
+                names.push(node_text(child, source).to_string());
+            }
+            _ if is_type_node(child.kind()) => {
+                ty = extract_type_string(child, source);
+            }
+            "expression_list" => {
+                // Try to infer type from value if not explicitly typed
+                if ty.is_empty() {
+                    ty = infer_const_type(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if ty.is_empty() {
+        ty = "untyped".to_string();
+    }
+
+    for name in names {
+        if is_exported(&name) {
+            pkg.constants.insert(
+                name.clone(),
+                ConstDef {
+                    name,
+                    ty: ty.clone(),
+                },
+            );
+        }
+    }
+}
+
+fn infer_const_type(node: tree_sitter::Node) -> String {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "int_literal" => return "int".to_string(),
+            "float_literal" => return "float64".to_string(),
+            "interpreted_string_literal" | "raw_string_literal" => return "string".to_string(),
+            "true" | "false" => return "bool".to_string(),
+            _ => {}
+        }
+    }
+    "untyped".to_string()
+}
+
+fn extract_type_string(node: tree_sitter::Node, source: &str) -> String {
+    match node.kind() {
+        "type_identifier" | "identifier" => node_text(node, source).to_string(),
+        "pointer_type" => {
+            if let Some(elem) = node.child_by_field_name("element") {
+                format!("*{}", extract_type_string(elem, source))
+            } else {
+                node_text(node, source).to_string()
+            }
+        }
+        "slice_type" => {
+            if let Some(elem) = node.child_by_field_name("element") {
+                format!("[]{}", extract_type_string(elem, source))
+            } else {
+                node_text(node, source).to_string()
+            }
+        }
+        "array_type" => {
+            let length = node
+                .child_by_field_name("length")
+                .map(|n| node_text(n, source))
+                .unwrap_or("...");
+            let elem = node
+                .child_by_field_name("element")
+                .map(|n| extract_type_string(n, source))
+                .unwrap_or_default();
+            format!("[{}]{}", length, elem)
+        }
+        "map_type" => {
+            let key = node
+                .child_by_field_name("key")
+                .map(|n| extract_type_string(n, source))
+                .unwrap_or_default();
+            let value = node
+                .child_by_field_name("value")
+                .map(|n| extract_type_string(n, source))
+                .unwrap_or_default();
+            format!("map[{}]{}", key, value)
+        }
+        "channel_type" => {
+            let value = node
+                .child_by_field_name("value")
+                .map(|n| extract_type_string(n, source))
+                .unwrap_or_default();
+            format!("chan {}", value)
+        }
+        "qualified_type" => {
+            let package = node
+                .child_by_field_name("package")
+                .map(|n| node_text(n, source))
+                .unwrap_or_default();
+            let name = node
+                .child_by_field_name("name")
+                .map(|n| node_text(n, source))
+                .unwrap_or_default();
+            format!("{}.{}", package, name)
+        }
+        "generic_type" => {
+            let type_name = node
+                .child_by_field_name("type")
+                .map(|n| extract_type_string(n, source))
+                .unwrap_or_default();
+            let args = node
+                .child_by_field_name("type_arguments")
+                .map(|n| extract_type_args(n, source))
+                .unwrap_or_default();
+            format!("{}[{}]", type_name, args.join(", "))
+        }
+        "function_type" => "func".to_string(),
+        "interface_type" => "interface{}".to_string(),
+        "struct_type" => "struct{}".to_string(),
+        "parameter_list" => {
+            // Multiple return values
+            let mut types = Vec::new();
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "parameter_declaration" {
+                    let mut inner_cursor = child.walk();
+                    for inner_child in child.children(&mut inner_cursor) {
+                        if is_type_node(inner_child.kind()) {
+                            types.push(extract_type_string(inner_child, source));
+                        }
+                    }
+                }
+            }
+            if types.len() == 1 {
+                types[0].clone()
+            } else {
+                format!("({})", types.join(", "))
+            }
+        }
+        "variadic_parameter_declaration" => {
+            if let Some(ty) = node.child_by_field_name("type") {
+                format!("...{}", extract_type_string(ty, source))
+            } else {
+                "...".to_string()
+            }
+        }
+        _ => node_text(node, source).to_string(),
+    }
+}
+
+fn extract_type_args(node: tree_sitter::Node, source: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if is_type_node(child.kind()) {
+            args.push(extract_type_string(child, source));
+        }
+    }
+    args
+}
+
+fn is_type_node(kind: &str) -> bool {
+    matches!(
+        kind,
+        "type_identifier"
+            | "identifier"
+            | "pointer_type"
+            | "slice_type"
+            | "array_type"
+            | "map_type"
+            | "channel_type"
+            | "qualified_type"
+            | "generic_type"
+            | "function_type"
+            | "interface_type"
+            | "struct_type"
+            | "parameter_list"
+            | "variadic_parameter_declaration"
+    )
+}
+
+fn node_text<'a>(node: tree_sitter::Node, source: &'a str) -> &'a str {
+    &source[node.byte_range()]
+}
+
+fn is_exported(name: &str) -> bool {
+    name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+
+    #[test]
+    fn test_extract_go_file() {
+        let dir = std::env::temp_dir().join("soppo-treesitter-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("test.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+type Point struct {{
+    X int
+    Y int
+}}
+
+func Hello(name string) string {{
+    return "Hello, " + name
+}}
+
+const MaxSize = 100
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+        assert_eq!(pkg.name, "test");
+        assert!(pkg.functions.contains_key("Hello"));
+        assert!(pkg.types.contains_key("Point"));
+        assert!(pkg.constants.contains_key("MaxSize"));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_with_soppo_marker() {
+        let dir = std::env::temp_dir().join("soppo-treesitter-marker-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("result.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+/*soppo:enum
+Result[T, E] {{
+    Ok T
+    Err E
+}}
+*/
+type Result[T any, E any] interface {{
+    isResult()
+}}
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+        assert!(pkg.soppo_types.contains_key("Result"));
+
+        let soppo_type = &pkg.soppo_types["Result"];
+        assert_eq!(soppo_type.kind, "enum");
+        assert_eq!(soppo_type.name, "Result");
+        assert_eq!(soppo_type.generics, vec!["T", "E"]);
+        assert_eq!(soppo_type.variants.len(), 2);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_generics() {
+        let dir = std::env::temp_dir().join("soppo-treesitter-generics-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("generics.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+func Map[T any, U any](items []T, f func(T) U) []U {{
+    return nil
+}}
+
+type Container[T any] struct {{
+    Value T
+}}
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+
+        let map_fn = &pkg.functions["Map"];
+        assert_eq!(map_fn.generics, vec!["T", "U"]);
+        assert_eq!(map_fn.params.len(), 2);
+
+        let container = &pkg.types["Container"];
+        assert_eq!(container.generics, vec!["T"]);
+        assert_eq!(container.kind, "struct");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_type_alias() {
+        let dir = std::env::temp_dir().join("soppo-treesitter-alias-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("alias.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+type MyInt int
+type StringSlice []string
+type Handler func(string) error
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+
+        let my_int = &pkg.types["MyInt"];
+        assert_eq!(my_int.kind, "alias");
+
+        let string_slice = &pkg.types["StringSlice"];
+        assert_eq!(string_slice.kind, "alias");
+
+        let handler = &pkg.types["Handler"];
+        assert_eq!(handler.kind, "alias");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}

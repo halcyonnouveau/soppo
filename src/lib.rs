@@ -1,9 +1,14 @@
 pub mod ast;
 pub mod codegen;
 pub mod error;
+pub mod go_cache;
+pub mod go_extract;
+pub mod go_types;
 pub mod infer;
 pub mod lexer;
 pub mod module;
 pub mod parser;
+pub mod project;
+pub mod resolve;
 pub mod source;
 pub mod ty;

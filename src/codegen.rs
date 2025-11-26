@@ -700,7 +700,7 @@ impl Codegen {
                 self.emit(")");
             }
 
-            ExprKind::Field { expr, field } => {
+            ExprKind::Field { expr, field, .. } => {
                 // Check if this is an enum constructor like Color.Red
                 if let ExprKind::Ident(type_name) = &expr.kind {
                     // Check if it's a registered type (enum)
@@ -927,7 +927,7 @@ mod tests {
         let file = parser.parse_file().unwrap();
 
         // Type check
-        let mut infer = crate::infer::Infer::new();
+        let mut infer = crate::infer::Infer::new().expect("Failed to create Infer");
         for decl in &file.decls {
             if let crate::ast::Decl::Func(func) = decl {
                 infer.infer_func_decl(func).unwrap();

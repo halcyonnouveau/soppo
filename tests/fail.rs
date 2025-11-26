@@ -49,3 +49,24 @@ fn test_const_no_value() {
     );
     insta::assert_snapshot!(result.unwrap_err());
 }
+
+#[test]
+fn test_go_unknown_function() {
+    let result = compile_soppo_file("tests/fixtures/fail/go_unknown_function.sop");
+    assert!(result.is_err(), "Expected error for unknown Go function");
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_go_wrong_arg_count() {
+    let result = compile_soppo_file("tests/fixtures/fail/go_wrong_arg_count.sop");
+    assert!(result.is_err(), "Expected error for wrong argument count");
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_go_wrong_arg_type() {
+    let result = compile_soppo_file("tests/fixtures/fail/go_wrong_arg_type.sop");
+    assert!(result.is_err(), "Expected error for wrong argument type");
+    insta::assert_snapshot!(result.unwrap_err());
+}

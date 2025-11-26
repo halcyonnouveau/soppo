@@ -6,9 +6,9 @@ pub fn compile_soppo_file(input_file: &str) -> Result<String, String> {
 
     let output = Command::new("cargo")
         .env("RUSTFLAGS", "-A warnings")
-        .args(&["run", "--quiet", "--bin", "soppo", "--", input_file])
+        .args(&["run", "--quiet", "--bin", "sop", "--", "build", input_file])
         .output()
-        .expect("Failed to run soppo");
+        .expect("Failed to run sop");
 
     if output.status.success() {
         let go_code = fs::read_to_string(&output_file).expect("Failed to read generated .go file");

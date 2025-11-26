@@ -1,6 +1,5 @@
 ---
 source: tests/pass.rs
-assertion_line: 30
 expression: output
 ---
 package main

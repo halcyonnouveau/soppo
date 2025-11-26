@@ -3,11 +3,21 @@ name = "soppo"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "sop"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 logos = "0.15"
 miette = { version = "7.6", features = ["fancy"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2.0"
+tree-sitter = "0.25"
+tree-sitter-go = "0.25"
 
 [dev-dependencies]
 insta = "1.44"
+tree-sitter = "0.25"
+tree-sitter-go = "0.25"

@@ -689,6 +689,7 @@ impl Parser {
                         kind: ExprKind::Field {
                             expr: Box::new(expr),
                             field,
+                            field_span,
                         },
                     };
                 }
@@ -703,7 +704,7 @@ impl Parser {
                             fn extract_type_path(e: &Expr) -> Option<String> {
                                 match &e.kind {
                                     ExprKind::Ident(name) => Some(name.clone()),
-                                    ExprKind::Field { expr, field } => extract_type_path(expr)
+                                    ExprKind::Field { expr, field, .. } => extract_type_path(expr)
                                         .map(|base| format!("{}.{}", base, field)),
                                     _ => None,
                                 }
@@ -1663,6 +1664,9 @@ impl Parser {
 
     /// Parse a complete file
     pub fn parse_file(&mut self) -> Result<File> {
+        // Skip leading whitespace/newlines
+        self.skip_terminators();
+
         // Parse package declaration
         let package = if self.consume(&Token::Package) {
             let name = match self.advance() {
@@ -1847,7 +1851,7 @@ mod tests {
     fn test_parse_field_access() {
         let expr = parse_expr_helper("foo.bar").unwrap();
         match expr.kind {
-            ExprKind::Field { expr, field } => {
+            ExprKind::Field { expr, field, .. } => {
                 assert!(matches!(expr.kind, ExprKind::Ident(s) if s == "foo"));
                 assert_eq!(field, "bar");
             }

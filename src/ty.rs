@@ -50,6 +50,23 @@ impl Type {
         Type::simple("bool")
     }
 
+    /// Built-in type: float
+    pub fn float() -> Self {
+        Type::simple("float")
+    }
+
+    /// Create a generic type with string name and type arguments
+    pub fn generic(name: &str, args: Vec<Type>) -> Self {
+        Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: name.to_string(),
+                span: Span::dummy(),
+            },
+            args,
+        }
+    }
+
     /// Built-in type: unit/void
     pub fn unit() -> Self {
         Type::simple("()")

@@ -1,4 +1,4 @@
-use crate::ast::{EnumVariant, FuncDecl, TypeDecl};
+use crate::ast::{ConstDecl, EnumVariant, FuncDecl, TypeDecl};
 use crate::source::ModuleId;
 use crate::ty::Type;
 use std::collections::HashMap;
@@ -12,16 +12,19 @@ pub struct GlobalState {
     current_module: ModuleId,
 }
 
-/// A module containing type and function definitions
+/// A module containing type, function, and constant definitions
 pub struct Module {
     pub id: ModuleId,
     pub name: String,
 
-    /// Type definitions (enums)
+    /// Type definitions (enums, structs, aliases)
     pub types: HashMap<String, TypeDef>,
 
     /// Function definitions
     pub functions: HashMap<String, FuncDef>,
+
+    /// Constant definitions
+    pub constants: HashMap<String, ConstDef>,
 }
 
 /// Type definition in a module
@@ -48,6 +51,13 @@ pub struct FuncDef {
     pub return_type: Type,
 }
 
+/// Constant definition in a module
+#[derive(Debug, Clone)]
+pub struct ConstDef {
+    pub name: String,
+    pub ty: Type,
+}
+
 impl GlobalState {
     pub fn new() -> Self {
         let mut gs = Self {
@@ -63,10 +73,35 @@ impl GlobalState {
                 name: "main".to_string(),
                 types: HashMap::new(),
                 functions: HashMap::new(),
+                constants: HashMap::new(),
             },
         );
 
         gs
+    }
+
+    /// Get or create a module by ID
+    pub fn get_or_create_module(&mut self, id: ModuleId) -> &mut Module {
+        self.modules.entry(id.clone()).or_insert_with(|| Module {
+            id: id.clone(),
+            name: id.0.clone(),
+            types: HashMap::new(),
+            functions: HashMap::new(),
+            constants: HashMap::new(),
+        })
+    }
+
+    /// Set the current module
+    pub fn set_current_module(&mut self, id: ModuleId) {
+        if !self.modules.contains_key(&id) {
+            self.get_or_create_module(id.clone());
+        }
+        self.current_module = id;
+    }
+
+    /// Get a module by ID
+    pub fn get_module(&self, id: &ModuleId) -> Option<&Module> {
+        self.modules.get(id)
     }
 
     /// Get the current module
@@ -125,17 +160,49 @@ impl GlobalState {
             .insert(func_decl.name.clone(), func_def);
     }
 
-    /// Lookup a type definition
+    /// Register a constant definition
+    pub fn register_constant(&mut self, const_decl: &ConstDecl, ty: Type) {
+        let const_def = ConstDef {
+            name: const_decl.name.clone(),
+            ty,
+        };
+
+        self.current_module_mut()
+            .constants
+            .insert(const_decl.name.clone(), const_def);
+    }
+
+    /// Lookup a type definition in current module
     pub fn lookup_type(&self, name: &str) -> Option<&TypeDef> {
         self.current_module().types.get(name)
     }
 
-    /// Lookup a function definition
+    /// Lookup a type definition in a specific module
+    pub fn lookup_type_in(&self, module: &ModuleId, name: &str) -> Option<&TypeDef> {
+        self.modules.get(module)?.types.get(name)
+    }
+
+    /// Lookup a function definition in current module
     pub fn lookup_function(&self, name: &str) -> Option<&FuncDef> {
         self.current_module().functions.get(name)
     }
 
-    /// Check if a type is registered
+    /// Lookup a function definition in a specific module
+    pub fn lookup_function_in(&self, module: &ModuleId, name: &str) -> Option<&FuncDef> {
+        self.modules.get(module)?.functions.get(name)
+    }
+
+    /// Lookup a constant definition in current module
+    pub fn lookup_constant(&self, name: &str) -> Option<&ConstDef> {
+        self.current_module().constants.get(name)
+    }
+
+    /// Lookup a constant definition in a specific module
+    pub fn lookup_constant_in(&self, module: &ModuleId, name: &str) -> Option<&ConstDef> {
+        self.modules.get(module)?.constants.get(name)
+    }
+
+    /// Check if a type is registered in current module
     pub fn has_type(&self, name: &str) -> bool {
         self.current_module().types.contains_key(name)
     }

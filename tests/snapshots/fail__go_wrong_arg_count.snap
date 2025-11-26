@@ -1,0 +1,14 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: Function has 1 arguments, but expected 2
+   ╭─[go_wrong_arg_count.sop:4:5]
+ 3 │ func main() {
+ 4 │     strings.HasPrefix("hello")
+   ·     ────────┬────────
+   ·             ╰── error occurred here
+ 5 │ }
+   ╰────

@@ -1,0 +1,16 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_mismatch
+
+  × Mismatched types
+   ╭─[go_wrong_arg_type.sop:4:23]
+ 3 │ func main() {
+ 4 │     strings.HasPrefix(123, "prefix")
+   ·                       ─┬─
+   ·                        ╰── expected `string`, found `int`
+ 5 │ }
+   ╰────
+  help: Change this expression to produce `string`, or change the expected
+        type

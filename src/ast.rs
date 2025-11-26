@@ -192,6 +192,7 @@ pub enum ExprKind {
     Field {
         expr: Box<Expr>,
         field: String,
+        field_span: Span,
     },
     Index {
         expr: Box<Expr>,

@@ -3,8 +3,11 @@ use crate::ast::{
     TypeDecl, TypeKind,
 };
 use crate::error::{Result, SoppoError};
+use crate::go_cache::GoCache;
+use crate::go_types::parse_go_type;
 use crate::module::GlobalState;
-use crate::source::Span;
+use crate::project::Project;
+use crate::source::{ModuleId, Span};
 use crate::ty::Type;
 use std::collections::{HashMap, HashSet};
 
@@ -27,18 +30,50 @@ pub struct Infer {
 
     /// Generic type parameters in scope: param name -> type variable
     generic_params: HashMap<String, Type>,
+
+    /// Cache for Go package information (always enabled)
+    go_cache: GoCache,
+
+    /// Current project (for external module resolution, optional)
+    project: Option<Project>,
+
+    /// Imported Go packages: short name -> import path
+    /// e.g., "fmt" -> "fmt", "strings" -> "strings"
+    imported_packages: HashMap<String, String>,
 }
 
 impl Infer {
-    pub fn new() -> Self {
-        Self {
+    /// Create a new type inference engine
+    ///
+    /// Go stdlib resolution is always enabled.
+    /// For external module resolution, use `with_project`.
+    pub fn new() -> miette::Result<Self> {
+        Ok(Self {
             global_state: GlobalState::new(),
             scopes: vec![HashMap::new()],
             substitutions: HashMap::new(),
             next_var: 0,
             expected_return_type: None,
             generic_params: HashMap::new(),
-        }
+            go_cache: GoCache::new()?,
+            project: None,
+            imported_packages: HashMap::new(),
+        })
+    }
+
+    /// Create an Infer with project context for external module resolution
+    pub fn with_project(project: Project) -> miette::Result<Self> {
+        Ok(Self {
+            global_state: GlobalState::new(),
+            scopes: vec![HashMap::new()],
+            substitutions: HashMap::new(),
+            next_var: 0,
+            expected_return_type: None,
+            generic_params: HashMap::new(),
+            go_cache: GoCache::new()?,
+            project: Some(project),
+            imported_packages: HashMap::new(),
+        })
     }
 
     pub fn global_state(self) -> GlobalState {
@@ -49,13 +84,84 @@ impl Infer {
     pub fn process_imports(&mut self, imports: &[crate::ast::Import]) {
         for import in imports {
             // Extract package name from import path
-            // e.g., "fmt" from "fmt" or "strings" from "strings"
-            let package_name = import.path.trim_matches('"');
+            // e.g., "fmt" from "fmt" or "http" from "net/http"
+            let import_path = import.path.trim_matches('"');
+            let package_name = import_path.rsplit('/').next().unwrap_or(import_path);
+
+            // Track the import for later lookup
+            self.imported_packages
+                .insert(package_name.to_string(), import_path.to_string());
 
             // Add package name to scope with a special "package" type
             // This allows field access like fmt.Printf to work
             self.insert_var(package_name.to_string(), Type::simple("_package"));
         }
+    }
+
+    /// Look up a function in an imported Go package
+    fn lookup_go_function(&mut self, package_name: &str, func_name: &str) -> Option<Type> {
+        // Get the import path for this package
+        let import_path = self.imported_packages.get(package_name)?.clone();
+
+        // Try to get the package info (project is optional - stdlib works without it)
+        let pkg = self
+            .go_cache
+            .get_or_parse(&import_path, self.project.as_ref())
+            .ok()?;
+
+        // Look up the function
+        let func_def = pkg.functions.get(func_name)?;
+
+        // Convert Go signature to Soppo Type
+        let param_types: Vec<Type> = func_def
+            .params
+            .iter()
+            .map(|p| parse_go_type(&p.ty))
+            .collect();
+
+        let return_type = if func_def.return_type.is_empty() {
+            Type::unit()
+        } else {
+            parse_go_type(&func_def.return_type)
+        };
+
+        Some(Type::fun(param_types, return_type))
+    }
+
+    /// Look up a type in an imported Go package
+    fn lookup_go_type(&mut self, package_name: &str, type_name: &str) -> Option<Type> {
+        // Get the import path for this package
+        let import_path = self.imported_packages.get(package_name)?.clone();
+
+        // Try to get the package info (project is optional - stdlib works without it)
+        let pkg = self
+            .go_cache
+            .get_or_parse(&import_path, self.project.as_ref())
+            .ok()?;
+
+        // Check if it's a type
+        if pkg.types.contains_key(type_name) {
+            return Some(Type::Con {
+                name: crate::source::Symbol {
+                    module: ModuleId::new(package_name),
+                    name: type_name.to_string(),
+                    span: Span::dummy(),
+                },
+                args: vec![],
+            });
+        }
+
+        // Check if it's a constant
+        if let Some(const_def) = pkg.constants.get(type_name) {
+            return Some(parse_go_type(&const_def.ty));
+        }
+
+        None
+    }
+
+    /// Check if a name refers to an imported Go package
+    fn is_imported_package(&self, name: &str) -> bool {
+        self.imported_packages.contains_key(name)
     }
 
     /// Generate a fresh type variable
@@ -285,18 +391,62 @@ impl Infer {
 
             // Functions: unify args and return
             (Type::Fun { args: a1, ret: r1 }, Type::Fun { args: a2, ret: r2 }) => {
-                if a1.len() != a2.len() {
-                    return Err(SoppoError::Type {
-                        message: format!(
-                            "Function has {} arguments, but expected {}",
-                            a2.len(),
-                            a1.len()
-                        ),
-                        span: span.clone(),
-                    });
-                }
-                for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                    self.unify(arg1, arg2, span)?;
+                // Check if a1 (expected) has a variadic last parameter
+                let has_variadic = a1.last().is_some_and(
+                    |last| matches!(last, Type::Con { name, .. } if name.name == "variadic"),
+                );
+
+                if has_variadic {
+                    // Variadic function: check non-variadic params match, then variadic can consume 0+
+                    let fixed_params = &a1[..a1.len() - 1];
+                    let variadic_param = a1.last().expect("checked above");
+
+                    // Extract the variadic element type
+                    let variadic_elem = if let Type::Con { args, .. } = variadic_param {
+                        args.first().cloned().unwrap_or(Type::simple("any"))
+                    } else {
+                        Type::simple("any")
+                    };
+
+                    // Check we have at least the fixed params
+                    if a2.len() < fixed_params.len() {
+                        return Err(SoppoError::Type {
+                            message: format!(
+                                "Function has {} arguments, but expected at least {}",
+                                a2.len(),
+                                fixed_params.len()
+                            ),
+                            span: span.clone(),
+                        });
+                    }
+
+                    // Unify fixed params
+                    for (arg1, arg2) in fixed_params.iter().zip(a2.iter()) {
+                        self.unify(arg1, arg2, span)?;
+                    }
+
+                    // Unify remaining args against variadic element type
+                    for arg2 in a2.iter().skip(fixed_params.len()) {
+                        // For "any" type, any argument is valid
+                        if variadic_elem != Type::simple("any") {
+                            self.unify(&variadic_elem, arg2, span)?;
+                        }
+                    }
+                } else {
+                    // Non-variadic function: exact arg count required
+                    if a1.len() != a2.len() {
+                        return Err(SoppoError::Type {
+                            message: format!(
+                                "Function has {} arguments, but expected {}",
+                                a2.len(),
+                                a1.len()
+                            ),
+                            span: span.clone(),
+                        });
+                    }
+                    for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                        self.unify(arg1, arg2, span)?;
+                    }
                 }
                 self.unify(r1, r2, span)?;
                 Ok(())
@@ -422,23 +572,121 @@ impl Infer {
                 let func_ty = self.infer_expr(func)?;
                 let func_ty = self.substitute(func_ty);
 
-                // Generate fresh type variable for result
-                let result_ty = self.fresh_ty_var();
+                // Infer argument types with their spans
+                let mut arg_tys = Vec::new();
+                for arg in args {
+                    arg_tys.push((self.infer_expr(arg)?, arg.span.clone()));
+                }
 
-                // Infer argument types
-                let arg_tys: Result<Vec<_>> = args.iter().map(|arg| self.infer_expr(arg)).collect();
-                let arg_tys = arg_tys?;
+                // Check function call with detailed error spans
+                match &func_ty {
+                    Type::Fun {
+                        args: param_tys,
+                        ret,
+                    } => {
+                        // Check if last param is variadic
+                        let has_variadic = param_tys.last().is_some_and(|last| {
+                            matches!(last, Type::Con { name, .. } if name.name == "variadic")
+                        });
 
-                // Unify with function type
-                let expected_func_ty = Type::fun(arg_tys, result_ty.clone());
-                self.unify(&func_ty, &expected_func_ty, &expr.span)?;
+                        if has_variadic {
+                            let fixed_params = &param_tys[..param_tys.len() - 1];
+                            let variadic_param = param_tys.last().expect("checked above");
+                            let variadic_elem = if let Type::Con { args, .. } = variadic_param {
+                                args.first().cloned().unwrap_or(Type::simple("any"))
+                            } else {
+                                Type::simple("any")
+                            };
 
-                Ok(self.substitute(result_ty))
+                            // Check we have at least the fixed params
+                            if arg_tys.len() < fixed_params.len() {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "Function has {} arguments, but expected at least {}",
+                                        arg_tys.len(),
+                                        fixed_params.len()
+                                    ),
+                                    span: func.span.clone(),
+                                });
+                            }
+
+                            // Check fixed params
+                            for (param_ty, (arg_ty, arg_span)) in
+                                fixed_params.iter().zip(arg_tys.iter())
+                            {
+                                self.unify(param_ty, arg_ty, arg_span)?;
+                            }
+
+                            // Check variadic args
+                            for (arg_ty, arg_span) in arg_tys.iter().skip(fixed_params.len()) {
+                                if variadic_elem != Type::simple("any") {
+                                    self.unify(&variadic_elem, arg_ty, arg_span)?;
+                                }
+                            }
+                        } else {
+                            // Non-variadic: exact arg count required
+                            if arg_tys.len() != param_tys.len() {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "Function has {} arguments, but expected {}",
+                                        arg_tys.len(),
+                                        param_tys.len()
+                                    ),
+                                    span: func.span.clone(),
+                                });
+                            }
+
+                            // Check each argument type
+                            for (param_ty, (arg_ty, arg_span)) in
+                                param_tys.iter().zip(arg_tys.iter())
+                            {
+                                self.unify(param_ty, arg_ty, arg_span)?;
+                            }
+                        }
+
+                        Ok(self.substitute(ret.as_ref().clone()))
+                    }
+                    Type::Var(_) => {
+                        // Function type is unknown, use standard unification
+                        let result_ty = self.fresh_ty_var();
+                        let arg_types: Vec<Type> = arg_tys.into_iter().map(|(ty, _)| ty).collect();
+                        let expected_func_ty = Type::fun(arg_types, result_ty.clone());
+                        self.unify(&func_ty, &expected_func_ty, &expr.span)?;
+                        Ok(self.substitute(result_ty))
+                    }
+                    _ => Err(SoppoError::Type {
+                        message: format!("Cannot call non-function type `{}`", func_ty),
+                        span: func.span.clone(),
+                    }),
+                }
             }
 
-            ExprKind::Field { expr, field } => {
+            ExprKind::Field {
+                expr: field_expr,
+                field,
+                field_span,
+            } => {
+                // Check if this is accessing something from an imported Go package
+                // e.g., fmt.Println, strings.HasPrefix
+                if let ExprKind::Ident(name) = &field_expr.kind
+                    && self.is_imported_package(name) {
+                        // Try to look up as a function first
+                        if let Some(func_ty) = self.lookup_go_function(name, field) {
+                            return Ok(func_ty);
+                        }
+                        // Try to look up as a type or constant
+                        if let Some(ty) = self.lookup_go_type(name, field) {
+                            return Ok(ty);
+                        }
+                        // Couldn't find it - error
+                        return Err(SoppoError::Type {
+                            message: format!("`{}` not found in package `{}`", field, name),
+                            span: field_span.clone(),
+                        });
+                    }
+
                 // Check if this is an enum constructor like Color.Red or Result.Ok
-                if let ExprKind::Ident(type_name) = &expr.kind {
+                if let ExprKind::Ident(type_name) = &field_expr.kind {
                     // Check if type_name is a registered type
                     if let Some(type_def) = self.global_state.lookup_type(type_name).cloned() {
                         // Check if this is an enum variant
@@ -499,7 +747,7 @@ impl Infer {
                 }
 
                 // Otherwise it's a regular field access
-                let expr_ty = self.infer_expr(expr)?;
+                let expr_ty = self.infer_expr(field_expr)?;
                 let expr_ty = self.substitute(expr_ty);
 
                 // Look up the struct type to validate field access
@@ -523,7 +771,7 @@ impl Infer {
                                 "Struct `{}` has no field named `{}`",
                                 name.name, field
                             ),
-                            span: expr.span.clone(),
+                            span: field_expr.span.clone(),
                         });
                     }
                 }
@@ -999,12 +1247,6 @@ impl Infer {
     }
 }
 
-impl Default for Infer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1014,7 +1256,7 @@ mod tests {
     fn infer_expr_helper(source: &str) -> Result<Type> {
         let mut parser = Parser::new(source, FileId(0));
         let expr = parser.parse_expr()?;
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_expr(&expr)?;
         Ok(infer.substitute(ty))
     }
@@ -1073,7 +1315,7 @@ mod tests {
 
     #[test]
     fn test_unification() {
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
 
         // Unify two type variables
         let t1 = infer.fresh_ty_var();
@@ -1087,7 +1329,7 @@ mod tests {
 
     #[test]
     fn test_occurs_check() {
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
 
         // Create a type variable
         let t = infer.fresh_ty_var();
@@ -1112,7 +1354,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let block = parser.parse_block().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_block(&block).unwrap();
 
         assert_eq!(ty, Type::int());
@@ -1124,7 +1366,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let block = parser.parse_block().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_block(&block).unwrap();
 
         assert_eq!(ty, Type::int());
@@ -1136,7 +1378,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let block = parser.parse_block().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_block(&block).unwrap();
 
         // Return statements are diverging, so the block returns Never
@@ -1149,7 +1391,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let func = parser.parse_func_decl().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let result = infer.infer_func_decl(&func);
 
         assert!(result.is_ok());
@@ -1162,7 +1404,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let func = parser.parse_func_decl().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let result = infer.infer_func_decl(&func);
 
         assert!(result.is_err());
@@ -1177,7 +1419,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let file = parser.parse_file().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
 
         // Infer both functions
         for decl in &file.decls {
@@ -1193,7 +1435,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let block = parser.parse_block().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_block(&block).unwrap();
 
         // Inner block shadows x with bool, so result is bool
@@ -1215,7 +1457,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let file = parser.parse_file().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
 
         // Register struct type
         for decl in &file.decls {
@@ -1248,7 +1490,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let file = parser.parse_file().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
 
         // Register struct type
         for decl in &file.decls {
@@ -1281,7 +1523,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let file = parser.parse_file().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
 
         // Register struct type
         for decl in &file.decls {
@@ -1310,7 +1552,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let expr = parser.parse_expr().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_expr(&expr).unwrap();
 
         // Should be array[int]
@@ -1333,7 +1575,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let block = parser.parse_block().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_block(&block).unwrap();
 
         // Should be int (the element type)
@@ -1352,7 +1594,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let block = parser.parse_block().unwrap();
 
-        let mut infer = Infer::new();
+        let mut infer = Infer::new().expect("Failed to create Infer");
         let result = infer.infer_block(&block);
 
         // Should succeed - adding two ints from array
@@ -1361,5 +1603,64 @@ mod tests {
             "Array element arithmetic should work: {:?}",
             result
         );
+    }
+
+    #[test]
+    fn test_import_tracking() {
+        let mut infer = Infer::new().expect("Failed to create Infer");
+
+        // Process some imports
+        let imports = vec![
+            crate::ast::Import {
+                path: "\"fmt\"".to_string(),
+                span: Span::dummy(),
+            },
+            crate::ast::Import {
+                path: "\"net/http\"".to_string(),
+                span: Span::dummy(),
+            },
+        ];
+
+        infer.process_imports(&imports);
+
+        // Check imports are tracked correctly
+        assert!(infer.is_imported_package("fmt"));
+        assert!(infer.is_imported_package("http")); // short name from net/http
+        assert!(!infer.is_imported_package("net"));
+        assert!(!infer.is_imported_package("strings"));
+
+        // Check import paths are stored
+        assert_eq!(infer.imported_packages.get("fmt"), Some(&"fmt".to_string()));
+        assert_eq!(
+            infer.imported_packages.get("http"),
+            Some(&"net/http".to_string())
+        );
+    }
+
+    #[test]
+    fn test_go_package_field_access_stdlib() {
+        // Go stdlib resolution should work and find fmt.Println
+        let source = r#"package main
+import "fmt"
+func main() {
+    fmt.Println("hello")
+}"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().expect("Failed to parse");
+
+        let mut infer = Infer::new().expect("Failed to create Infer");
+        infer.process_imports(&file.imports);
+
+        // Type check the function - should succeed because fmt.Println is resolved
+        for decl in &file.decls {
+            if let crate::ast::Decl::Func(func) = decl {
+                let result = infer.infer_func_decl(func);
+                assert!(
+                    result.is_ok(),
+                    "Should type check Go package access: {:?}",
+                    result
+                );
+            }
+        }
     }
 }
