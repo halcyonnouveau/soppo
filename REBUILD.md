@@ -37,25 +37,36 @@ Source Code → Lexer → Parser → AST → Type Inference → Codegen → Go C
 
 ### Not Yet Implemented
 
-**Core Language:**
+**Priority 1 - Critical:**
+- Import / package system
+- Standard library (Result, Option as prelude)
+- Slice type (`[]T`) + composite literals
+- Map type (`map[K]V`) + composite literals
+- Goroutines (`go func()`)
+- Channel type (`chan T`, `<-chan T`, `chan<- T`)
+- Channel operations (`ch <- v`, `<-ch`, `close(ch)`)
+
+**Priority 2 - Important:**
 - Interface types (define contracts, Go stdlib interop)
+- Pointer type (`*T`, `&x`, `*p`)
+- `break`, `continue`
+- Range-based for loops (`for i, v := range collection`)
+- `defer`
+- Anonymous functions / closures
+- `select` statement
+- `make` / `new` built-ins
+
+**Priority 3 - Nice to Have:**
 - Unary operators (`-x` negation)
 - Bitwise operators (`&`, `|`, `^`, `<<`, `>>`, `&^`)
 - Compound assignments (`+=`, `-=`, `*=`, etc.)
 - Increment/decrement (`++`, `--`)
-- `break`, `continue`
-- `defer`
-- Range-based for loops (`for i, v := range collection`)
-- Slice type (`[]T`)
-- Map type (`map[K]V`)
-- Pointer type (`*T`, `&x`, `*p`)
 - Slice expressions (`arr[1:3]`)
-- Anonymous functions / closures
-- `make` / `new` built-ins
+- Type assertions (`x.(Type)`)
+- Blank identifier in assignments (`_ = foo()`)
+- Full numeric types (`int8`-`64`, `uint8`-`64`, `float32`, `byte`, `rune`, `uintptr`, `complex64`/`128`)
 
-**Soppo-specific:**
-- Standard library (Result, Option as prelude)
-- `.d.sop` definition files for Go interop
+**Soppo-specific (after Priority 1):**
 - `?` operator for error propagation
 
 ### Future `...` Support
