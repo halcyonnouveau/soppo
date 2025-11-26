@@ -92,7 +92,7 @@ impl GlobalState {
                 crate::ast::TypeKind::Struct { fields } => TypeDefKind::Struct {
                     fields: fields
                         .iter()
-                        .map(|f| (f.name.clone(), Type::dummy()))
+                        .map(|f| (f.name.clone(), Type::from_ast(&f.ty)))
                         .collect(),
                 },
             },
@@ -111,9 +111,13 @@ impl GlobalState {
             params: func_decl
                 .params
                 .iter()
-                .map(|p| (p.name.clone(), Type::dummy()))
+                .map(|p| (p.name.clone(), Type::from_ast(&p.ty)))
                 .collect(),
-            return_type: Type::dummy(),
+            return_type: func_decl
+                .return_type
+                .as_ref()
+                .map(|t| Type::from_ast(t))
+                .unwrap_or_else(Type::unit),
         };
 
         self.current_module_mut()

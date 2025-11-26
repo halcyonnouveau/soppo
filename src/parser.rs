@@ -529,7 +529,103 @@ impl Parser {
 
         loop {
             match self.peek() {
-                // Function call: expr(args)
+                // Either array indexing expr[index] or type args for call expr[T](args)
+                // Disambiguate by checking if ( follows ]
+                Some(Token::LBracket) => {
+                    // Save position BEFORE consuming [ so we can backtrack fully
+                    let saved_pos = self.pos;
+                    self.advance();
+
+                    // Try to parse as type args first by checking if this looks like types
+                    // and is followed by (
+                    // For now, use a simpler heuristic: if content is a simple identifier
+                    // followed by ] and (, treat as type args. Otherwise array index.
+
+                    // Try parsing as type args (comma-separated types)
+                    let mut type_args = Vec::new();
+                    let mut is_type_args = true;
+
+                    if !matches!(self.peek(), Some(Token::RBracket)) {
+                        loop {
+                            // Save position before trying to parse type
+                            let type_start_pos = self.pos;
+                            // Try to parse a type - if this fails, it's not type args
+                            match self.parse_type() {
+                                Ok(ty) => type_args.push(ty),
+                                Err(_) => {
+                                    // Restore to before this type parse attempt
+                                    self.pos = type_start_pos;
+                                    is_type_args = false;
+                                    break;
+                                }
+                            }
+
+                            if !self.consume(&Token::Comma) {
+                                break;
+                            }
+                        }
+                    }
+
+                    // Check if ] followed by (
+                    if is_type_args && matches!(self.peek(), Some(Token::RBracket)) {
+                        self.advance(); // consume ]
+                        if matches!(self.peek(), Some(Token::LParen)) {
+                            // This is type args + call: expr[T](args)
+                            self.advance(); // consume (
+                            let mut args = Vec::new();
+
+                            if !matches!(self.peek(), Some(Token::RParen)) {
+                                loop {
+                                    args.push(self.parse_expr()?);
+
+                                    if !self.consume(&Token::Comma) {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            let end_span = self.expect(Token::RParen)?;
+
+                            expr = Expr {
+                                span: Span::with_bytes(
+                                    expr.span.start,
+                                    end_span.end,
+                                    self.file,
+                                    expr.span.byte_start,
+                                    end_span.byte_end,
+                                ),
+                                kind: ExprKind::Call {
+                                    func: Box::new(expr),
+                                    type_args,
+                                    args,
+                                },
+                            };
+                            continue;
+                        }
+                    }
+
+                    // Not type args - backtrack and parse as array index
+                    self.pos = saved_pos;
+                    self.advance(); // consume the [ we backtracked past
+                    let index = self.parse_expr()?;
+                    let end_span = self.expect(Token::RBracket)?;
+
+                    expr = Expr {
+                        span: Span::with_bytes(
+                            expr.span.start,
+                            end_span.end,
+                            self.file,
+                            expr.span.byte_start,
+                            end_span.byte_end,
+                        ),
+                        kind: ExprKind::Index {
+                            expr: Box::new(expr),
+                            index: Box::new(index),
+                        },
+                    };
+                }
+
+                // Function call without type args: expr(args)
                 Some(Token::LParen) => {
                     self.advance();
                     let mut args = Vec::new();
@@ -556,6 +652,7 @@ impl Parser {
                         ),
                         kind: ExprKind::Call {
                             func: Box::new(expr),
+                            type_args: vec![],
                             args,
                         },
                     };
@@ -595,27 +692,6 @@ impl Parser {
                     };
                 }
 
-                // Array indexing: expr[index]
-                Some(Token::LBracket) => {
-                    self.advance();
-                    let index = self.parse_expr()?;
-                    let end_span = self.expect(Token::RBracket)?;
-
-                    expr = Expr {
-                        span: Span::with_bytes(
-                            expr.span.start,
-                            end_span.end,
-                            self.file,
-                            expr.span.byte_start,
-                            end_span.byte_end,
-                        ),
-                        kind: ExprKind::Index {
-                            expr: Box::new(expr),
-                            index: Box::new(index),
-                        },
-                    };
-                }
-
                 // Struct literal: Type{field: value, ...} or Type.Variant{field: value, ...}
                 Some(Token::LBrace) => {
                     // Extract type name from identifier or field access chain
@@ -626,10 +702,8 @@ impl Parser {
                             fn extract_type_path(e: &Expr) -> Option<String> {
                                 match &e.kind {
                                     ExprKind::Ident(name) => Some(name.clone()),
-                                    ExprKind::Field { expr, field } => {
-                                        extract_type_path(expr)
-                                            .map(|base| format!("{}.{}", base, field))
-                                    }
+                                    ExprKind::Field { expr, field } => extract_type_path(expr)
+                                        .map(|base| format!("{}.{}", base, field)),
                                     _ => None,
                                 }
                             }
@@ -1661,11 +1735,16 @@ mod tests {
     fn test_parse_function_call() {
         let expr = parse_expr_helper("foo(1, 2)").unwrap();
         match expr.kind {
-            ExprKind::Call { func, args } => {
+            ExprKind::Call {
+                func,
+                args,
+                type_args,
+            } => {
                 assert!(matches!(func.kind, ExprKind::Ident(s) if s == "foo"));
                 assert_eq!(args.len(), 2);
                 assert!(matches!(args[0].kind, ExprKind::Integer(1)));
                 assert!(matches!(args[1].kind, ExprKind::Integer(2)));
+                assert!(type_args.is_empty());
             }
             _ => panic!("Expected call expression"),
         }

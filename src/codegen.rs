@@ -176,14 +176,17 @@ impl Codegen {
                                 String::new()
                             };
 
-                            self.emit_line(&format!("type {}{} struct {{}}", full_name, generic_params));
+                            self.emit_line(&format!(
+                                "type {}{} struct {{}}",
+                                full_name, generic_params
+                            ));
                             self.emit_line(&format!(
                                 "func ({}{}) is{}() {{}}",
                                 full_name, generic_names, type_decl.name
                             ));
                             self.emit_line(&format!(
-                                "func ({}) String() string {{ return \"{}\" }}",
-                                full_name, name
+                                "func ({}{}) String() string {{ return \"{}\" }}",
+                                full_name, generic_names, name
                             ));
                             self.emit_line("");
                         }
@@ -197,7 +200,10 @@ impl Codegen {
                                 String::new()
                             };
 
-                            self.emit_line(&format!("type {}{} struct {{", full_name, generic_params));
+                            self.emit_line(&format!(
+                                "type {}{} struct {{",
+                                full_name, generic_params
+                            ));
                             self.indent();
                             self.emit_line(&format!("Value {}", self.go_type(&ty.name)));
                             self.dedent();
@@ -218,7 +224,10 @@ impl Codegen {
                                 String::new()
                             };
 
-                            self.emit_line(&format!("type {}{} struct {{", full_name, generic_params));
+                            self.emit_line(&format!(
+                                "type {}{} struct {{",
+                                full_name, generic_params
+                            ));
                             self.indent();
                             for field in fields {
                                 self.emit_line(&format!(
@@ -310,13 +319,13 @@ impl Codegen {
 
                                 self.emit_line(&format!(
                                     "func {}{}() {}{} {{",
-                                    func_name,
-                                    generic_params,
-                                    type_decl.name,
-                                    generic_names
+                                    func_name, generic_params, type_decl.name, generic_names
                                 ));
                                 self.indent();
-                                self.emit_line(&format!("return {}{}{{}}", type_name, generic_names));
+                                self.emit_line(&format!(
+                                    "return {}{}{{}}",
+                                    type_name, generic_names
+                                ));
                                 self.dedent();
                                 self.emit_line("}");
                             }
@@ -631,8 +640,23 @@ impl Codegen {
                 self.emit(")");
             }
 
-            ExprKind::Call { func, args } => {
+            ExprKind::Call {
+                func,
+                type_args,
+                args,
+            } => {
                 self.gen_expr(func);
+                // Emit type arguments if present: func[int, string](args)
+                if !type_args.is_empty() {
+                    self.emit("[");
+                    for (i, ty) in type_args.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(&self.go_type(&ty.name));
+                    }
+                    self.emit("]");
+                }
                 self.emit("(");
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {

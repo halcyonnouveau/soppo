@@ -24,6 +24,9 @@ pub struct Infer {
 
     /// Expected return type for the current function (None if not in a function)
     expected_return_type: Option<Type>,
+
+    /// Generic type parameters in scope: param name -> type variable
+    generic_params: HashMap<String, Type>,
 }
 
 impl Infer {
@@ -34,6 +37,7 @@ impl Infer {
             substitutions: HashMap::new(),
             next_var: 0,
             expected_return_type: None,
+            generic_params: HashMap::new(),
         }
     }
 
@@ -59,6 +63,42 @@ impl Infer {
         let var = Type::var(self.next_var);
         self.next_var += 1;
         var
+    }
+
+    /// Resolve an AST type to a runtime Type, checking for generic params
+    fn resolve_type(&mut self, ast_ty: &crate::ast::Type) -> Type {
+        // Check if the type name is a generic parameter
+        if let Some(ty_var) = self.generic_params.get(&ast_ty.name) {
+            return ty_var.clone();
+        }
+
+        // Not a generic param - create a concrete type
+        // Recursively resolve type arguments
+        let args: Vec<Type> = ast_ty
+            .args
+            .iter()
+            .map(|arg| self.resolve_type(arg))
+            .collect();
+
+        Type::Con {
+            name: crate::source::Symbol {
+                module: crate::source::ModuleId::empty(),
+                name: ast_ty.name.clone(),
+                span: ast_ty.span.clone(),
+            },
+            args,
+        }
+    }
+
+    /// Instantiate a type name using a substitution map
+    /// If the name is in the subst map, return the substituted type variable
+    /// Otherwise return the type as-is
+    fn instantiate_type(&self, type_name: &str, subst: &HashMap<String, Type>) -> Type {
+        if let Some(ty_var) = subst.get(type_name) {
+            ty_var.clone()
+        } else {
+            Type::simple(type_name)
+        }
     }
 
     /// Push a new scope
@@ -357,7 +397,11 @@ impl Infer {
                 }
             }
 
-            ExprKind::Call { func, args } => {
+            ExprKind::Call {
+                func,
+                type_args: _,
+                args,
+            } => {
                 // Check if this is a type conversion: TypeName(value)
                 if let ExprKind::Ident(type_name) = &func.kind
                     && self.global_state.has_type(type_name)
@@ -403,9 +447,16 @@ impl Infer {
                 // Check if this is an enum constructor like Color.Red or Result.Ok
                 if let ExprKind::Ident(type_name) = &expr.kind {
                     // Check if type_name is a registered type
-                    if let Some(type_def) = self.global_state.lookup_type(type_name) {
+                    if let Some(type_def) = self.global_state.lookup_type(type_name).cloned() {
                         // Check if this is an enum variant
                         if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
+                            // Create fresh type variables for generic params
+                            let generic_subst: HashMap<String, Type> = type_def
+                                .generics
+                                .iter()
+                                .map(|g| (g.clone(), self.fresh_ty_var()))
+                                .collect();
+
                             // Find the variant
                             for variant in variants {
                                 let variant_name = match variant {
@@ -423,8 +474,10 @@ impl Infer {
                                         }
                                         crate::ast::EnumVariant::Single { ty, .. } => {
                                             // Single variant: returns a constructor function
-                                            // Ok(int) -> fn(int) -> Result
-                                            let param_ty = Type::simple(&ty.name);
+                                            // Ok(T) -> fn(T) -> Result[T, E]
+                                            // Instantiate generic params with fresh type vars
+                                            let param_ty =
+                                                self.instantiate_type(&ty.name, &generic_subst);
                                             let return_ty = Type::simple(type_name);
                                             Ok(Type::fun(vec![param_ty], return_ty))
                                         }
@@ -433,7 +486,12 @@ impl Infer {
                                             // taking all fields as parameters
                                             let param_tys: Vec<Type> = fields
                                                 .iter()
-                                                .map(|f| Type::simple(&f.ty.name))
+                                                .map(|f| {
+                                                    self.instantiate_type(
+                                                        &f.ty.name,
+                                                        &generic_subst,
+                                                    )
+                                                })
                                                 .collect();
                                             let return_ty = Type::simple(type_name);
                                             Ok(Type::fun(param_tys, return_ty))
@@ -725,25 +783,30 @@ impl Infer {
     pub fn infer_func_decl(&mut self, func: &FuncDecl) -> Result<()> {
         self.push_scope();
 
+        // Save old generic params and set up new ones for this function
+        let old_generic_params = std::mem::take(&mut self.generic_params);
+        for generic in &func.generics {
+            let ty_var = self.fresh_ty_var();
+            self.generic_params.insert(generic.name.clone(), ty_var);
+        }
+
         // Set expected return type for this function
         let old_expected_return = self.expected_return_type.clone();
         if let Some(ret_ty_ast) = &func.return_type {
-            self.expected_return_type = Some(Type::simple(&ret_ty_ast.name));
+            self.expected_return_type = Some(self.resolve_type(ret_ty_ast));
         } else {
             self.expected_return_type = Some(Type::unit());
         }
 
         // Add receiver parameter to scope (for methods)
         if let Some(receiver) = &func.receiver {
-            let receiver_ty = Type::simple(&receiver.ty.name);
+            let receiver_ty = self.resolve_type(&receiver.ty);
             self.insert_var(receiver.name.clone(), receiver_ty);
         }
 
         // Add parameters to scope
         for param in &func.params {
-            // For now, we expect type annotations on parameters
-            // Convert AST type to Type (simplified - just use the name)
-            let param_ty = Type::simple(&param.ty.name);
+            let param_ty = self.resolve_type(&param.ty);
             self.insert_var(param.name.clone(), param_ty);
         }
 
@@ -752,30 +815,24 @@ impl Infer {
 
         // Check against declared return type
         if let Some(ret_ty_ast) = &func.return_type {
-            let declared_ret_ty = Type::simple(&ret_ty_ast.name);
+            let declared_ret_ty = self.resolve_type(ret_ty_ast);
             self.unify(&body_ty, &declared_ret_ty, &func.span)?;
         }
 
         self.pop_scope();
 
-        // Restore old expected return type
+        // Restore old expected return type and generic params
         self.expected_return_type = old_expected_return;
+        self.generic_params = old_generic_params;
 
         // Register function in global state
         let func_ty = if let Some(ret_ty_ast) = &func.return_type {
-            let param_tys: Vec<Type> = func
-                .params
-                .iter()
-                .map(|p| Type::simple(&p.ty.name))
-                .collect();
-            let ret_ty = Type::simple(&ret_ty_ast.name);
+            let param_tys: Vec<Type> = func.params.iter().map(|p| Type::from_ast(&p.ty)).collect();
+            let ret_ty = Type::from_ast(ret_ty_ast);
             Type::fun(param_tys, ret_ty)
         } else {
             Type::fun(
-                func.params
-                    .iter()
-                    .map(|p| Type::simple(&p.ty.name))
-                    .collect(),
+                func.params.iter().map(|p| Type::from_ast(&p.ty)).collect(),
                 Type::unit(),
             )
         };
@@ -822,6 +879,13 @@ impl Infer {
                 // Register the enum type in the global state
                 self.global_state.register_type(type_decl);
 
+                // Set up generic params for this type declaration
+                let old_generic_params = std::mem::take(&mut self.generic_params);
+                for generic in &type_decl.generics {
+                    let ty_var = self.fresh_ty_var();
+                    self.generic_params.insert(generic.name.clone(), ty_var);
+                }
+
                 // Register each variant as a constructor function
                 for variant in variants {
                     match variant {
@@ -835,7 +899,7 @@ impl Infer {
                         }
                         EnumVariant::Single { name, ty, .. } => {
                             // Single value variants are functions: T -> EnumType
-                            let value_ty = Type::simple(&ty.name);
+                            let value_ty = self.resolve_type(ty);
                             let enum_ty = Type::simple(&type_decl.name);
                             let constructor_ty = Type::fun(vec![value_ty], enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
@@ -845,7 +909,7 @@ impl Infer {
                         EnumVariant::Struct { name, fields, .. } => {
                             // Struct variants are functions: (field1, field2, ...) -> EnumType
                             let field_tys: Vec<Type> =
-                                fields.iter().map(|f| Type::simple(&f.ty.name)).collect();
+                                fields.iter().map(|f| self.resolve_type(&f.ty)).collect();
                             let enum_ty = Type::simple(&type_decl.name);
                             let constructor_ty = Type::fun(field_tys, enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
@@ -854,16 +918,26 @@ impl Infer {
                         }
                     }
                 }
+
+                // Restore old generic params
+                self.generic_params = old_generic_params;
                 Ok(())
             }
             TypeKind::Struct { fields } => {
                 // Register the struct type with proper field types
                 self.global_state.register_type(type_decl);
 
+                // Set up generic params for this type declaration
+                let old_generic_params = std::mem::take(&mut self.generic_params);
+                for generic in &type_decl.generics {
+                    let ty_var = self.fresh_ty_var();
+                    self.generic_params.insert(generic.name.clone(), ty_var);
+                }
+
                 // Store field types for later field access validation
                 let field_types: Vec<(String, Type)> = fields
                     .iter()
-                    .map(|f| (f.name.clone(), Type::simple(&f.ty.name)))
+                    .map(|f| (f.name.clone(), self.resolve_type(&f.ty)))
                     .collect();
 
                 // Update the registered type with actual field types
@@ -878,6 +952,8 @@ impl Infer {
                     };
                 }
 
+                // Restore old generic params
+                self.generic_params = old_generic_params;
                 Ok(())
             }
         }

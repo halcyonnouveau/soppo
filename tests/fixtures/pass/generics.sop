@@ -1,0 +1,24 @@
+package main
+
+import "fmt"
+
+type Option[T any] enum {
+    Some T
+    None
+}
+
+type Result[T any, E any] enum {
+    Ok T
+    Err E
+}
+
+func main() {
+    x := Option.Some(42)
+    y := Option.Some("hello")
+    z := Option.Some[int](100)
+
+    r1 := Result.Ok[int, string](1)
+    r2 := Result.Err[int, string]("failed")
+
+    fmt.Printf("%v %v %v %v %v\n", x, y, z, r1, r2)
+}

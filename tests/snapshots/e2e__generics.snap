@@ -1,0 +1,57 @@
+---
+source: tests/e2e.rs
+expression: output
+---
+package main
+
+import "fmt"
+
+type Option[T any] interface {
+    isOption()
+}
+
+type Option_Some[T any] struct {
+    Value T
+}
+func (Option_Some[T]) isOption() {}
+
+type Option_None[T any] struct {}
+func (Option_None[T]) isOption() {}
+func (Option_None[T]) String() string { return "None" }
+
+func OptionSome[T any](value T) Option[T] {
+    return Option_Some[T]{Value: value}
+}
+func OptionNone[T any]() Option[T] {
+    return Option_None[T]{}
+}
+
+type Result[T any, E any] interface {
+    isResult()
+}
+
+type Result_Ok[T any, E any] struct {
+    Value T
+}
+func (Result_Ok[T, E]) isResult() {}
+
+type Result_Err[T any, E any] struct {
+    Value E
+}
+func (Result_Err[T, E]) isResult() {}
+
+func ResultOk[T any, E any](value T) Result[T, E] {
+    return Result_Ok[T, E]{Value: value}
+}
+func ResultErr[T any, E any](value E) Result[T, E] {
+    return Result_Err[T, E]{Value: value}
+}
+
+func main() {
+    x := OptionSome(42)
+    y := OptionSome("hello")
+    z := OptionSome[int](100)
+    r1 := ResultOk[int, string](1)
+    r2 := ResultErr[int, string]("failed")
+    fmt.Printf("%v %v %v %v %v\n", x, y, z, r1, r2)
+}

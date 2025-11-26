@@ -82,3 +82,10 @@ fn test_error_non_exhaustive() {
     assert!(result.is_err(), "Expected non-exhaustive match error");
     insta::assert_snapshot!(result.unwrap_err());
 }
+
+#[test]
+fn test_generics() {
+    let output =
+        compile_soppo_file("tests/fixtures/pass/generics.sop").expect("Compilation should succeed");
+    insta::assert_snapshot!(output);
+}

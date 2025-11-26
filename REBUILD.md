@@ -28,9 +28,7 @@ Source Code → Lexer → Parser → AST → Type Inference → Codegen → Go C
 - ✅ Struct variant destructuring in match (`case Shape.Circle{radius: r, ...}:`)
 - ✅ Exhaustiveness checking for match expressions
 - ✅ Namespaced enum variant types (`Color_Red`, `Shape_Circle`) to avoid collisions
-
-### In Progress
-- 🔄 Generic type inference (instantiation, generalization)
+- ✅ Generic type inference (instantiation, type argument syntax `func[T](args)`)
 
 ### Not Yet Implemented
 - Standard library (Result, Option as prelude)

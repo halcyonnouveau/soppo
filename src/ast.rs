@@ -180,6 +180,7 @@ pub enum ExprKind {
     },
     Call {
         func: Box<Expr>,
+        type_args: Vec<Type>,
         args: Vec<Expr>,
     },
     Field {

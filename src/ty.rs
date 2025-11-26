@@ -89,6 +89,18 @@ impl Type {
             args: vec![element_type],
         }
     }
+
+    /// Convert an AST type to a runtime type
+    pub fn from_ast(ast_ty: &crate::ast::Type) -> Self {
+        Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: ast_ty.name.clone(),
+                span: ast_ty.span.clone(),
+            },
+            args: ast_ty.args.iter().map(Type::from_ast).collect(),
+        }
+    }
 }
 
 impl fmt::Display for Type {
