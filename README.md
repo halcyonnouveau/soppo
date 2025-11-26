@@ -1,3 +1,5 @@
+<img src="./docs/soppo.png" alt="soppo" style="max-width: 100%;">
+
 # Soppo
 
 A language that compiles to Go, adding type expressiveness and better developer ergonomics.
