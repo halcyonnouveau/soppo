@@ -1,7 +1,8 @@
-use crate::source::Span;
-use crate::ty::Type;
 use miette::Diagnostic;
 use thiserror::Error;
+
+use crate::parse::Span;
+use crate::types::Type;
 
 #[derive(Error, Debug, Diagnostic)]
 pub enum SoppoError {

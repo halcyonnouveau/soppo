@@ -1,7 +1,7 @@
-use crate::ast::*;
+use super::ast::*;
+use super::lexer::{Lexer, Token};
+use super::source::{FileId, Span};
 use crate::error::{Result, SoppoError};
-use crate::lexer::{Lexer, Token};
-use crate::source::{FileId, Span};
 
 // Reserved keywords that cannot be used as identifiers
 const RESERVED_KEYWORDS: &[&str] = &[
@@ -344,22 +344,22 @@ impl Parser {
 
             // Literal patterns
             Token::Integer(n) => Ok(Pattern {
-                kind: PatternKind::Literal(crate::ast::Literal::Integer(n)),
+                kind: PatternKind::Literal(super::ast::Literal::Integer(n)),
                 span,
             }),
 
             Token::String(s) => Ok(Pattern {
-                kind: PatternKind::Literal(crate::ast::Literal::String(s)),
+                kind: PatternKind::Literal(super::ast::Literal::String(s)),
                 span,
             }),
 
             Token::True => Ok(Pattern {
-                kind: PatternKind::Literal(crate::ast::Literal::Bool(true)),
+                kind: PatternKind::Literal(super::ast::Literal::Bool(true)),
                 span,
             }),
 
             Token::False => Ok(Pattern {
-                kind: PatternKind::Literal(crate::ast::Literal::Bool(false)),
+                kind: PatternKind::Literal(super::ast::Literal::Bool(false)),
                 span,
             }),
 

@@ -1,15 +1,13 @@
-use crate::ast::{
-    BinOp, Block, ConstDecl, EnumVariant, Expr, ExprKind, FuncDecl, PatternKind, Stmt, StmtKind,
-    TypeDecl, TypeKind,
-};
-use crate::error::{Result, SoppoError};
-use crate::go_cache::GoCache;
-use crate::go_types::parse_go_type;
-use crate::module::GlobalState;
-use crate::project::Project;
-use crate::source::{ModuleId, Span};
-use crate::ty::Type;
 use std::collections::{HashMap, HashSet};
+
+use super::module::GlobalState;
+use super::ty::Type;
+use crate::error::{Result, SoppoError};
+use crate::go::{GoCache, Project, parse_go_type};
+use crate::parse::{
+    BinOp, Block, ConstDecl, EnumVariant, Expr, ExprKind, FuncDecl, Import, ModuleId, Pattern,
+    PatternKind, Span, Stmt, StmtKind, Symbol, Type as AstType, TypeDecl, TypeKind,
+};
 
 /// Type inference engine
 pub struct Infer {
@@ -81,7 +79,7 @@ impl Infer {
     }
 
     /// Process imports and add package names to scope
-    pub fn process_imports(&mut self, imports: &[crate::ast::Import]) {
+    pub fn process_imports(&mut self, imports: &[Import]) {
         for import in imports {
             // Extract package name from import path
             // e.g., "fmt" from "fmt" or "http" from "net/http"
@@ -142,7 +140,7 @@ impl Infer {
         // Check if it's a type
         if pkg.types.contains_key(type_name) {
             return Some(Type::Con {
-                name: crate::source::Symbol {
+                name: Symbol {
                     module: ModuleId::new(package_name),
                     name: type_name.to_string(),
                     span: Span::dummy(),
@@ -172,7 +170,7 @@ impl Infer {
     }
 
     /// Resolve an AST type to a runtime Type, checking for generic params
-    fn resolve_type(&mut self, ast_ty: &crate::ast::Type) -> Type {
+    fn resolve_type(&mut self, ast_ty: &AstType) -> Type {
         // Check if the type name is a generic parameter
         if let Some(ty_var) = self.generic_params.get(&ast_ty.name) {
             return ty_var.clone();
@@ -187,8 +185,8 @@ impl Infer {
             .collect();
 
         Type::Con {
-            name: crate::source::Symbol {
-                module: crate::source::ModuleId::empty(),
+            name: Symbol {
+                module: ModuleId::empty(),
                 name: ast_ty.name.clone(),
                 span: ast_ty.span.clone(),
             },
@@ -235,12 +233,8 @@ impl Infer {
     }
 
     /// Add pattern bindings to the current scope
-    fn add_pattern_bindings(
-        &mut self,
-        pattern: &crate::ast::Pattern,
-        scrutinee_ty: &Type,
-    ) -> Result<()> {
-        use crate::ast::PatternKind;
+    fn add_pattern_bindings(&mut self, pattern: &Pattern, scrutinee_ty: &Type) -> Result<()> {
+        use PatternKind;
 
         match &pattern.kind {
             PatternKind::Default => {
@@ -267,7 +261,7 @@ impl Infer {
                     name: type_name, ..
                 } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
-                    && let crate::module::TypeDefKind::Enum { variants } = &type_def.kind
+                    && let super::module::TypeDefKind::Enum { variants } = &type_def.kind
                 {
                     for variant in variants {
                         if let EnumVariant::Single {
@@ -303,7 +297,7 @@ impl Infer {
                     name: type_name, ..
                 } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
-                    && let crate::module::TypeDefKind::Enum { variants } = &type_def.kind
+                    && let super::module::TypeDefKind::Enum { variants } = &type_def.kind
                 {
                     for variant in variants {
                         if let EnumVariant::Struct {
@@ -669,28 +663,29 @@ impl Infer {
                 // Check if this is accessing something from an imported Go package
                 // e.g., fmt.Println, strings.HasPrefix
                 if let ExprKind::Ident(name) = &field_expr.kind
-                    && self.is_imported_package(name) {
-                        // Try to look up as a function first
-                        if let Some(func_ty) = self.lookup_go_function(name, field) {
-                            return Ok(func_ty);
-                        }
-                        // Try to look up as a type or constant
-                        if let Some(ty) = self.lookup_go_type(name, field) {
-                            return Ok(ty);
-                        }
-                        // Couldn't find it - error
-                        return Err(SoppoError::Type {
-                            message: format!("`{}` not found in package `{}`", field, name),
-                            span: field_span.clone(),
-                        });
+                    && self.is_imported_package(name)
+                {
+                    // Try to look up as a function first
+                    if let Some(func_ty) = self.lookup_go_function(name, field) {
+                        return Ok(func_ty);
                     }
+                    // Try to look up as a type or constant
+                    if let Some(ty) = self.lookup_go_type(name, field) {
+                        return Ok(ty);
+                    }
+                    // Couldn't find it - error
+                    return Err(SoppoError::Type {
+                        message: format!("`{}` not found in package `{}`", field, name),
+                        span: field_span.clone(),
+                    });
+                }
 
                 // Check if this is an enum constructor like Color.Red or Result.Ok
                 if let ExprKind::Ident(type_name) = &field_expr.kind {
                     // Check if type_name is a registered type
                     if let Some(type_def) = self.global_state.lookup_type(type_name).cloned() {
                         // Check if this is an enum variant
-                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
+                        if let super::module::TypeDefKind::Enum { variants } = &type_def.kind {
                             // Create fresh type variables for generic params
                             let generic_subst: HashMap<String, Type> = type_def
                                 .generics
@@ -701,19 +696,19 @@ impl Infer {
                             // Find the variant
                             for variant in variants {
                                 let variant_name = match variant {
-                                    crate::ast::EnumVariant::Unit { name, .. } => name,
-                                    crate::ast::EnumVariant::Single { name, .. } => name,
-                                    crate::ast::EnumVariant::Struct { name, .. } => name,
+                                    EnumVariant::Unit { name, .. } => name,
+                                    EnumVariant::Single { name, .. } => name,
+                                    EnumVariant::Struct { name, .. } => name,
                                 };
 
                                 if variant_name == field {
                                     // Found the variant
                                     return match variant {
-                                        crate::ast::EnumVariant::Unit { .. } => {
+                                        EnumVariant::Unit { .. } => {
                                             // Unit variant: just returns the enum type
                                             Ok(Type::simple(type_name))
                                         }
-                                        crate::ast::EnumVariant::Single { ty, .. } => {
+                                        EnumVariant::Single { ty, .. } => {
                                             // Single variant: returns a constructor function
                                             // Ok(T) -> fn(T) -> Result[T, E]
                                             // Instantiate generic params with fresh type vars
@@ -722,7 +717,7 @@ impl Infer {
                                             let return_ty = Type::simple(type_name);
                                             Ok(Type::fun(vec![param_ty], return_ty))
                                         }
-                                        crate::ast::EnumVariant::Struct { fields, .. } => {
+                                        EnumVariant::Struct { fields, .. } => {
                                             // Struct variant: returns a constructor function
                                             // taking all fields as parameters
                                             let param_tys: Vec<Type> = fields
@@ -753,7 +748,7 @@ impl Infer {
                 // Look up the struct type to validate field access
                 if let Type::Con { name, .. } = &expr_ty
                     && let Some(type_def) = self.global_state.lookup_type(&name.name)
-                    && let crate::module::TypeDefKind::Struct { fields } = &type_def.kind
+                    && let super::module::TypeDefKind::Struct { fields } = &type_def.kind
                 {
                     // Check if the field exists
                     if let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field) {
@@ -984,7 +979,7 @@ impl Infer {
                 // Exhaustiveness check for enum types
                 if let Type::Con { name, .. } = &scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&name.name)
-                    && let crate::module::TypeDefKind::Enum { variants } = &type_def.kind
+                    && let super::module::TypeDefKind::Enum { variants } = &type_def.kind
                 {
                     // Check if any arm is Default (catch-all)
                     let has_default = arms
@@ -1234,7 +1229,7 @@ impl Infer {
                     .types
                     .get_mut(&type_decl.name)
                 {
-                    type_def.kind = crate::module::TypeDefKind::Struct {
+                    type_def.kind = super::module::TypeDefKind::Struct {
                         fields: field_types,
                     };
                 }
@@ -1250,8 +1245,7 @@ impl Infer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::Parser;
-    use crate::source::FileId;
+    use crate::parse::{Decl, FileId, Parser};
 
     fn infer_expr_helper(source: &str) -> Result<Type> {
         let mut parser = Parser::new(source, FileId(0));
@@ -1336,8 +1330,8 @@ mod tests {
 
         // Try to unify with a type containing itself: T = Option[T]
         let option_t = Type::con_with_args(
-            crate::source::Symbol {
-                module: crate::source::ModuleId::empty(),
+            Symbol {
+                module: ModuleId::empty(),
                 name: "Option".to_string(),
                 span: Span::dummy(),
             },
@@ -1423,7 +1417,7 @@ mod tests {
 
         // Infer both functions
         for decl in &file.decls {
-            if let crate::ast::Decl::Func(func) = decl {
+            if let Decl::Func(func) = decl {
                 infer.infer_func_decl(func).unwrap();
             }
         }
@@ -1461,14 +1455,14 @@ mod tests {
 
         // Register struct type
         for decl in &file.decls {
-            if let crate::ast::Decl::Type(type_decl) = decl {
+            if let Decl::Type(type_decl) = decl {
                 infer.infer_type_decl(type_decl).unwrap();
             }
         }
 
         // Type check function
         for decl in &file.decls {
-            if let crate::ast::Decl::Func(func) = decl {
+            if let Decl::Func(func) = decl {
                 let result = infer.infer_func_decl(func);
                 assert!(result.is_ok(), "Function should type check: {:?}", result);
             }
@@ -1494,14 +1488,14 @@ mod tests {
 
         // Register struct type
         for decl in &file.decls {
-            if let crate::ast::Decl::Type(type_decl) = decl {
+            if let Decl::Type(type_decl) = decl {
                 infer.infer_type_decl(type_decl).unwrap();
             }
         }
 
         // Type check function - should fail
         for decl in &file.decls {
-            if let crate::ast::Decl::Func(func) = decl {
+            if let Decl::Func(func) = decl {
                 let result = infer.infer_func_decl(func);
                 assert!(result.is_err(), "Should error on invalid field access");
             }
@@ -1527,14 +1521,14 @@ mod tests {
 
         // Register struct type
         for decl in &file.decls {
-            if let crate::ast::Decl::Type(type_decl) = decl {
+            if let Decl::Type(type_decl) = decl {
                 infer.infer_type_decl(type_decl).unwrap();
             }
         }
 
         // Type check function
         for decl in &file.decls {
-            if let crate::ast::Decl::Func(func) = decl {
+            if let Decl::Func(func) = decl {
                 let result = infer.infer_func_decl(func);
                 assert!(
                     result.is_ok(),
@@ -1611,11 +1605,11 @@ mod tests {
 
         // Process some imports
         let imports = vec![
-            crate::ast::Import {
+            Import {
                 path: "\"fmt\"".to_string(),
                 span: Span::dummy(),
             },
-            crate::ast::Import {
+            Import {
                 path: "\"net/http\"".to_string(),
                 span: Span::dummy(),
             },
@@ -1653,7 +1647,7 @@ func main() {
 
         // Type check the function - should succeed because fmt.Println is resolved
         for decl in &file.decls {
-            if let crate::ast::Decl::Func(func) = decl {
+            if let Decl::Func(func) = decl {
                 let result = infer.infer_func_decl(func);
                 assert!(
                     result.is_ok(),

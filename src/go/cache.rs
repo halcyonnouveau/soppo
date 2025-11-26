@@ -1,11 +1,10 @@
-//! Cache for parsed Go packages.
-
-use crate::go_extract::{self, GoPackage};
-use crate::project::Project;
-use crate::resolve::{ImportKind, Resolver};
-use miette::Result;
 use std::collections::HashMap;
-use std::path::Path;
+
+use miette::Result;
+
+use super::extract::{self as extract, GoPackage};
+use super::project::Project;
+use super::resolve::{ImportKind, Resolver};
 
 /// Cache for parsed Go packages.
 /// Avoids re-parsing the same package multiple times during compilation.
@@ -47,7 +46,7 @@ impl GoCache {
             ImportKind::ExternalGo { source_dir, .. } => source_dir,
         };
 
-        let pkg = go_extract::extract(source_dir)?;
+        let pkg = extract::extract(source_dir)?;
         self.packages.insert(import_path.to_string(), pkg);
         Ok(self.packages.get(import_path).unwrap())
     }
@@ -66,11 +65,6 @@ impl GoCache {
     pub fn resolver(&self) -> &Resolver {
         &self.resolver
     }
-}
-
-/// Parse a single Go file or directory (convenience function)
-pub fn parse_go_path(path: &Path) -> Result<GoPackage> {
-    go_extract::extract(path)
 }
 
 #[cfg(test)]
@@ -106,7 +100,7 @@ func Hello() string {{
         )
         .unwrap();
 
-        let pkg = parse_go_path(&file_path).unwrap();
+        let pkg = extract::extract(&file_path).unwrap();
         assert!(pkg.functions.contains_key("Hello"));
 
         fs::remove_dir_all(&dir).unwrap();

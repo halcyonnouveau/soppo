@@ -1,13 +1,12 @@
-use clap::{Parser as ClapParser, Subcommand};
-use miette::{IntoDiagnostic, NamedSource, Result};
-use soppo::ast::Decl;
-use soppo::codegen::Codegen;
-use soppo::infer::Infer;
-use soppo::parser::Parser;
-use soppo::project::Project;
-use soppo::source::FileId;
 use std::fs;
 use std::path::PathBuf;
+
+use clap::{Parser as ClapParser, Subcommand};
+use miette::{IntoDiagnostic, NamedSource, Result};
+use soppo::codegen::Codegen;
+use soppo::go::Project;
+use soppo::parse::{Decl, FileId, Parser};
+use soppo::types::Infer;
 
 #[derive(ClapParser)]
 #[command(name = "sop")]

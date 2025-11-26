@@ -3,8 +3,8 @@
 //! This module parses Go type syntax (as extracted by tree-sitter) and converts
 //! it to Soppo's internal Type representation.
 
-use crate::source::{ModuleId, Span, Symbol};
-use crate::ty::Type;
+use crate::parse::{ModuleId, Span, Symbol};
+use crate::types::Type;
 
 /// Parse a Go type string into a Soppo Type.
 ///
@@ -38,17 +38,19 @@ pub fn parse_go_type(s: &str) -> Type {
 
     // Array type: [N]T or [...]T
     if s.starts_with('[')
-        && let Some(bracket_end) = s.find(']') {
-            let inner = &s[bracket_end + 1..];
-            // We treat arrays as slices for simplicity
-            return Type::generic("array", vec![parse_go_type(inner)]);
-        }
+        && let Some(bracket_end) = s.find(']')
+    {
+        let inner = &s[bracket_end + 1..];
+        // We treat arrays as slices for simplicity
+        return Type::generic("array", vec![parse_go_type(inner)]);
+    }
 
     // Map type: map[K]V
     if let Some(rest) = s.strip_prefix("map[")
-        && let Some((key, value)) = parse_map_types(rest) {
-            return Type::generic("map", vec![parse_go_type(key), parse_go_type(value)]);
-        }
+        && let Some((key, value)) = parse_map_types(rest)
+    {
+        return Type::generic("map", vec![parse_go_type(key), parse_go_type(value)]);
+    }
 
     // Channel type: chan T
     if let Some(inner) = s.strip_prefix("chan ") {
@@ -84,13 +86,14 @@ pub fn parse_go_type(s: &str) -> Type {
 
     // Generic type: T[A, B]
     if let Some(bracket_pos) = s.find('[')
-        && s.ends_with(']') {
-            let name = &s[..bracket_pos];
-            let args_str = &s[bracket_pos + 1..s.len() - 1];
-            let args = split_type_list(args_str);
-            let type_args: Vec<Type> = args.iter().map(|t| parse_go_type(t)).collect();
-            return make_type_with_module(name, type_args);
-        }
+        && s.ends_with(']')
+    {
+        let name = &s[..bracket_pos];
+        let args_str = &s[bracket_pos + 1..s.len() - 1];
+        let args = split_type_list(args_str);
+        let type_args: Vec<Type> = args.iter().map(|t| parse_go_type(t)).collect();
+        return make_type_with_module(name, type_args);
+    }
 
     // Qualified type: pkg.Type
     if let Some(dot_pos) = s.find('.') {

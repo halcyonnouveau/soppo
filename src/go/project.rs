@@ -1,18 +1,19 @@
-use miette::{Diagnostic, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use miette::{Diagnostic, Result};
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum ProjectError {
     #[error("No go.mod found (searched from {0} to filesystem root)")]
-    NoGoMod(PathBuf),
+    NotFound(PathBuf),
 
     #[error("Failed to read go.mod: {0}")]
-    ReadGoMod(String),
+    ReadFailed(String),
 
     #[error("Invalid go.mod: missing module declaration")]
-    InvalidGoMod,
+    InvalidFormat,
 }
 
 pub struct Project {
@@ -38,7 +39,7 @@ impl Project {
             }
 
             if !current.pop() {
-                return Err(ProjectError::NoGoMod(start.to_path_buf()).into());
+                return Err(ProjectError::NotFound(start.to_path_buf()).into());
             }
         }
     }
@@ -66,7 +67,7 @@ impl Project {
 
 /// Parse go.mod to extract module path
 fn parse_go_mod(path: &Path) -> Result<String> {
-    let content = fs::read_to_string(path).map_err(|e| ProjectError::ReadGoMod(e.to_string()))?;
+    let content = fs::read_to_string(path).map_err(|e| ProjectError::ReadFailed(e.to_string()))?;
 
     for line in content.lines() {
         let line = line.trim();
@@ -78,7 +79,7 @@ fn parse_go_mod(path: &Path) -> Result<String> {
         }
     }
 
-    Err(ProjectError::InvalidGoMod.into())
+    Err(ProjectError::InvalidFormat.into())
 }
 
 /// Recursively find .sop files, excluding special directories
@@ -109,10 +110,11 @@ fn find_sop_files(dir: &Path, files: &mut Vec<PathBuf>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::{self, File};
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 

@@ -1,4 +1,4 @@
-use crate::source::Span;
+use super::source::Span;
 
 /// A complete source file
 #[derive(Debug, Clone, PartialEq)]

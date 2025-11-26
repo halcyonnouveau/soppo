@@ -1,5 +1,6 @@
-use crate::source::{FileId, LineColumn, Span};
 use logos::Logos;
+
+use super::source::{FileId, LineColumn, Span};
 
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\f]+")]

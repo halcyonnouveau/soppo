@@ -3,10 +3,11 @@
 //! This module uses tree-sitter-go to parse Go source files and extract
 //! type signatures for functions, types, and constants.
 
-use miette::{Diagnostic, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+use miette::{Diagnostic, Result};
 use thiserror::Error;
 use tree_sitter::{Parser, Tree};
 
@@ -661,9 +662,10 @@ fn is_exported(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::{self, File};
     use std::io::Write;
+
+    use super::*;
 
     #[test]
     fn test_extract_go_file() {

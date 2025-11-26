@@ -1,5 +1,6 @@
-use crate::source::{ModuleId, Span, Symbol};
 use std::fmt;
+
+use crate::parse::{ModuleId, Span, Symbol, Type as AstType};
 
 /// Type representation after type checking
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +109,7 @@ impl Type {
     }
 
     /// Convert an AST type to a runtime type
-    pub fn from_ast(ast_ty: &crate::ast::Type) -> Self {
+    pub fn from_ast(ast_ty: &AstType) -> Self {
         Type::Con {
             name: Symbol {
                 module: ModuleId::empty(),

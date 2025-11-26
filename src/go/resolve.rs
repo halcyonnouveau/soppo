@@ -1,9 +1,11 @@
-use crate::project::Project;
-use miette::{Diagnostic, Result};
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use miette::{Diagnostic, Result};
+use serde::Deserialize;
 use thiserror::Error;
+
+use super::project::Project;
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum ResolveError {
@@ -66,9 +68,10 @@ impl Resolver {
     pub fn resolve(&self, import_path: &str, project: Option<&Project>) -> Result<ImportKind> {
         // Check for local Soppo package first (requires project)
         if let Some(proj) = project
-            && let Some(kind) = self.resolve_local_soppo(import_path, proj) {
-                return Ok(kind);
-            }
+            && let Some(kind) = self.resolve_local_soppo(import_path, proj)
+        {
+            return Ok(kind);
+        }
 
         // Check stdlib (no project needed)
         if let Some(kind) = self.resolve_stdlib(import_path) {

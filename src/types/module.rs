@@ -1,7 +1,7 @@
-use crate::ast::{ConstDecl, EnumVariant, FuncDecl, TypeDecl};
-use crate::source::ModuleId;
-use crate::ty::Type;
 use std::collections::HashMap;
+
+use super::ty::Type;
+use crate::parse::{ConstDecl, EnumVariant, FuncDecl, ModuleId, TypeDecl, TypeKind};
 
 /// Global state tracking all modules and types
 pub struct GlobalState {
@@ -120,11 +120,11 @@ impl GlobalState {
             name: type_decl.name.clone(),
             generics: type_decl.generics.iter().map(|g| g.name.clone()).collect(),
             kind: match &type_decl.kind {
-                crate::ast::TypeKind::Alias { .. } => TypeDefKind::Alias,
-                crate::ast::TypeKind::Enum { variants } => TypeDefKind::Enum {
+                TypeKind::Alias { .. } => TypeDefKind::Alias,
+                TypeKind::Enum { variants } => TypeDefKind::Enum {
                     variants: variants.clone(),
                 },
-                crate::ast::TypeKind::Struct { fields } => TypeDefKind::Struct {
+                TypeKind::Struct { fields } => TypeDefKind::Struct {
                     fields: fields
                         .iter()
                         .map(|f| (f.name.clone(), Type::from_ast(&f.ty)))
@@ -217,8 +217,7 @@ impl Default for GlobalState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Generic, TypeKind};
-    use crate::source::Span;
+    use crate::parse::{Generic, Span};
 
     #[test]
     fn test_global_state_creation() {

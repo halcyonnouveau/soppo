@@ -1,13 +1,14 @@
-use crate::ast::{
-    BinOp, Block, ConstDecl, EnumVariant, Expr, ExprKind, File, FuncDecl, Stmt, StmtKind, TypeDecl,
-    TypeKind,
+use crate::parse::{
+    BinOp, Block, ConstDecl, Decl, EnumVariant, Expr, ExprKind, File, FuncDecl, Generic, Literal,
+    PatternKind, Stmt, StmtKind, TypeDecl, TypeKind,
 };
+use crate::types::GlobalState;
 
 /// Code generator for emitting Go code
 pub struct Codegen {
     output: String,
     indent_level: usize,
-    global_state: crate::module::GlobalState,
+    global_state: GlobalState,
     current_func_return_type: Option<String>,
 }
 
@@ -16,12 +17,12 @@ impl Codegen {
         Self {
             output: String::new(),
             indent_level: 0,
-            global_state: crate::module::GlobalState::new(),
+            global_state: GlobalState::new(),
             current_func_return_type: None,
         }
     }
 
-    pub fn with_global_state(global_state: crate::module::GlobalState) -> Self {
+    pub fn with_global_state(global_state: GlobalState) -> Self {
         Self {
             output: String::new(),
             indent_level: 0,
@@ -67,7 +68,7 @@ impl Codegen {
     }
 
     /// Format generic parameters with constraints: "T any, E any"
-    fn format_generic_params(&self, generics: &[crate::ast::Generic]) -> String {
+    fn format_generic_params(&self, generics: &[Generic]) -> String {
         generics
             .iter()
             .map(|g| format!("{} {}", g.name, g.constraint))
@@ -76,7 +77,7 @@ impl Codegen {
     }
 
     /// Format generic parameter names only: "T, E"
-    fn format_generic_names(&self, generics: &[crate::ast::Generic]) -> String {
+    fn format_generic_names(&self, generics: &[Generic]) -> String {
         generics
             .iter()
             .map(|g| g.name.as_str())
@@ -85,7 +86,7 @@ impl Codegen {
     }
 
     /// Format generic parameters in brackets if not empty: "[T any, E any]" or ""
-    fn format_generic_brackets(&self, generics: &[crate::ast::Generic]) -> String {
+    fn format_generic_brackets(&self, generics: &[Generic]) -> String {
         if generics.is_empty() {
             String::new()
         } else {
@@ -110,15 +111,15 @@ impl Codegen {
         // Generate declarations
         for decl in &file.decls {
             match decl {
-                crate::ast::Decl::Const(const_decl) => {
+                Decl::Const(const_decl) => {
                     self.gen_const_decl(const_decl);
                     self.emit_line("");
                 }
-                crate::ast::Decl::Type(type_decl) => {
+                Decl::Type(type_decl) => {
                     self.gen_type_decl(type_decl);
                     self.emit_line("");
                 }
-                crate::ast::Decl::Func(func) => {
+                Decl::Func(func) => {
                     self.gen_func_decl(func);
                     self.emit_line("");
                 }
@@ -526,9 +527,9 @@ impl Codegen {
                 let is_type_switch = arms.iter().any(|arm| {
                     matches!(
                         &arm.pattern.kind,
-                        crate::ast::PatternKind::Variant(_)
-                            | crate::ast::PatternKind::Destructor { .. }
-                            | crate::ast::PatternKind::StructDestructor { .. }
+                        PatternKind::Variant(_)
+                            | PatternKind::Destructor { .. }
+                            | PatternKind::StructDestructor { .. }
                     )
                 });
 
@@ -536,8 +537,7 @@ impl Codegen {
                 let needs_binding = arms.iter().any(|arm| {
                     matches!(
                         &arm.pattern.kind,
-                        crate::ast::PatternKind::Destructor { .. }
-                            | crate::ast::PatternKind::StructDestructor { .. }
+                        PatternKind::Destructor { .. } | PatternKind::StructDestructor { .. }
                     )
                 });
 
@@ -559,41 +559,39 @@ impl Codegen {
                     self.emit_indent();
 
                     // Emit pattern - default is special (default:, not case default:)
-                    if matches!(&arm.pattern.kind, crate::ast::PatternKind::Default) {
+                    if matches!(&arm.pattern.kind, PatternKind::Default) {
                         self.emit("default:\n");
                     } else {
                         self.emit("case ");
                         match &arm.pattern.kind {
-                            crate::ast::PatternKind::Variant(name) => {
+                            PatternKind::Variant(name) => {
                                 // Convert qualified name (Color.Red) to namespaced (Color_Red)
                                 let full_name = name.replace('.', "_");
                                 self.emit(&full_name);
                             }
-                            crate::ast::PatternKind::Literal(lit) => match lit {
-                                crate::ast::Literal::Integer(n) => self.emit(&n.to_string()),
-                                crate::ast::Literal::String(s) => self.emit(&format!("\"{}\"", s)),
-                                crate::ast::Literal::Bool(b) => self.emit(&b.to_string()),
+                            PatternKind::Literal(lit) => match lit {
+                                Literal::Integer(n) => self.emit(&n.to_string()),
+                                Literal::String(s) => self.emit(&format!("\"{}\"", s)),
+                                Literal::Bool(b) => self.emit(&b.to_string()),
                             },
-                            crate::ast::PatternKind::Destructor { name, .. } => {
+                            PatternKind::Destructor { name, .. } => {
                                 // Convert qualified name (MyResult.Ok) to namespaced (MyResult_Ok)
                                 let full_name = name.replace('.', "_");
                                 self.emit(&full_name);
                             }
-                            crate::ast::PatternKind::StructDestructor { name, .. } => {
+                            PatternKind::StructDestructor { name, .. } => {
                                 // Convert qualified name (Shape.Circle) to namespaced (Shape_Circle)
                                 let full_name = name.replace('.', "_");
                                 self.emit(&full_name);
                             }
-                            crate::ast::PatternKind::Default => unreachable!(),
+                            PatternKind::Default => unreachable!(),
                         }
                         self.emit(":\n");
                     }
                     self.indent();
 
                     // Extract pattern bindings for destructor patterns
-                    if let crate::ast::PatternKind::Destructor { name: _, binding } =
-                        &arm.pattern.kind
-                    {
+                    if let PatternKind::Destructor { name: _, binding } = &arm.pattern.kind {
                         // __v is already the concrete type from the switch statement
                         self.emit_indent();
                         self.emit(&format!("{} := __v.Value\n", binding));
@@ -603,9 +601,7 @@ impl Codegen {
                     }
 
                     // Extract pattern bindings for struct destructor patterns
-                    if let crate::ast::PatternKind::StructDestructor { fields, .. } =
-                        &arm.pattern.kind
-                    {
+                    if let PatternKind::StructDestructor { fields, .. } = &arm.pattern.kind {
                         // __v is already the concrete type from the switch statement
                         for (field_name, binding_name) in fields {
                             self.emit_indent();
@@ -813,8 +809,7 @@ impl Default for Codegen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::Parser;
-    use crate::source::FileId;
+    use crate::parse::{FileId, Parser};
 
     #[test]
     fn test_gen_simple_function() {
@@ -903,49 +898,5 @@ mod tests {
         assert!(output.contains("package main"));
         assert!(output.contains("func add(x int, y int) int"));
         assert!(output.contains("func main() int"));
-    }
-
-    #[test]
-    fn test_e2e_simple_program() {
-        // End-to-end test: parse, type-check, and generate Go code
-        let source = r#"
-            func add(x int, y int) int {
-                result := x + y
-                return result
-            }
-
-            func main() int {
-                a := 10
-                b := 20
-                sum := add(a, b)
-                return sum
-            }
-        "#;
-
-        // Parse
-        let mut parser = Parser::new(source, FileId(0));
-        let file = parser.parse_file().unwrap();
-
-        // Type check
-        let mut infer = crate::infer::Infer::new().expect("Failed to create Infer");
-        for decl in &file.decls {
-            if let crate::ast::Decl::Func(func) = decl {
-                infer.infer_func_decl(func).unwrap();
-            }
-        }
-
-        // Generate Go code
-        let mut codegen = Codegen::new();
-        codegen.gen_file(&file);
-        let output = codegen.output();
-
-        // Verify output
-        assert!(output.contains("package main"));
-        assert!(output.contains("func add(x int, y int) int"));
-        assert!(output.contains("result := (x + y)"));
-        assert!(output.contains("func main() int"));
-        assert!(output.contains("a := 10"));
-        assert!(output.contains("b := 20"));
-        assert!(output.contains("sum := add(a, b)"));
     }
 }
