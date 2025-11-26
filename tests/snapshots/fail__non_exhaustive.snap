@@ -1,11 +1,11 @@
 ---
-source: tests/e2e.rs
+source: tests/fail.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::non_exhaustive
 
   × Non-exhaustive match
-    ╭─[error_non_exhaustive.sop:11:5]
+    ╭─[non_exhaustive.sop:11:5]
  10 │         var message string
  11 │ ╭─▶     match color {
  12 │ │       case Color.Red:

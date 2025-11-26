@@ -1,5 +1,6 @@
 ---
-source: tests/e2e.rs
+source: tests/pass.rs
+assertion_line: 23
 expression: output
 ---
 package main

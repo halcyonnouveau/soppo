@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::parse
+
+  × Syntax error: Variable declaration requires either a type or an
+  │ initializer
+   ╭─[var_no_type_or_value.sop:4:9]
+ 3 │ func main() {
+ 4 │     var x
+   ·         ┬
+   ·         ╰── unexpected token
+ 5 │ }
+   ╰────

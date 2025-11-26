@@ -27,7 +27,7 @@ pub enum Decl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstDecl {
     pub name: String,
-    pub ty: Type,
+    pub ty: Option<Type>, // Optional - infer from value if not provided
     pub value: Expr,
     pub span: Span,
 }
@@ -129,11 +129,17 @@ pub enum StmtKind {
         name: String,
         value: Expr,
     },
-    // var x type or var x type = value (explicit type declaration)
+    // var x = value, var x type, or var x type = value
     VarDecl {
         name: String,
-        ty: Type,
+        ty: Option<Type>, //infer from value if not provided
         value: Option<Expr>,
+    },
+    // const x = value or const x type = value (inside functions)
+    ConstDecl {
+        name: String,
+        ty: Option<Type>, // infer from value if not provided
+        value: Expr,
     },
     // x = value or x.y = value (assignment)
     Assign {

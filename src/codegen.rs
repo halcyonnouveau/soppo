@@ -128,11 +128,17 @@ impl Codegen {
 
     /// Generate a const declaration
     fn gen_const_decl(&mut self, const_decl: &ConstDecl) {
-        self.emit(&format!(
-            "const {} {} = ",
-            const_decl.name,
-            self.go_type(&const_decl.ty.name)
-        ));
+        if let Some(ty) = &const_decl.ty {
+            // const X type = value
+            self.emit(&format!(
+                "const {} {} = ",
+                const_decl.name,
+                self.go_type(&ty.name)
+            ));
+        } else {
+            // const X = value (type inference)
+            self.emit(&format!("const {} = ", const_decl.name));
+        }
         self.gen_expr(&const_decl.value);
         self.emit("\n");
     }
@@ -431,12 +437,39 @@ impl Codegen {
 
             StmtKind::VarDecl { name, ty, value } => {
                 self.emit_indent();
-                if let Some(expr) = value {
-                    self.emit(&format!("var {} {} = ", name, self.go_type(&ty.name)));
-                    self.gen_expr(expr);
-                } else {
-                    self.emit(&format!("var {} {}", name, self.go_type(&ty.name)));
+                match (ty, value) {
+                    (Some(t), Some(expr)) => {
+                        // var x type = value
+                        self.emit(&format!("var {} {} = ", name, self.go_type(&t.name)));
+                        self.gen_expr(expr);
+                    }
+                    (Some(t), None) => {
+                        // var x type (zero value)
+                        self.emit(&format!("var {} {}", name, self.go_type(&t.name)));
+                    }
+                    (None, Some(expr)) => {
+                        // var x = value (type inference)
+                        self.emit(&format!("var {} = ", name));
+                        self.gen_expr(expr);
+                    }
+                    (None, None) => {
+                        // Should be caught by type checker
+                        unreachable!("var declaration without type or value")
+                    }
                 }
+                self.emit("\n");
+            }
+
+            StmtKind::ConstDecl { name, ty, value } => {
+                self.emit_indent();
+                if let Some(t) = ty {
+                    // const x type = value
+                    self.emit(&format!("const {} {} = ", name, self.go_type(&t.name)));
+                } else {
+                    // const x = value (type inference)
+                    self.emit(&format!("const {} = ", name));
+                }
+                self.gen_expr(value);
                 self.emit("\n");
             }
 

@@ -30,7 +30,30 @@ Source Code → Lexer → Parser → AST → Type Inference → Codegen → Go C
 - ✅ Namespaced enum variant types (`Color_Red`, `Shape_Circle`) to avoid collisions
 - ✅ Generic type inference (instantiation, type argument syntax `func[T](args)`)
 
+### Completed (continued)
+- ✅ Variable declarations with type inference (`var a = 1`, `var b int = 2`, `var c int`)
+- ✅ Constant declarations with type inference (`const X = 1`, `const Y int = 2`)
+- ✅ Constants inside functions (not just top-level)
+
 ### Not Yet Implemented
+
+**Core Language:**
+- Interface types (define contracts, Go stdlib interop)
+- Unary operators (`-x` negation)
+- Bitwise operators (`&`, `|`, `^`, `<<`, `>>`, `&^`)
+- Compound assignments (`+=`, `-=`, `*=`, etc.)
+- Increment/decrement (`++`, `--`)
+- `break`, `continue`
+- `defer`
+- Range-based for loops (`for i, v := range collection`)
+- Slice type (`[]T`)
+- Map type (`map[K]V`)
+- Pointer type (`*T`, `&x`, `*p`)
+- Slice expressions (`arr[1:3]`)
+- Anonymous functions / closures
+- `make` / `new` built-ins
+
+**Soppo-specific:**
 - Standard library (Result, Option as prelude)
 - `.d.sop` definition files for Go interop
 - `?` operator for error propagation
@@ -48,6 +71,21 @@ Currently `...` is only used in struct destructuring patterns to ignore remainin
 3. **Generic constraints required**: `[T any]` not `[T]` (matches Go 1.18+)
 4. **Type checking mandatory**: No codegen without successful type check
 5. **Snapshot tests for codegen**: Unit tests for internal logic
+6. **No multiple return values**: Use `Result[T, E]` for error handling (Rust-style)
+
+## Variable Declaration Rules (Go-style)
+
+Following Go's rules for `:=` vs `=`:
+
+| Syntax | Meaning | Scope |
+|--------|---------|-------|
+| `x := 1` | Declare AND assign (short declaration) | Inside functions only |
+| `x = 1` | Assign only (must be declared) | Anywhere after declaration |
+| `var x = 1` | Declare with type inference | Anywhere |
+| `var x int = 1` | Declare with explicit type | Anywhere |
+| `var x int` | Declare without value (zero value) | Anywhere |
+| `const X = 1` | Constant with inference | Top-level |
+| `const X int = 1` | Constant with explicit type | Top-level |
 
 ## File Structure
 
@@ -65,15 +103,21 @@ src/
   source.rs       - Span, FileId, Symbol
   error.rs        - Error types with miette
 tests/
-  e2e.rs          - End-to-end tests with snapshots
+  common/         - Shared test utilities
+  pass.rs         - Tests that should compile successfully
+  fail.rs         - Tests that should produce errors
+  fixtures/
+    pass/         - .sop files that should compile
+    fail/         - .sop files that should error
   snapshots/      - Insta snapshot files
 ```
 
 ## Testing
 
 ```bash
-cargo test --lib      # Unit tests
-cargo test --test e2e # E2E with snapshots
+cargo test --lib             # Unit tests
+cargo test --test pass       # Passing compilation tests
+cargo test --test fail       # Error case tests
 cargo insta review    # Review snapshot changes
 ```
 

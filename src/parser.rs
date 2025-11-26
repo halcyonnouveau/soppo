@@ -30,6 +30,7 @@ const RESERVED_KEYWORDS: &[&str] = &[
     "import",
     "return",
     "var",
+    "const",
     // Soppo
     "match",
     "enum",
@@ -928,7 +929,7 @@ impl Parser {
             }
 
             Some(Token::Var) => {
-                // var name type or var name type = value
+                // var name = value, var name type, or var name type = value
                 self.advance(); // consume 'var'
 
                 // Parse the variable name
@@ -950,16 +951,33 @@ impl Parser {
 
                 self.validate_identifier(&name, &name_span)?;
 
-                // Parse the type
-                let ty = self.parse_type()?;
-
-                // Check for optional initializer
-                let (value, end_span) = if self.consume(&Token::Assign) {
+                // Check if next token is = (type inference) or a type name
+                let (ty, value, end_span) = if self.consume(&Token::Assign) {
+                    // var name = value (type inference)
                     let expr = self.parse_expr()?;
                     let span = expr.span.clone();
-                    (Some(expr), span)
+                    (None, Some(expr), span)
+                } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                    // var name type ... (explicit type)
+                    let ty = self.parse_type()?;
+                    let ty_span = ty.span.clone();
+
+                    if self.consume(&Token::Assign) {
+                        // var name type = value
+                        let expr = self.parse_expr()?;
+                        let span = expr.span.clone();
+                        (Some(ty), Some(expr), span)
+                    } else {
+                        // var name type (zero value)
+                        (Some(ty), None, ty_span)
+                    }
                 } else {
-                    (None, ty.span.clone())
+                    // var name (no type, no value - error)
+                    return Err(SoppoError::Parse {
+                        message: "Variable declaration requires either a type or an initializer"
+                            .to_string(),
+                        span: name_span,
+                    });
                 };
 
                 Ok(Stmt {
@@ -971,6 +989,69 @@ impl Parser {
                         end_span.byte_end,
                     ),
                     kind: StmtKind::VarDecl { name, ty, value },
+                })
+            }
+
+            Some(Token::Const) => {
+                // const name = value or const name type = value
+                self.advance(); // consume 'const'
+
+                // Parse the constant name
+                let (name, name_span) = match self.advance() {
+                    Some((Token::Ident(name), span)) => (name, span),
+                    Some((tok, span)) => {
+                        return Err(SoppoError::Parse {
+                            message: format!("Expected constant name, found {:?}", tok),
+                            span,
+                        });
+                    }
+                    None => {
+                        return Err(SoppoError::Parse {
+                            message: "Expected constant name".to_string(),
+                            span: Span::dummy(),
+                        });
+                    }
+                };
+
+                self.validate_identifier(&name, &name_span)?;
+
+                // Check if next token is = (type inference) or a type name
+                let ty = if self.consume(&Token::Assign) {
+                    // const name = value (type inference)
+                    None
+                } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                    // const name type = value (explicit type)
+                    let ty = self.parse_type()?;
+                    let ty_span = ty.span.clone();
+                    if !self.consume(&Token::Assign) {
+                        return Err(SoppoError::Parse {
+                            message: format!(
+                                "Constant '{}' requires an initializer (use `const {} {} = <value>`)",
+                                name, name, ty.name
+                            ),
+                            span: ty_span,
+                        });
+                    }
+                    Some(ty)
+                } else {
+                    return Err(SoppoError::Parse {
+                        message: "Expected type or '=' in const declaration".to_string(),
+                        span: name_span,
+                    });
+                };
+
+                let value = self.parse_expr()?;
+                let end_span = value.span.clone();
+
+                Ok(Stmt {
+                    span: Span::with_bytes(
+                        start_span.start,
+                        end_span.end,
+                        self.file,
+                        start_span.byte_start,
+                        end_span.byte_end,
+                    ),
+                    kind: StmtKind::ConstDecl { name, ty, value },
                 })
             }
 
@@ -1532,7 +1613,7 @@ impl Parser {
         }
     }
 
-    /// Parse a const declaration: const NAME TYPE = VALUE
+    /// Parse a const declaration: const NAME = VALUE or const NAME TYPE = VALUE
     fn parse_const_decl(&mut self) -> Result<ConstDecl> {
         let start = self.expect(Token::Const)?;
 
@@ -1554,9 +1635,21 @@ impl Parser {
 
         self.validate_identifier(&name, &name_span)?;
 
-        let ty = self.parse_type()?;
-
-        self.expect(Token::Assign)?;
+        // Check if next token is = (type inference) or a type name
+        let ty = if self.consume(&Token::Assign) {
+            // const NAME = VALUE (type inference)
+            None
+        } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+            // const NAME TYPE = VALUE (explicit type)
+            let ty = self.parse_type()?;
+            self.expect(Token::Assign)?;
+            Some(ty)
+        } else {
+            return Err(SoppoError::Parse {
+                message: "Expected type or '=' in const declaration".to_string(),
+                span: name_span,
+            });
+        };
 
         let value = self.parse_expr()?;
 

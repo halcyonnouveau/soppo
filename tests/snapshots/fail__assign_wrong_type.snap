@@ -1,11 +1,11 @@
 ---
-source: tests/e2e.rs
+source: tests/fail.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::type_mismatch
 
   × Mismatched types
-   ╭─[error_assign_wrong_type.sop:3:5]
+   ╭─[assign_wrong_type.sop:3:5]
  2 │     x := 42
  3 │     x = "not an int"
    ·     ────────┬───────

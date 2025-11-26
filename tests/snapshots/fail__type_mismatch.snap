@@ -1,11 +1,11 @@
 ---
-source: tests/e2e.rs
+source: tests/fail.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::type_mismatch
 
   × Mismatched types
-   ╭─[error_type_mismatch.sop:2:12]
+   ╭─[type_mismatch.sop:2:12]
  1 │ func bad() int {
  2 │     return "hello"
    ·            ───┬───

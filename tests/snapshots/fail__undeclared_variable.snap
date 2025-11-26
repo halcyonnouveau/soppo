@@ -1,11 +1,11 @@
 ---
-source: tests/e2e.rs
+source: tests/fail.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::undefined_variable
 
   × Cannot find value `x` in this scope
-   ╭─[error_undeclared_variable.sop:2:5]
+   ╭─[undeclared_variable.sop:2:5]
  1 │ func test() int {
  2 │     x = 42
    ·     ┬

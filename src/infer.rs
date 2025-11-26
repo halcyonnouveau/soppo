@@ -608,12 +608,52 @@ impl Infer {
             }
 
             StmtKind::VarDecl { name, ty, value } => {
-                let declared_ty = Type::simple(&ty.name);
-                if let Some(expr) = value {
-                    let value_ty = self.infer_expr(expr)?;
-                    self.unify(&declared_ty, &value_ty, &expr.span)?;
-                }
-                self.insert_var(name.clone(), declared_ty);
+                let var_ty = match (ty, value) {
+                    (Some(t), Some(expr)) => {
+                        // var x type = value: unify declared with inferred
+                        let declared_ty = Type::from_ast(t);
+                        let value_ty = self.infer_expr(expr)?;
+                        self.unify(&declared_ty, &value_ty, &expr.span)?;
+                        declared_ty
+                    }
+                    (Some(t), None) => {
+                        // var x type: use declared type (zero value)
+                        Type::from_ast(t)
+                    }
+                    (None, Some(expr)) => {
+                        // var x = value: infer from value
+                        self.infer_expr(expr)?
+                    }
+                    (None, None) => {
+                        // var x: error (should be caught by parser)
+                        return Err(SoppoError::Type {
+                            message:
+                                "Variable declaration requires either a type or an initializer"
+                                    .to_string(),
+                            span: stmt.span.clone(),
+                        });
+                    }
+                };
+                self.insert_var(name.clone(), var_ty);
+                Ok(Type::unit())
+            }
+
+            StmtKind::ConstDecl { name, ty, value } => {
+                // Infer the type of the value
+                let value_ty = self.infer_expr(value)?;
+
+                // Determine the constant's type
+                let const_ty = if let Some(t) = ty {
+                    // const x type = value: unify declared with inferred
+                    let declared_ty = Type::from_ast(t);
+                    self.unify(&declared_ty, &value_ty, &value.span)?;
+                    declared_ty
+                } else {
+                    // const x = value: infer from value
+                    value_ty
+                };
+
+                self.insert_var(name.clone(), const_ty);
                 Ok(Type::unit())
             }
 
@@ -845,13 +885,20 @@ impl Infer {
         // Infer the type of the value
         let value_ty = self.infer_expr(&const_decl.value)?;
 
-        // Check it matches the declared type
-        let declared_ty = Type::simple(&const_decl.ty.name);
-        self.unify(&declared_ty, &value_ty, &const_decl.value.span)?;
+        // Determine the constant's type
+        let const_ty = if let Some(ty) = &const_decl.ty {
+            // const X type = value: unify declared with inferred
+            let declared_ty = Type::from_ast(ty);
+            self.unify(&declared_ty, &value_ty, &const_decl.value.span)?;
+            declared_ty
+        } else {
+            // const X = value: infer from value
+            value_ty
+        };
 
         // Add constant to the global scope
         if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(const_decl.name.clone(), declared_ty);
+            scope.insert(const_decl.name.clone(), const_ty);
         }
 
         Ok(())

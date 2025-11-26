@@ -1,5 +1,6 @@
 ---
-source: tests/e2e.rs
+source: tests/pass.rs
+assertion_line: 9
 expression: output
 ---
 package main
@@ -94,8 +95,12 @@ func calculate(x int, y int) int {
 }
 
 func main() {
+    var a = 1
+    var b int = 1
+    const c = 1
+    const d int = 1
     x := 42
-    y := 10
+    y := ((((10 + a) + b) + c) + d)
     sum := (x + y)
     radius := 5.0
     area := ((PI * radius) * radius)
