@@ -106,6 +106,41 @@ func calculate(x int, y int) int {
     return result
 }
 
+// Multi-value return: two values
+func divide(a int, b int) (int, int) {
+    return a / b, a % b
+}
+
+// Multi-value return: three values
+func minMax(a int, b int, c int) (int, int, int) {
+    min := a
+    max := a
+    mid := a
+
+    if b < min {
+        min = b
+    }
+    if c < min {
+        min = c
+    }
+    if b > max {
+        max = b
+    }
+    if c > max {
+        max = c
+    }
+
+    if a != min && a != max {
+        mid = a
+    } else if b != min && b != max {
+        mid = b
+    } else {
+        mid = c
+    }
+
+    return min, mid, max
+}
+
 func main() {
     var a = 1
     var b int = 1
@@ -113,9 +148,18 @@ func main() {
     const c = 1
     const d int = 1
 
+    // Multi-var declarations
+    var e, f, g int
+    var h, i = 2, 3
+    var j, k int = 4, 5
+
+    // Multi-const declarations
+    const l, m = 6, 7
+    const n, o int = 8, 9
+
     // Integer operations
     x := 42
-    y := 10 + a + b + c + d
+    y := 10 + a + b + c + d + e + f + g + h + i + j + k + l + m + n + o
     sum := x + y
 
     // Float operations
@@ -149,6 +193,16 @@ func main() {
         status = "failure"
     }
 
+    // Multi-value returns
+    quot, rem := divide(17, 5)
+    small, medium, large := minMax(3, 1, 2)
+
+    // Multi-value short declaration with literals
+    p, q := 100, 200
+
+    // Multi-var with multi-return function
+    var q2, r2 = divide(20, 6)
+
     // Print results
     fmt.Printf("Sum: %d\n", sum)
     fmt.Printf("Area: %f\n", area)
@@ -158,4 +212,8 @@ func main() {
     fmt.Printf("Count: %d\n", count)
     fmt.Printf("Array sum: %d\n", arraySum)
     fmt.Printf("Status: %s\n", status)
+    fmt.Printf("17 / 5 = %d remainder %d\n", quot, rem)
+    fmt.Printf("min=%d, mid=%d, max=%d\n", small, medium, large)
+    fmt.Printf("20 / 6 = %d remainder %d\n", q2, r2)
+    fmt.Printf("p=%d, q=%d\n", p, q)
 }

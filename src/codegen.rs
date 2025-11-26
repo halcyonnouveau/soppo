@@ -391,12 +391,23 @@ impl Codegen {
 
         self.emit(")");
 
-        // Return type
-        if let Some(ret_ty) = &func.return_type {
-            let go_type = self.go_type(&ret_ty.name).to_string();
-            self.emit(&format!(" {}", go_type));
-            // Store return type for use in return statements
-            self.current_func_return_type = Some(go_type);
+        // Return type(s)
+        if !func.return_types.is_empty() {
+            if func.return_types.len() == 1 {
+                // Single return type
+                let go_type = self.go_type(&func.return_types[0].name).to_string();
+                self.emit(&format!(" {}", go_type));
+                self.current_func_return_type = Some(go_type);
+            } else {
+                // Multi-value return: (type1, type2, ...)
+                let types: Vec<String> = func
+                    .return_types
+                    .iter()
+                    .map(|t| self.go_type(&t.name).to_string())
+                    .collect();
+                self.emit(&format!(" ({})", types.join(", ")));
+                self.current_func_return_type = Some(types.join(", "));
+            }
         } else {
             self.current_func_return_type = None;
         }
@@ -433,6 +444,19 @@ impl Codegen {
                 self.emit_indent();
                 self.emit(&format!("{} := ", name));
                 self.gen_expr(value);
+                self.emit("\n");
+            }
+
+            StmtKind::MultiDecl { names, values } => {
+                self.emit_indent();
+                self.emit(&names.join(", "));
+                self.emit(" := ");
+                for (i, val) in values.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(val);
+                }
                 self.emit("\n");
             }
 
@@ -474,11 +498,87 @@ impl Codegen {
                 self.emit("\n");
             }
 
+            StmtKind::MultiVarDecl { names, ty, values } => {
+                self.emit_indent();
+                if values.is_empty() {
+                    // var a, b, c type (zero values)
+                    let ty = ty.as_ref().expect("MultiVarDecl without values needs type");
+                    self.emit(&format!(
+                        "var {} {}",
+                        names.join(", "),
+                        self.go_type(&ty.name)
+                    ));
+                } else if let Some(t) = ty {
+                    // var a, b type = expr1, expr2
+                    self.emit(&format!(
+                        "var {} {} = ",
+                        names.join(", "),
+                        self.go_type(&t.name)
+                    ));
+                    for (i, val) in values.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.gen_expr(val);
+                    }
+                } else {
+                    // var a, b = expr1, expr2
+                    self.emit(&format!("var {} = ", names.join(", ")));
+                    for (i, val) in values.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.gen_expr(val);
+                    }
+                }
+                self.emit("\n");
+            }
+
+            StmtKind::MultiConstDecl { names, ty, values } => {
+                self.emit_indent();
+                if let Some(t) = ty {
+                    // const a, b type = expr1, expr2
+                    self.emit(&format!(
+                        "const {} {} = ",
+                        names.join(", "),
+                        self.go_type(&t.name)
+                    ));
+                } else {
+                    // const a, b = expr1, expr2
+                    self.emit(&format!("const {} = ", names.join(", ")));
+                }
+                for (i, val) in values.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(val);
+                }
+                self.emit("\n");
+            }
+
             StmtKind::Assign { target, value } => {
                 self.emit_indent();
                 self.gen_expr(target);
                 self.emit(" = ");
                 self.gen_expr(value);
+                self.emit("\n");
+            }
+
+            StmtKind::MultiAssign { targets, values } => {
+                self.emit_indent();
+                for (i, target) in targets.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(target);
+                }
+                self.emit(" = ");
+                for (i, val) in values.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(val);
+                }
                 self.emit("\n");
             }
 
@@ -509,14 +609,19 @@ impl Codegen {
                 self.output.push('\n');
             }
 
-            StmtKind::Return { value } => {
+            StmtKind::Return { values } => {
                 self.emit_indent();
-                if let Some(expr) = value {
-                    self.emit("return ");
-                    self.gen_expr(expr);
-                    self.emit("\n");
-                } else {
+                if values.is_empty() {
                     self.emit("return\n");
+                } else {
+                    self.emit("return ");
+                    for (i, expr) in values.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.gen_expr(expr);
+                    }
+                    self.emit("\n");
                 }
             }
 

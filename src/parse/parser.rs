@@ -883,20 +883,114 @@ impl Parser {
         match self.peek() {
             Some(Token::Ident(_)) => {
                 // Parse as expression first, then check for assignment operators
-                let target = self.parse_expr()?;
+                let first_target = self.parse_expr()?;
 
+                // Check for multi-value declaration/assignment: a, b := ... or a, b = ...
+                if let ExprKind::Ident(first_name) = &first_target.kind
+                    && self.consume(&Token::Comma)
+                {
+                    // Multi-value: collect more identifiers
+                    let mut names = vec![first_name.clone()];
+                    let mut targets = vec![first_target.clone()];
+
+                    loop {
+                        let target = self.parse_expr()?;
+                        if let ExprKind::Ident(name) = &target.kind {
+                            names.push(name.clone());
+                            targets.push(target);
+                        } else {
+                            return Err(SoppoError::Parse {
+                                message: "Multi-value assignment targets must be identifiers"
+                                    .to_string(),
+                                span: target.span,
+                            });
+                        }
+
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
+                    }
+
+                    if self.consume(&Token::ColonAssign) {
+                        // Multi-value declaration: a, b := f() or a, b := expr1, expr2
+                        for name in &names {
+                            self.validate_identifier(name, &first_target.span)?;
+                        }
+                        let mut values = vec![self.parse_expr()?];
+                        while self.consume(&Token::Comma) {
+                            values.push(self.parse_expr()?);
+                        }
+                        // Allow 1 value (multi-return) or N values (one per name)
+                        if values.len() != 1 && values.len() != names.len() {
+                            return Err(SoppoError::Parse {
+                                message: format!(
+                                    "Expected 1 or {} values but got {}",
+                                    names.len(),
+                                    values.len()
+                                ),
+                                span: first_target.span.clone(),
+                            });
+                        }
+                        let end_span = values.last().unwrap().span.clone();
+                        return Ok(Stmt {
+                            span: Span::with_bytes(
+                                first_target.span.start,
+                                end_span.end,
+                                self.file,
+                                first_target.span.byte_start,
+                                end_span.byte_end,
+                            ),
+                            kind: StmtKind::MultiDecl { names, values },
+                        });
+                    } else if self.consume(&Token::Assign) {
+                        // Multi-value assignment: a, b = f() or a, b = expr1, expr2
+                        let mut values = vec![self.parse_expr()?];
+                        while self.consume(&Token::Comma) {
+                            values.push(self.parse_expr()?);
+                        }
+                        // Allow 1 value (multi-return) or N values (one per target)
+                        if values.len() != 1 && values.len() != targets.len() {
+                            return Err(SoppoError::Parse {
+                                message: format!(
+                                    "Expected 1 or {} values but got {}",
+                                    targets.len(),
+                                    values.len()
+                                ),
+                                span: first_target.span.clone(),
+                            });
+                        }
+                        let end_span = values.last().unwrap().span.clone();
+                        return Ok(Stmt {
+                            span: Span::with_bytes(
+                                first_target.span.start,
+                                end_span.end,
+                                self.file,
+                                first_target.span.byte_start,
+                                end_span.byte_end,
+                            ),
+                            kind: StmtKind::MultiAssign { targets, values },
+                        });
+                    } else {
+                        return Err(SoppoError::Parse {
+                            message: "Expected := or = after multi-value target".to_string(),
+                            span: self.peek_span(),
+                        });
+                    }
+                }
+
+                // Single target
                 if self.consume(&Token::ColonAssign) {
                     // Short variable declaration: x := value
                     // target must be a simple identifier
-                    if let ExprKind::Ident(name) = target.kind {
-                        self.validate_identifier(&name, &target.span)?;
+                    if let ExprKind::Ident(name) = first_target.kind {
+                        self.validate_identifier(&name, &first_target.span)?;
                         let value = self.parse_expr()?;
                         Ok(Stmt {
                             span: Span::with_bytes(
-                                target.span.start,
+                                first_target.span.start,
                                 value.span.end,
                                 self.file,
-                                target.span.byte_start,
+                                first_target.span.byte_start,
                                 value.span.byte_end,
                             ),
                             kind: StmtKind::Decl { name, value },
@@ -904,7 +998,7 @@ impl Parser {
                     } else {
                         Err(SoppoError::Parse {
                             message: "Left side of := must be a simple identifier".to_string(),
-                            span: target.span,
+                            span: first_target.span,
                         })
                     }
                 } else if self.consume(&Token::Assign) {
@@ -912,29 +1006,33 @@ impl Parser {
                     let value = self.parse_expr()?;
                     Ok(Stmt {
                         span: Span::with_bytes(
-                            target.span.start,
+                            first_target.span.start,
                             value.span.end,
                             self.file,
-                            target.span.byte_start,
+                            first_target.span.byte_start,
                             value.span.byte_end,
                         ),
-                        kind: StmtKind::Assign { target, value },
+                        kind: StmtKind::Assign {
+                            target: first_target,
+                            value,
+                        },
                     })
                 } else {
                     // Just an expression statement
                     Ok(Stmt {
-                        span: target.span.clone(),
-                        kind: StmtKind::Expr(target),
+                        span: first_target.span.clone(),
+                        kind: StmtKind::Expr(first_target),
                     })
                 }
             }
 
             Some(Token::Var) => {
-                // var name = value, var name type, or var name type = value
+                // var name = value, var name type, var name type = value
+                // var a, b, c type, var a, b = 1, 2, var a, b type = 1, 2
                 self.advance(); // consume 'var'
 
-                // Parse the variable name
-                let (name, name_span) = match self.advance() {
+                // Parse the first variable name
+                let (first_name, first_name_span) = match self.advance() {
                     Some((Token::Ident(name), span)) => (name, span),
                     Some((tok, span)) => {
                         return Err(SoppoError::Parse {
@@ -950,55 +1048,162 @@ impl Parser {
                     }
                 };
 
-                self.validate_identifier(&name, &name_span)?;
+                self.validate_identifier(&first_name, &first_name_span)?;
 
-                // Check if next token is = (type inference) or a type name
-                let (ty, value, end_span) = if self.consume(&Token::Assign) {
-                    // var name = value (type inference)
-                    let expr = self.parse_expr()?;
-                    let span = expr.span.clone();
-                    (None, Some(expr), span)
-                } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
-                    // var name type ... (explicit type)
-                    let ty = self.parse_type()?;
-                    let ty_span = ty.span.clone();
+                // Check for multi-var declaration (comma after first name)
+                if self.consume(&Token::Comma) {
+                    // Multi-var: var a, b, c type or var a, b = 1, 2
+                    let mut names = vec![first_name];
 
-                    if self.consume(&Token::Assign) {
-                        // var name type = value
+                    // Parse remaining names
+                    loop {
+                        let (name, name_span) = match self.advance() {
+                            Some((Token::Ident(name), span)) => (name, span),
+                            Some((tok, span)) => {
+                                return Err(SoppoError::Parse {
+                                    message: format!("Expected variable name, found {:?}", tok),
+                                    span,
+                                });
+                            }
+                            None => {
+                                return Err(SoppoError::Parse {
+                                    message: "Expected variable name".to_string(),
+                                    span: Span::dummy(),
+                                });
+                            }
+                        };
+                        self.validate_identifier(&name, &name_span)?;
+                        names.push(name);
+
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
+                    }
+
+                    // Now parse type and/or values
+                    // Allow either:
+                    // - var a, b = f() (single multi-return expression)
+                    // - var a, b = expr1, expr2 (one expression per name)
+                    let (ty, values, end_span) = if self.consume(&Token::Assign) {
+                        // var a, b = expr1, expr2 or var a, b = f()
+                        let mut vals = vec![self.parse_expr()?];
+                        while self.consume(&Token::Comma) {
+                            vals.push(self.parse_expr()?);
+                        }
+                        // Allow 1 value (multi-return) or N values (one per name)
+                        if vals.len() != 1 && vals.len() != names.len() {
+                            return Err(SoppoError::Parse {
+                                message: format!(
+                                    "Expected 1 or {} values but got {}",
+                                    names.len(),
+                                    vals.len()
+                                ),
+                                span: start_span.clone(),
+                            });
+                        }
+                        let end = vals.last().unwrap().span.clone();
+                        (None, vals, end)
+                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                        // var a, b, c type or var a, b type = 1, 2
+                        let ty = self.parse_type()?;
+                        let ty_span = ty.span.clone();
+
+                        if self.consume(&Token::Assign) {
+                            // var a, b type = expr1, expr2 or var a, b type = f()
+                            let mut vals = vec![self.parse_expr()?];
+                            while self.consume(&Token::Comma) {
+                                vals.push(self.parse_expr()?);
+                            }
+                            // Allow 1 value (multi-return) or N values (one per name)
+                            if vals.len() != 1 && vals.len() != names.len() {
+                                return Err(SoppoError::Parse {
+                                    message: format!(
+                                        "Expected 1 or {} values but got {}",
+                                        names.len(),
+                                        vals.len()
+                                    ),
+                                    span: start_span.clone(),
+                                });
+                            }
+                            let end = vals.last().unwrap().span.clone();
+                            (Some(ty), vals, end)
+                        } else {
+                            // var a, b, c type (zero values)
+                            (Some(ty), vec![], ty_span)
+                        }
+                    } else {
+                        return Err(SoppoError::Parse {
+                            message: "Multi-variable declaration requires a type or initializers"
+                                .to_string(),
+                            span: start_span.clone(),
+                        });
+                    };
+
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            start_span.start,
+                            end_span.end,
+                            self.file,
+                            start_span.byte_start,
+                            end_span.byte_end,
+                        ),
+                        kind: StmtKind::MultiVarDecl { names, ty, values },
+                    })
+                } else {
+                    // Single var declaration
+                    let (ty, value, end_span) = if self.consume(&Token::Assign) {
+                        // var name = value (type inference)
                         let expr = self.parse_expr()?;
                         let span = expr.span.clone();
-                        (Some(ty), Some(expr), span)
-                    } else {
-                        // var name type (zero value)
-                        (Some(ty), None, ty_span)
-                    }
-                } else {
-                    // var name (no type, no value - error)
-                    return Err(SoppoError::Parse {
-                        message: "Variable declaration requires either a type or an initializer"
-                            .to_string(),
-                        span: name_span,
-                    });
-                };
+                        (None, Some(expr), span)
+                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                        // var name type ... (explicit type)
+                        let ty = self.parse_type()?;
+                        let ty_span = ty.span.clone();
 
-                Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        end_span.end,
-                        self.file,
-                        start_span.byte_start,
-                        end_span.byte_end,
-                    ),
-                    kind: StmtKind::VarDecl { name, ty, value },
-                })
+                        if self.consume(&Token::Assign) {
+                            // var name type = value
+                            let expr = self.parse_expr()?;
+                            let span = expr.span.clone();
+                            (Some(ty), Some(expr), span)
+                        } else {
+                            // var name type (zero value)
+                            (Some(ty), None, ty_span)
+                        }
+                    } else {
+                        // var name (no type, no value - error)
+                        return Err(SoppoError::Parse {
+                            message:
+                                "Variable declaration requires either a type or an initializer"
+                                    .to_string(),
+                            span: first_name_span,
+                        });
+                    };
+
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            start_span.start,
+                            end_span.end,
+                            self.file,
+                            start_span.byte_start,
+                            end_span.byte_end,
+                        ),
+                        kind: StmtKind::VarDecl {
+                            name: first_name,
+                            ty,
+                            value,
+                        },
+                    })
+                }
             }
 
             Some(Token::Const) => {
-                // const name = value or const name type = value
+                // const name = value, const name type = value
+                // const a, b = 1, 2, const a, b type = 1, 2
                 self.advance(); // consume 'const'
 
-                // Parse the constant name
-                let (name, name_span) = match self.advance() {
+                // Parse the first constant name
+                let (first_name, first_name_span) = match self.advance() {
                     Some((Token::Ident(name), span)) => (name, span),
                     Some((tok, span)) => {
                         return Err(SoppoError::Parse {
@@ -1014,46 +1219,147 @@ impl Parser {
                     }
                 };
 
-                self.validate_identifier(&name, &name_span)?;
+                self.validate_identifier(&first_name, &first_name_span)?;
 
-                // Check if next token is = (type inference) or a type name
-                let ty = if self.consume(&Token::Assign) {
-                    // const name = value (type inference)
-                    None
-                } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
-                    // const name type = value (explicit type)
-                    let ty = self.parse_type()?;
-                    let ty_span = ty.span.clone();
-                    if !self.consume(&Token::Assign) {
-                        return Err(SoppoError::Parse {
-                            message: format!(
-                                "Constant '{}' requires an initializer (use `const {} {} = <value>`)",
-                                name, name, ty.name
-                            ),
-                            span: ty_span,
-                        });
+                // Check for multi-const declaration (comma after first name)
+                if self.consume(&Token::Comma) {
+                    // Multi-const: const a, b = 1, 2 or const a, b type = 1, 2
+                    let mut names = vec![first_name];
+
+                    // Parse remaining names
+                    loop {
+                        let (name, name_span) = match self.advance() {
+                            Some((Token::Ident(name), span)) => (name, span),
+                            Some((tok, span)) => {
+                                return Err(SoppoError::Parse {
+                                    message: format!("Expected constant name, found {:?}", tok),
+                                    span,
+                                });
+                            }
+                            None => {
+                                return Err(SoppoError::Parse {
+                                    message: "Expected constant name".to_string(),
+                                    span: Span::dummy(),
+                                });
+                            }
+                        };
+                        self.validate_identifier(&name, &name_span)?;
+                        names.push(name);
+
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
                     }
-                    Some(ty)
+
+                    // Now parse type and/or values (consts must have values)
+                    let (ty, values, end_span) = if self.consume(&Token::Assign) {
+                        // const a, b = expr1, expr2 (type inference)
+                        let mut vals = vec![self.parse_expr()?];
+                        while self.consume(&Token::Comma) {
+                            vals.push(self.parse_expr()?);
+                        }
+                        if vals.len() != names.len() {
+                            return Err(SoppoError::Parse {
+                                message: format!(
+                                    "Expected {} values but got {}",
+                                    names.len(),
+                                    vals.len()
+                                ),
+                                span: start_span.clone(),
+                            });
+                        }
+                        let end = vals.last().unwrap().span.clone();
+                        (None, vals, end)
+                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                        // const a, b type = 1, 2
+                        let ty = self.parse_type()?;
+                        let ty_span = ty.span.clone();
+
+                        if !self.consume(&Token::Assign) {
+                            return Err(SoppoError::Parse {
+                                message: "Multi-constant declaration requires initializers"
+                                    .to_string(),
+                                span: ty_span,
+                            });
+                        }
+
+                        let mut vals = vec![self.parse_expr()?];
+                        while self.consume(&Token::Comma) {
+                            vals.push(self.parse_expr()?);
+                        }
+                        if vals.len() != names.len() {
+                            return Err(SoppoError::Parse {
+                                message: format!(
+                                    "Expected {} values but got {}",
+                                    names.len(),
+                                    vals.len()
+                                ),
+                                span: start_span.clone(),
+                            });
+                        }
+                        let end = vals.last().unwrap().span.clone();
+                        (Some(ty), vals, end)
+                    } else {
+                        return Err(SoppoError::Parse {
+                            message: "Expected type or '=' in multi-const declaration".to_string(),
+                            span: start_span.clone(),
+                        });
+                    };
+
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            start_span.start,
+                            end_span.end,
+                            self.file,
+                            start_span.byte_start,
+                            end_span.byte_end,
+                        ),
+                        kind: StmtKind::MultiConstDecl { names, ty, values },
+                    })
                 } else {
-                    return Err(SoppoError::Parse {
-                        message: "Expected type or '=' in const declaration".to_string(),
-                        span: name_span,
-                    });
-                };
+                    // Single const declaration
+                    let ty = if self.consume(&Token::Assign) {
+                        // const name = value (type inference)
+                        None
+                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                        // const name type = value (explicit type)
+                        let ty = self.parse_type()?;
+                        let ty_span = ty.span.clone();
+                        if !self.consume(&Token::Assign) {
+                            return Err(SoppoError::Parse {
+                                message: format!(
+                                    "Constant '{}' requires an initializer (use `const {} {} = <value>`)",
+                                    first_name, first_name, ty.name
+                                ),
+                                span: ty_span,
+                            });
+                        }
+                        Some(ty)
+                    } else {
+                        return Err(SoppoError::Parse {
+                            message: "Expected type or '=' in const declaration".to_string(),
+                            span: first_name_span,
+                        });
+                    };
 
-                let value = self.parse_expr()?;
-                let end_span = value.span.clone();
+                    let value = self.parse_expr()?;
+                    let end_span = value.span.clone();
 
-                Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        end_span.end,
-                        self.file,
-                        start_span.byte_start,
-                        end_span.byte_end,
-                    ),
-                    kind: StmtKind::ConstDecl { name, ty, value },
-                })
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            start_span.start,
+                            end_span.end,
+                            self.file,
+                            start_span.byte_start,
+                            end_span.byte_end,
+                        ),
+                        kind: StmtKind::ConstDecl {
+                            name: first_name,
+                            ty,
+                            value,
+                        },
+                    })
+                }
             }
 
             Some(Token::LBrace) => {
@@ -1131,14 +1437,19 @@ impl Parser {
 
             Some(Token::Return) => {
                 self.advance();
-                let value = if matches!(self.peek(), Some(Token::RBrace) | None) {
-                    None
+                let values = if matches!(self.peek(), Some(Token::RBrace) | None) {
+                    vec![]
                 } else {
-                    Some(self.parse_expr()?)
+                    // Parse comma-separated return values
+                    let mut values = vec![self.parse_expr()?];
+                    while self.consume(&Token::Comma) {
+                        values.push(self.parse_expr()?);
+                    }
+                    values
                 };
 
-                let end_span = value
-                    .as_ref()
+                let end_span = values
+                    .last()
                     .map(|v| v.span.clone())
                     .unwrap_or(start_span.clone());
 
@@ -1150,7 +1461,7 @@ impl Parser {
                         start_span.byte_start,
                         end_span.byte_end,
                     ),
-                    kind: StmtKind::Return { value },
+                    kind: StmtKind::Return { values },
                 })
             }
 
@@ -1380,11 +1691,27 @@ impl Parser {
 
         self.expect(Token::RParen)?;
 
-        // Parse optional return type (Go-style: comes after params without arrow)
-        let return_type = if !matches!(self.peek(), Some(Token::LBrace)) {
-            Some(self.parse_type()?)
+        // Parse optional return type(s)
+        // Go-style: single type or (type1, type2, ...)
+        let return_types = if matches!(self.peek(), Some(Token::LBrace)) {
+            // No return type
+            vec![]
+        } else if self.consume(&Token::LParen) {
+            // Multi-value return: (int, string, error)
+            let mut types = vec![];
+            if !matches!(self.peek(), Some(Token::RParen)) {
+                loop {
+                    types.push(self.parse_type()?);
+                    if !self.consume(&Token::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.expect(Token::RParen)?;
+            types
         } else {
-            None
+            // Single return type
+            vec![self.parse_type()?]
         };
 
         // Parse body
@@ -1395,7 +1722,7 @@ impl Parser {
             name,
             generics,
             params,
-            return_type,
+            return_types,
             body: body.clone(),
             span: Span::with_bytes(
                 start_span.start,
@@ -1921,10 +2248,10 @@ mod tests {
         let stmt = parser.parse_stmt().unwrap();
 
         match stmt.kind {
-            StmtKind::Return { value: Some(value) } => {
-                assert!(matches!(value.kind, ExprKind::Integer(42)));
+            StmtKind::Return { values } if values.len() == 1 => {
+                assert!(matches!(values[0].kind, ExprKind::Integer(42)));
             }
-            _ => panic!("Expected return statement"),
+            _ => panic!("Expected return statement with one value"),
         }
     }
 
@@ -1951,8 +2278,8 @@ mod tests {
         assert_eq!(func.params[0].name, "x");
         assert_eq!(func.params[0].ty.name, "int");
         assert_eq!(func.params[1].name, "y");
-        assert!(func.return_type.is_some());
-        assert_eq!(func.return_type.unwrap().name, "int");
+        assert_eq!(func.return_types.len(), 1);
+        assert_eq!(func.return_types[0].name, "int");
         assert_eq!(func.body.stmts.len(), 1);
     }
 

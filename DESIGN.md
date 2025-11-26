@@ -127,27 +127,87 @@ type User struct {
 }
 ```
 
-## Error Handling (planned)
+## Error Handling
 
-### Result Type
+The `?` operator handles Go's `(T, error)` return pattern with less boilerplate.
 
-```go
-type Result[T any, E any] enum {
-    Ok T
-    Err E
-}
-```
-
-### The ? Operator
+### Basic Usage
 
 ```go
+// Auto-return error if not nil
 func process() (Config, error) {
-    port := parsePort(config)?  // Returns early if err != nil
+    port := parsePort(config) ?
     return Config{port: port}, nil
 }
 ```
 
-## Exhaustiveness Checking (planned)
+If `parsePort` returns a non-nil error, the function immediately returns with that error.
+
+### With Error Wrapping
+
+```go
+func process() (Config, error) {
+    port := parsePort(config) ? {
+        return Config{}, fmt.Errorf("parse failed: %v", err)
+    }
+    return Config{port: port}, nil
+}
+```
+
+The block after `?` has an implicit `err` variable containing the error.
+
+### Transpilation
+
+```go
+// Soppo
+r := SomeFunction() ?
+
+// Becomes Go
+r, _err := SomeFunction()
+if _err != nil {
+    return _zero, _err  // returns zero values + error
+}
+```
+
+With custom handling:
+```go
+// Soppo
+r := SomeFunction() ? {
+    return Config{}, fmt.Errorf("failed: %v", err)
+}
+
+// Becomes Go
+r, err := SomeFunction()
+if err != nil {
+    return Config{}, fmt.Errorf("failed: %v", err)
+}
+```
+
+## Nil Safety
+
+Go allows dereferencing nil pointers, which crashes at runtime:
+
+```go
+// Go - compiles fine, crashes at runtime
+var user *User = nil
+fmt.Println(user.Name)  // panic: nil pointer dereference
+```
+
+Soppo uses flow-sensitive nil tracking to catch this at compile time:
+
+```go
+// Soppo
+user := findUser(1)       // *User, may be nil
+fmt.Println(user.Name)    // ERROR: user may be nil
+
+if user != nil {
+    fmt.Println(user.Name)  // OK: compiler knows non-nil here
+}
+```
+
+The compiler tracks which variables have been nil-checked and only allows dereferencing after a check. No new syntax - just smarter type checking.
+
+## Exhaustiveness Checking
 
 All enum variants must be handled:
 
@@ -160,12 +220,6 @@ case Color.Green:
     doGreen()
 }
 ```
-
-## Standard Library (planned)
-
-**Prelude** - Auto-imported:
-- `Option[T]`, `Some`, `None`
-- `Result[T, E]`, `Ok`, `Err`
 
 ## Go Interop
 

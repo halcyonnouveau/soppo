@@ -30,39 +30,63 @@ mod go_extract;   // new, uses same lexer, no full AST
 - Pre-scans for `// soppo:enum` markers before lexing
 - Handles Go-only constructs (interfaces, type aliases) without polluting Soppo parser
 
-### 3. Go Multi-Return Handling
-Go functions with multiple returns map to Soppo types:
+### 3. Go Multi-Return & Error Handling
 
-| Go returns | Soppo type |
-|------------|------------|
-| `(T, error)` | `Result[T, error]` (auto-convert) |
-| `(A, B)` | `Pair[A, B]` |
-| `(A, B, C)` | `Triple[A, B, C]` |
-| `(A, B, C, D)` | `Quad[A, B, C, D]` |
-| 5+ returns | Compile error |
+Soppo supports Go's multi-return directly with the `?` operator for error handling.
 
-Prelude types (generated to `gen/soppo/prelude.go`, auto-imported):
-```go
-// gen/soppo/prelude.go
-package soppo
+#### Error Handling with `?`
 
-type Pair[A, B any] struct { First A; Second B }
-type Triple[A, B, C any] struct { First A; Second B; Third C }
-type Quad[A, B, C, D any] struct { First A; Second B; Third C; Fourth D }
-type Result[T, E any] interface { isResult() }
-// ... Result variants, Option, etc.
-```
-
-Destructuring syntax for non-error returns:
+For `(T, error)` returns, use `?` to auto-return on error:
 ```soppo
-(width, height) := image.Bounds()  // Pair[int, int] → desugars to Go's multi-assign
-// NOT for (T, error) → those become Result, use Result methods
+func process() (Config, error) {
+    data := readFile("config.json") ?
+    port := parsePort(data) ?
+    return Config{port: port}, nil
+}
 ```
 
-### 4. Module Version Resolution
+With custom error wrapping:
+```soppo
+func process() (Config, error) {
+    data := readFile("config.json") ? {
+        return Config{}, fmt.Errorf("read failed: %v", err)
+    }
+    return Config{port: 8080}, nil
+}
+```
+
+#### Multi-Value Returns
+
+Soppo supports Go-style multi-value returns natively:
+```soppo
+func divide(a int, b int) (int, int) {
+    return a / b, a % b
+}
+
+func main() {
+    quot, rem := divide(10, 3)
+}
+```
+
+No wrapper types needed - transpiles directly to Go.
+
+### 4. Nil Safety
+
+Soppo uses flow-sensitive nil tracking. Go allows nil dereference (crashes at runtime), but Soppo catches it at compile time:
+
+```soppo
+user := findUser(1)       // *User, may be nil
+fmt.Println(user.Name)    // ERROR: user may be nil
+
+if user != nil {
+    fmt.Println(user.Name)  // OK: compiler knows non-nil here
+}
+```
+
+### 5. Module Version Resolution
 Shell out to `go list -m -json` to resolve module versions rather than parsing go.sum ourselves. Uses Go's battle-tested resolution logic.
 
-### 5. Project Structure
+### 6. Project Structure
 ```
 project/
 ├── go.mod                    ← Go module definition
@@ -82,7 +106,7 @@ project/
 - Go ignores `.sop` files, only compiles `.go` files
 - Generated files are committed for seamless Go consumption
 
-### 6. Import System
+### 7. Import System
 
 **All imports are Go imports** - no special syntax needed:
 ```soppo
@@ -94,7 +118,7 @@ import "github.com/other/golib"                   // External Go lib
 
 Import paths always point to Go code. Type information is extracted separately.
 
-### 7. Type Extraction (Two Sources)
+### 8. Type Extraction (Two Sources)
 
 | Import Type | Code Location | Types From |
 |-------------|---------------|------------|
@@ -111,7 +135,7 @@ import "github.com/user/project/gen/pkg/util"
   → Not found → Parse Go files (auto-extract types)
 ```
 
-### 8. Preserving Soppo Semantics in Generated Code
+### 9. Preserving Soppo Semantics in Generated Code
 
 Add marker comments so external Soppo libs retain enum semantics:
 

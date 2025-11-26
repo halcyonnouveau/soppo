@@ -23,8 +23,8 @@ pub struct Infer {
     /// Next fresh type variable ID
     next_var: i32,
 
-    /// Expected return type for the current function (None if not in a function)
-    expected_return_type: Option<Type>,
+    /// Expected return types for the current function (None if not in a function)
+    expected_return_types: Option<Vec<Type>>,
 
     /// Generic type parameters in scope: param name -> type variable
     generic_params: HashMap<String, Type>,
@@ -51,7 +51,7 @@ impl Infer {
             scopes: vec![HashMap::new()],
             substitutions: HashMap::new(),
             next_var: 0,
-            expected_return_type: None,
+            expected_return_types: None,
             generic_params: HashMap::new(),
             go_cache: GoCache::new()?,
             project: None,
@@ -66,7 +66,7 @@ impl Infer {
             scopes: vec![HashMap::new()],
             substitutions: HashMap::new(),
             next_var: 0,
-            expected_return_type: None,
+            expected_return_types: None,
             generic_params: HashMap::new(),
             go_cache: GoCache::new()?,
             project: Some(project),
@@ -859,6 +859,44 @@ impl Infer {
                 Ok(Type::unit())
             }
 
+            StmtKind::MultiDecl { names, values } => {
+                if values.len() == 1 && names.len() > 1 {
+                    // a, b := f() (multi-return unpacking)
+                    let value = &values[0];
+                    let value_ty = self.infer_expr(value)?;
+                    let value_ty = self.substitute(value_ty);
+
+                    // The value should be a tuple type with matching arity
+                    if let Type::Con {
+                        name: type_name,
+                        args,
+                    } = &value_ty
+                        && type_name.name == "_tuple" && args.len() == names.len() {
+                            for (name, ty) in names.iter().zip(args.iter()) {
+                                self.insert_var(name.clone(), ty.clone());
+                            }
+                            return Ok(Type::unit());
+                        }
+
+                    // Not a tuple type or wrong arity
+                    Err(SoppoError::Type {
+                        message: format!(
+                            "Cannot unpack {} values from type `{}`",
+                            names.len(),
+                            value_ty
+                        ),
+                        span: value.span.clone(),
+                    })
+                } else {
+                    // a, b := expr1, expr2 (one value per name)
+                    for (name, value) in names.iter().zip(values.iter()) {
+                        let value_ty = self.infer_expr(value)?;
+                        self.insert_var(name.clone(), value_ty);
+                    }
+                    Ok(Type::unit())
+                }
+            }
+
             StmtKind::VarDecl { name, ty, value } => {
                 let var_ty = match (ty, value) {
                     (Some(t), Some(expr)) => {
@@ -890,6 +928,71 @@ impl Infer {
                 Ok(Type::unit())
             }
 
+            StmtKind::MultiVarDecl { names, ty, values } => {
+                if values.is_empty() {
+                    // var a, b, c type (zero values)
+                    let declared_ty =
+                        ty.as_ref()
+                            .map(Type::from_ast)
+                            .ok_or_else(|| SoppoError::Type {
+                                message:
+                                    "Multi-variable declaration without values requires a type"
+                                        .to_string(),
+                                span: stmt.span.clone(),
+                            })?;
+                    for name in names {
+                        self.insert_var(name.clone(), declared_ty.clone());
+                    }
+                } else if values.len() == 1 && names.len() > 1 {
+                    // var a, b = f() (multi-return unpacking)
+                    let value = &values[0];
+                    let value_ty = self.infer_expr(value)?;
+                    let value_ty = self.substitute(value_ty);
+
+                    // The value should be a tuple type with matching arity
+                    if let Type::Con {
+                        name: type_name,
+                        args,
+                    } = &value_ty
+                        && type_name.name == "_tuple" && args.len() == names.len() {
+                            for (name, arg_ty) in names.iter().zip(args.iter()) {
+                                let var_ty = if let Some(t) = ty {
+                                    let declared_ty = Type::from_ast(t);
+                                    self.unify(&declared_ty, arg_ty, &value.span)?;
+                                    declared_ty
+                                } else {
+                                    arg_ty.clone()
+                                };
+                                self.insert_var(name.clone(), var_ty);
+                            }
+                            return Ok(Type::unit());
+                        }
+
+                    return Err(SoppoError::Type {
+                        message: format!(
+                            "Cannot unpack {} values from type `{}`",
+                            names.len(),
+                            value_ty
+                        ),
+                        span: value.span.clone(),
+                    });
+                } else {
+                    // var a, b = expr1, expr2 or var a, b type = expr1, expr2
+                    for (name, value) in names.iter().zip(values.iter()) {
+                        let value_ty = self.infer_expr(value)?;
+                        let var_ty = if let Some(t) = ty {
+                            let declared_ty = Type::from_ast(t);
+                            self.unify(&declared_ty, &value_ty, &value.span)?;
+                            declared_ty
+                        } else {
+                            value_ty
+                        };
+                        self.insert_var(name.clone(), var_ty);
+                    }
+                }
+                Ok(Type::unit())
+            }
+
             StmtKind::ConstDecl { name, ty, value } => {
                 // Infer the type of the value
                 let value_ty = self.infer_expr(value)?;
@@ -909,11 +1012,67 @@ impl Infer {
                 Ok(Type::unit())
             }
 
+            StmtKind::MultiConstDecl { names, ty, values } => {
+                // const a, b = expr1, expr2 or const a, b type = expr1, expr2
+                for (name, value) in names.iter().zip(values.iter()) {
+                    let value_ty = self.infer_expr(value)?;
+                    let const_ty = if let Some(t) = ty {
+                        let declared_ty = Type::from_ast(t);
+                        self.unify(&declared_ty, &value_ty, &value.span)?;
+                        declared_ty
+                    } else {
+                        value_ty
+                    };
+                    self.insert_var(name.clone(), const_ty);
+                }
+                Ok(Type::unit())
+            }
+
             StmtKind::Assign { target, value } => {
                 let target_ty = self.infer_expr(target)?;
                 let value_ty = self.infer_expr(value)?;
                 self.unify(&target_ty, &value_ty, &stmt.span)?;
                 Ok(Type::unit())
+            }
+
+            StmtKind::MultiAssign { targets, values } => {
+                if values.len() == 1 && targets.len() > 1 {
+                    // a, b = f() (multi-return unpacking)
+                    let value = &values[0];
+                    let value_ty = self.infer_expr(value)?;
+                    let value_ty = self.substitute(value_ty);
+
+                    // The value should be a tuple type with matching arity
+                    if let Type::Con {
+                        name: type_name,
+                        args,
+                    } = &value_ty
+                        && type_name.name == "_tuple" && args.len() == targets.len() {
+                            for (target, expected_ty) in targets.iter().zip(args.iter()) {
+                                let target_ty = self.infer_expr(target)?;
+                                self.unify(&target_ty, expected_ty, &target.span)?;
+                            }
+                            return Ok(Type::unit());
+                        }
+
+                    // Not a tuple type or wrong arity
+                    Err(SoppoError::Type {
+                        message: format!(
+                            "Cannot unpack {} values from type `{}`",
+                            targets.len(),
+                            value_ty
+                        ),
+                        span: value.span.clone(),
+                    })
+                } else {
+                    // a, b = expr1, expr2 (one value per target)
+                    for (target, value) in targets.iter().zip(values.iter()) {
+                        let target_ty = self.infer_expr(target)?;
+                        let value_ty = self.infer_expr(value)?;
+                        self.unify(&target_ty, &value_ty, &target.span)?;
+                    }
+                    Ok(Type::unit())
+                }
             }
 
             StmtKind::For { condition, body } => {
@@ -954,12 +1113,27 @@ impl Infer {
                 }
             }
 
-            StmtKind::Return { value } => {
-                if let Some(expr) = value {
-                    let value_ty = self.infer_expr(expr)?;
-                    // Check against expected return type
-                    if let Some(expected) = &self.expected_return_type {
-                        self.unify(&expected.clone(), &value_ty, &expr.span)?;
+            StmtKind::Return { values } => {
+                // Check return values against expected return types
+                if let Some(expected_types) = self.expected_return_types.clone() {
+                    if values.len() != expected_types.len() {
+                        return Err(SoppoError::Type {
+                            message: format!(
+                                "Expected {} return value(s), got {}",
+                                expected_types.len(),
+                                values.len()
+                            ),
+                            span: stmt.span.clone(),
+                        });
+                    }
+                    for (expr, expected) in values.iter().zip(expected_types.iter()) {
+                        let value_ty = self.infer_expr(expr)?;
+                        self.unify(expected, &value_ty, &expr.span)?;
+                    }
+                } else if !values.is_empty() {
+                    // Infer types but no expected types to check against
+                    for expr in values {
+                        self.infer_expr(expr)?;
                     }
                 }
                 // Return statements are diverging - they never produce a value
@@ -1074,12 +1248,17 @@ impl Infer {
             self.generic_params.insert(generic.name.clone(), ty_var);
         }
 
-        // Set expected return type for this function
-        let old_expected_return = self.expected_return_type.clone();
-        if let Some(ret_ty_ast) = &func.return_type {
-            self.expected_return_type = Some(self.resolve_type(ret_ty_ast));
+        // Set expected return types for this function
+        let old_expected_return = self.expected_return_types.clone();
+        if func.return_types.is_empty() {
+            self.expected_return_types = Some(vec![]);
         } else {
-            self.expected_return_type = Some(Type::unit());
+            self.expected_return_types = Some(
+                func.return_types
+                    .iter()
+                    .map(|ty| self.resolve_type(ty))
+                    .collect(),
+            );
         }
 
         // Add receiver parameter to scope (for methods)
@@ -1097,28 +1276,34 @@ impl Infer {
         // Infer body type
         let body_ty = self.infer_block(&func.body)?;
 
-        // Check against declared return type
-        if let Some(ret_ty_ast) = &func.return_type {
-            let declared_ret_ty = self.resolve_type(ret_ty_ast);
+        // Check against declared return type (for single return)
+        if func.return_types.len() == 1 {
+            let declared_ret_ty = self.resolve_type(&func.return_types[0]);
             self.unify(&body_ty, &declared_ret_ty, &func.span)?;
         }
 
         self.pop_scope();
 
-        // Restore old expected return type and generic params
-        self.expected_return_type = old_expected_return;
+        // Restore old expected return types and generic params
+        self.expected_return_types = old_expected_return;
         self.generic_params = old_generic_params;
 
         // Register function in global state
-        let func_ty = if let Some(ret_ty_ast) = &func.return_type {
+        // For multi-value returns, we use a tuple type representation
+        let func_ty = {
             let param_tys: Vec<Type> = func.params.iter().map(|p| Type::from_ast(&p.ty)).collect();
-            let ret_ty = Type::from_ast(ret_ty_ast);
+            let ret_ty = if func.return_types.is_empty() {
+                Type::unit()
+            } else if func.return_types.len() == 1 {
+                Type::from_ast(&func.return_types[0])
+            } else {
+                // Multi-value return: create a tuple type
+                Type::generic(
+                    "_tuple",
+                    func.return_types.iter().map(Type::from_ast).collect(),
+                )
+            };
             Type::fun(param_tys, ret_ty)
-        } else {
-            Type::fun(
-                func.params.iter().map(|p| Type::from_ast(&p.ty)).collect(),
-                Type::unit(),
-            )
         };
 
         // Store function type in outermost scope so it can be called

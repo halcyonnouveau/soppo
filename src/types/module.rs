@@ -48,7 +48,7 @@ pub struct FuncDef {
     pub name: String,
     pub generics: Vec<String>,
     pub params: Vec<(String, Type)>,
-    pub return_type: Type,
+    pub return_types: Vec<Type>,
 }
 
 /// Constant definition in a module
@@ -148,11 +148,7 @@ impl GlobalState {
                 .iter()
                 .map(|p| (p.name.clone(), Type::from_ast(&p.ty)))
                 .collect(),
-            return_type: func_decl
-                .return_type
-                .as_ref()
-                .map(Type::from_ast)
-                .unwrap_or_else(Type::unit),
+            return_types: func_decl.return_types.iter().map(Type::from_ast).collect(),
         };
 
         self.current_module_mut()

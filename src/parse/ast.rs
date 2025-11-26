@@ -95,7 +95,7 @@ pub struct FuncDecl {
     pub name: String,
     pub generics: Vec<Generic>,
     pub params: Vec<Param>,
-    pub return_type: Option<Type>,
+    pub return_types: Vec<Type>, // Empty = no return, one = single, many = multi-value
     pub body: Block,
     pub span: Span,
 }
@@ -129,11 +129,22 @@ pub enum StmtKind {
         name: String,
         value: Expr,
     },
+    // x, y := value or x, y := expr1, expr2 (multi-value short declaration)
+    MultiDecl {
+        names: Vec<String>,
+        values: Vec<Expr>, // 1 value (multi-return) or N values (one per name)
+    },
     // var x = value, var x type, or var x type = value
     VarDecl {
         name: String,
         ty: Option<Type>, //infer from value if not provided
         value: Option<Expr>,
+    },
+    // var a, b, c type or var a, b = expr1, expr2
+    MultiVarDecl {
+        names: Vec<String>,
+        ty: Option<Type>,  // shared type for all vars (var a, b, c int)
+        values: Vec<Expr>, // empty = zero value, or one value per name
     },
     // const x = value or const x type = value (inside functions)
     ConstDecl {
@@ -141,10 +152,21 @@ pub enum StmtKind {
         ty: Option<Type>, // infer from value if not provided
         value: Expr,
     },
+    // const a, b = expr1, expr2 or const a, b type = expr1, expr2
+    MultiConstDecl {
+        names: Vec<String>,
+        ty: Option<Type>,  // shared type for all consts
+        values: Vec<Expr>, // one value per name (consts must have values)
+    },
     // x = value or x.y = value (assignment)
     Assign {
         target: Expr,
         value: Expr,
+    },
+    // x, y = value or x, y = expr1, expr2 (multi-value assignment)
+    MultiAssign {
+        targets: Vec<Expr>,
+        values: Vec<Expr>, // 1 value (multi-return) or N values (one per target)
     },
     For {
         condition: Expr,
@@ -156,7 +178,7 @@ pub enum StmtKind {
         else_block: Option<Block>,
     },
     Return {
-        value: Option<Expr>,
+        values: Vec<Expr>, // Empty = no return, one = single, many = multi-value
     },
     Match {
         scrutinee: Expr,
