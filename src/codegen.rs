@@ -653,7 +653,7 @@ impl Codegen {
                         if i > 0 {
                             self.emit(", ");
                         }
-                        self.emit(&self.go_type(&ty.name));
+                        self.emit(self.go_type(&ty.name));
                     }
                     self.emit("]");
                 }

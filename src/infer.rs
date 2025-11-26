@@ -160,21 +160,18 @@ impl Infer {
                 if let Type::Con {
                     name: type_name, ..
                 } = scrutinee_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
+                    && let crate::module::TypeDefKind::Enum { variants } = &type_def.kind
                 {
-                    if let Some(type_def) = self.global_state.lookup_type(&type_name.name) {
-                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
-                            for variant in variants {
-                                if let EnumVariant::Single {
-                                    name: vname, ty, ..
-                                } = variant
-                                {
-                                    if vname == variant_name {
-                                        let binding_ty = Type::simple(&ty.name);
-                                        self.insert_var(binding.clone(), binding_ty);
-                                        return Ok(());
-                                    }
-                                }
-                            }
+                    for variant in variants {
+                        if let EnumVariant::Single {
+                            name: vname, ty, ..
+                        } = variant
+                            && vname == variant_name
+                        {
+                            let binding_ty = Type::simple(&ty.name);
+                            self.insert_var(binding.clone(), binding_ty);
+                            return Ok(());
                         }
                     }
                 }
@@ -199,32 +196,28 @@ impl Infer {
                 if let Type::Con {
                     name: type_name, ..
                 } = scrutinee_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
+                    && let crate::module::TypeDefKind::Enum { variants } = &type_def.kind
                 {
-                    if let Some(type_def) = self.global_state.lookup_type(&type_name.name) {
-                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
-                            for variant in variants {
-                                if let EnumVariant::Struct {
-                                    name: vname,
-                                    fields: variant_fields,
-                                    ..
-                                } = variant
+                    for variant in variants {
+                        if let EnumVariant::Struct {
+                            name: vname,
+                            fields: variant_fields,
+                            ..
+                        } = variant
+                            && vname == variant_name
+                        {
+                            found_variant = true;
+                            // Collect field types
+                            for (field_name, binding_name) in fields {
+                                if let Some(field) =
+                                    variant_fields.iter().find(|f| &f.name == field_name)
                                 {
-                                    if vname == variant_name {
-                                        found_variant = true;
-                                        // Collect field types
-                                        for (field_name, binding_name) in fields {
-                                            if let Some(field) = variant_fields
-                                                .iter()
-                                                .find(|f| &f.name == field_name)
-                                            {
-                                                let field_ty = Type::simple(&field.ty.name);
-                                                bindings.push((binding_name.clone(), field_ty));
-                                            }
-                                        }
-                                        break;
-                                    }
+                                    let field_ty = Type::simple(&field.ty.name);
+                                    bindings.push((binding_name.clone(), field_ty));
                                 }
                             }
+                            break;
                         }
                     }
                 }
@@ -261,7 +254,7 @@ impl Infer {
             // One is a type variable: create substitution
             (Type::Var(a), ty) | (ty, Type::Var(a)) => {
                 // Occurs check: prevent infinite types like T = List[T]
-                if self.occurs(*a, ty) {
+                if Self::occurs(*a, ty) {
                     return Err(SoppoError::Type {
                         message: format!("Infinite type: ?{} = {}", a, ty),
                         span: span.clone(),
@@ -311,20 +304,20 @@ impl Infer {
 
             // Mismatch
             _ => Err(SoppoError::TypeMismatch {
-                expected: t1.clone(),
-                found: t2.clone(),
+                expected: Box::new(t1.clone()),
+                found: Box::new(t2.clone()),
                 span: span.clone(),
             }),
         }
     }
 
     /// Check if type variable occurs in type (for occurs check)
-    fn occurs(&self, var: i32, ty: &Type) -> bool {
+    fn occurs(var: i32, ty: &Type) -> bool {
         match ty {
             Type::Var(v) => *v == var,
-            Type::Con { args, .. } => args.iter().any(|arg| self.occurs(var, arg)),
+            Type::Con { args, .. } => args.iter().any(|arg| Self::occurs(var, arg)),
             Type::Fun { args, ret } => {
-                args.iter().any(|arg| self.occurs(var, arg)) || self.occurs(var, ret)
+                args.iter().any(|arg| Self::occurs(var, arg)) || Self::occurs(var, ret)
             }
             Type::Never => false,
         }
@@ -701,57 +694,56 @@ impl Infer {
                 }
 
                 // Exhaustiveness check for enum types
-                if let Type::Con { name, .. } = &scrutinee_ty {
-                    if let Some(type_def) = self.global_state.lookup_type(&name.name) {
-                        if let crate::module::TypeDefKind::Enum { variants } = &type_def.kind {
-                            // Check if any arm is Default (catch-all)
-                            let has_default = arms
-                                .iter()
-                                .any(|arm| matches!(&arm.pattern.kind, PatternKind::Default));
+                if let Type::Con { name, .. } = &scrutinee_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&name.name)
+                    && let crate::module::TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    // Check if any arm is Default (catch-all)
+                    let has_default = arms
+                        .iter()
+                        .any(|arm| matches!(&arm.pattern.kind, PatternKind::Default));
 
-                            if !has_default {
-                                // Collect covered variants from patterns
-                                let covered: HashSet<String> = arms
-                                    .iter()
-                                    .filter_map(|arm| match &arm.pattern.kind {
-                                        PatternKind::Variant(v) => {
-                                            // Extract variant name from qualified name like "Color.Red"
-                                            Some(v.rsplit('.').next().unwrap_or(v).to_string())
-                                        }
-                                        PatternKind::Destructor { name, .. } => Some(
-                                            name.rsplit('.').next().unwrap_or(name).to_string(),
-                                        ),
-                                        PatternKind::StructDestructor { name, .. } => Some(
-                                            name.rsplit('.').next().unwrap_or(name).to_string(),
-                                        ),
-                                        _ => None,
-                                    })
-                                    .collect();
-
-                                // Find missing variants
-                                let missing: Vec<String> = variants
-                                    .iter()
-                                    .filter_map(|v| {
-                                        let vname = match v {
-                                            EnumVariant::Unit { name, .. } => name,
-                                            EnumVariant::Single { name, .. } => name,
-                                            EnumVariant::Struct { name, .. } => name,
-                                        };
-                                        if !covered.contains(vname) {
-                                            Some(vname.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect();
-
-                                if !missing.is_empty() {
-                                    return Err(SoppoError::NonExhaustive {
-                                        missing,
-                                        span: stmt.span.clone(),
-                                    });
+                    if !has_default {
+                        // Collect covered variants from patterns
+                        let covered: HashSet<String> = arms
+                            .iter()
+                            .filter_map(|arm| match &arm.pattern.kind {
+                                PatternKind::Variant(v) => {
+                                    // Extract variant name from qualified name like "Color.Red"
+                                    Some(v.rsplit('.').next().unwrap_or(v).to_string())
                                 }
-                            }
+                                PatternKind::Destructor { name, .. } => {
+                                    Some(name.rsplit('.').next().unwrap_or(name).to_string())
+                                }
+                                PatternKind::StructDestructor { name, .. } => {
+                                    Some(name.rsplit('.').next().unwrap_or(name).to_string())
+                                }
+                                _ => None,
+                            })
+                            .collect();
+
+                        // Find missing variants
+                        let missing: Vec<String> = variants
+                            .iter()
+                            .filter_map(|v| {
+                                let vname = match v {
+                                    EnumVariant::Unit { name, .. } => name,
+                                    EnumVariant::Single { name, .. } => name,
+                                    EnumVariant::Struct { name, .. } => name,
+                                };
+                                if !covered.contains(vname) {
+                                    Some(vname.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        if !missing.is_empty() {
+                            return Err(SoppoError::NonExhaustive {
+                                missing,
+                                span: stmt.span.clone(),
+                            });
                         }
                     }
                 }

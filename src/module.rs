@@ -116,7 +116,7 @@ impl GlobalState {
             return_type: func_decl
                 .return_type
                 .as_ref()
-                .map(|t| Type::from_ast(t))
+                .map(Type::from_ast)
                 .unwrap_or_else(Type::unit),
         };
 

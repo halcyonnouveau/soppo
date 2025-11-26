@@ -27,8 +27,8 @@ pub enum SoppoError {
         help("Change this expression to produce `{expected}`, or change the expected type")
     )]
     TypeMismatch {
-        expected: Type,
-        found: Type,
+        expected: Box<Type>,
+        found: Box<Type>,
         #[label("expected `{expected}`, found `{found}`")]
         span: Span,
     },
