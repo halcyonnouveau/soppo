@@ -12,7 +12,7 @@ I'd like to present to you Soppo's raison d'être:
 
 Anyway I don't like Dingo and this "DONZEO MANIFESTO" is about why.
 
-Normally I wouldn't write something so aggressively *mean* about someone else's work, I'm not about that life. But I don't think this is someone else's work, this is AI language model Claude made by AI "safety" and research company Anthropic's work. And as such, the neurons of my brain which make me feel bad about shitting on other people just aren't lighting up right now.
+Normally I wouldn't write something so aggressively *mean* about someone else's work, I'm not about that life. But I don't think this is someone else's work, this is AI language model Claude made by AI "safety" and research company Anthropic's work. And as such, the neurons in my brain that are supposed to make me feel bad about shitting on other people just aren't lighting up right now.
 
 I have no issues calling Claude a piss-fuck dickhead cunt. It comes pretty naturally to me, actually.
 
