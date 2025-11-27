@@ -2393,6 +2393,24 @@ impl Parser {
 
             let end_span = self.expect(Token::RBrace)?;
             (TypeKind::Struct { fields }, end_span)
+        } else if self.consume(&Token::Interface) {
+            // Parse interface
+            self.expect(Token::LBrace)?;
+            // Skip terminators after opening brace
+            self.skip_terminators();
+
+            let mut methods = Vec::new();
+
+            while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                let method = self.parse_interface_method()?;
+                methods.push(method);
+
+                // Terminators as separator
+                self.skip_terminators();
+            }
+
+            let end_span = self.expect(Token::RBrace)?;
+            (TypeKind::Interface { methods }, end_span)
         } else {
             // Type alias: type Foo = Bar or type Foo int
             let target = self.parse_type()?;
@@ -2518,6 +2536,81 @@ impl Parser {
             name,
             ty,
             span: name_span,
+        })
+    }
+
+    /// Parse interface method signature: MethodName(params) returns
+    fn parse_interface_method(&mut self) -> Result<InterfaceMethod> {
+        let (name, name_span) = match self.advance() {
+            Some((Token::Ident(name), span)) => (name, span),
+            Some((tok, span)) => {
+                return Err(SoppoError::Parse {
+                    message: format!("Expected method name, found {:?}", tok),
+                    span,
+                });
+            }
+            None => {
+                return Err(SoppoError::Parse {
+                    message: "Expected method name".to_string(),
+                    span: Span::dummy(),
+                });
+            }
+        };
+
+        // Parse parameters
+        self.expect(Token::LParen)?;
+        let mut params = Vec::new();
+
+        if !matches!(self.peek(), Some(Token::RParen)) {
+            loop {
+                params.push(self.parse_param()?);
+
+                if !self.consume(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+
+        let end_span = self.expect(Token::RParen)?;
+
+        // Parse optional return type(s)
+        let (returns, final_span) = if matches!(
+            self.peek(),
+            Some(Token::Newline) | Some(Token::RBrace) | None
+        ) {
+            // No return type
+            (vec![], end_span)
+        } else if self.consume(&Token::LParen) {
+            // Multi-value return: (int, string, error)
+            let mut types = vec![];
+            if !matches!(self.peek(), Some(Token::RParen)) {
+                loop {
+                    types.push(self.parse_type()?);
+                    if !self.consume(&Token::Comma) {
+                        break;
+                    }
+                }
+            }
+            let rparen_span = self.expect(Token::RParen)?;
+            (types, rparen_span)
+        } else {
+            // Single return type
+            let ty = self.parse_type()?;
+            let ty_span = ty.span.clone();
+            (vec![ty], ty_span)
+        };
+
+        Ok(InterfaceMethod {
+            name,
+            params,
+            returns,
+            span: Span::with_bytes(
+                name_span.start,
+                final_span.end,
+                self.file,
+                name_span.byte_start,
+                final_span.byte_end,
+            ),
         })
     }
 

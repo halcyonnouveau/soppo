@@ -2192,6 +2192,12 @@ impl Infer {
                 self.generic_params = old_generic_params;
                 Ok(())
             }
+            TypeKind::Interface { .. } => {
+                // Interfaces are just type definitions that Go uses for polymorphism
+                // Just register the type, no special type checking needed
+                self.global_state.register_type(type_decl);
+                Ok(())
+            }
         }
     }
 }

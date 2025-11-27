@@ -9,7 +9,7 @@ use soppo::parse::{Decl, FileId, Parser};
 use soppo::types::Infer;
 
 #[derive(ClapParser)]
-#[command(name = "sop")]
+#[command(name = "sop", about = "Sop is a tool for managing Soppo source code")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -19,8 +19,7 @@ struct Cli {
 enum Command {
     /// Build project or specific files
     Build {
-        /// Files to compile (glob patterns expanded by shell)
-        /// If empty, builds entire project from go.mod root
+        /// Files to compile. If empty, builds entire project from go.mod root
         #[arg()]
         files: Vec<PathBuf>,
 
@@ -30,7 +29,7 @@ enum Command {
     },
     /// Type-check without generating code
     Check {
-        /// Files to check (glob patterns expanded by shell)
+        /// Files to check
         #[arg()]
         files: Vec<PathBuf>,
     },
@@ -81,7 +80,7 @@ fn build_project(output: Option<PathBuf>) -> Result<()> {
 fn build_files(files: &[PathBuf], output: Option<PathBuf>) -> Result<()> {
     for file in files {
         let output_path = if let Some(ref dir) = output {
-            // Preserve structure: --out-dir gen/ with pkg/main.sop -> gen/pkg/main.go
+            // Preserve structure: --output gen/ with pkg/main.sop -> gen/pkg/main.go
             let mut out = dir.join(file);
             out.set_extension("go");
             out

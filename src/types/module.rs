@@ -40,6 +40,15 @@ pub enum TypeDefKind {
     Alias,
     Enum { variants: Vec<EnumVariant> },
     Struct { fields: Vec<(String, Type)> },
+    Interface { methods: Vec<MethodSig> },
+}
+
+/// Method signature for interfaces
+#[derive(Debug, Clone)]
+pub struct MethodSig {
+    pub name: String,
+    pub params: Vec<(String, Type)>,
+    pub returns: Vec<Type>,
 }
 
 /// Function definition in a module
@@ -128,6 +137,20 @@ impl GlobalState {
                     fields: fields
                         .iter()
                         .map(|f| (f.name.clone(), Type::from_ast(&f.ty)))
+                        .collect(),
+                },
+                TypeKind::Interface { methods } => TypeDefKind::Interface {
+                    methods: methods
+                        .iter()
+                        .map(|m| MethodSig {
+                            name: m.name.clone(),
+                            params: m
+                                .params
+                                .iter()
+                                .map(|p| (p.name.clone(), Type::from_ast(&p.ty)))
+                                .collect(),
+                            returns: m.returns.iter().map(Type::from_ast).collect(),
+                        })
                         .collect(),
                 },
             },

@@ -337,6 +337,7 @@ impl Codegen {
                     }
                 }
             }
+
             TypeKind::Struct { fields } => {
                 // Generate struct type with generics if present
                 let generic_params = self.format_generic_brackets(&type_decl.generics);
@@ -348,6 +349,51 @@ impl Codegen {
                 self.indent();
                 for field in fields {
                     self.emit_line(&format!("{} {}", field.name, self.go_type(&field.ty.name)));
+                }
+                self.dedent();
+                self.emit_line("}");
+            }
+
+            TypeKind::Interface { methods } => {
+                // Generate Go interface directly
+                let generic_params = self.format_generic_brackets(&type_decl.generics);
+
+                self.emit_line(&format!(
+                    "type {}{} interface {{",
+                    type_decl.name, generic_params
+                ));
+                self.indent();
+                for method in methods {
+                    self.emit_indent();
+                    self.emit(&format!("{}(", method.name));
+
+                    // Parameters
+                    for (i, param) in method.params.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(&format!("{} {}", param.name, self.go_type(&param.ty.name)));
+                    }
+
+                    self.emit(")");
+
+                    // Return types
+                    if !method.returns.is_empty() {
+                        if method.returns.len() == 1 {
+                            self.emit(&format!(" {}", self.go_type(&method.returns[0].name)));
+                        } else {
+                            self.emit(" (");
+                            for (i, ty) in method.returns.iter().enumerate() {
+                                if i > 0 {
+                                    self.emit(", ");
+                                }
+                                self.emit(&self.go_type(&ty.name));
+                            }
+                            self.emit(")");
+                        }
+                    }
+
+                    self.emit("\n");
                 }
                 self.dedent();
                 self.emit_line("}");

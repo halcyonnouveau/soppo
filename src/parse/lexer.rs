@@ -40,6 +40,8 @@ pub enum Token {
     Enum,
     #[token("struct")]
     Struct,
+    #[token("interface")]
+    Interface,
     #[token("var")]
     Var,
     #[token("go")]

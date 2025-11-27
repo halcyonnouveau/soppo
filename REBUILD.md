@@ -20,6 +20,7 @@
 - Multi-value returns
 - Multiple patterns in match arms (`case 1, 2, 3:`)
 - Expression-less match (`match { case x > 0: ... }`)
+- Interface definitions
 
 ## Not Yet Implemented
 
@@ -29,7 +30,6 @@
 - Named arguments
 - String interpolation
 - `select` statement
-- Interface definitions
 
 **Syntax:**
 - Comment preservation 

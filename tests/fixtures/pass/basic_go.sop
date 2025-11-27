@@ -8,6 +8,19 @@ import "time"
 const MAX_SIZE int = 100
 const PI float64 = 3.14159
 
+// Interface definitions (pass through to Go)
+type Reader interface {
+    Read(p []byte) (int, error)
+}
+
+type Writer interface {
+    Write(p []byte) (int, error)
+}
+
+type Stringer interface {
+    String() string
+}
+
 // Type alias
 type UserId int
 

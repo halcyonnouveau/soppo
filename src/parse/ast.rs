@@ -47,6 +47,16 @@ pub enum TypeKind {
     Alias { target: Type },
     Enum { variants: Vec<EnumVariant> },
     Struct { fields: Vec<Field> },
+    Interface { methods: Vec<InterfaceMethod> },
+}
+
+/// Interface method signature
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub returns: Vec<Type>,
+    pub span: Span,
 }
 
 /// Generic type parameter
