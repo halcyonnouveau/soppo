@@ -40,7 +40,11 @@ The value add of TypeScript is "static types for JavaScript". If we were to appl
 
 A specific design goal of TypeScript is to "[impose no runtime overhead on emitted programs](https://github.com/Microsoft/TypeScript/wiki/TypeScript-Design-Goals#goals)." It's able to do this because it does NOT generate code, the resulting JS is essentially your original TS code minus the type annotations. There are some exceptions like enums, but enums are widely regarded a mistake in TypeScript, so I'm going to ignore it.
 
-Dingo also says it has "zero runtime overhead", which is just a fucking lie. The very nature of being a code generator means IT HAS OVERHEAD. You could say "minimal" if you have the numbers to back it up I guess, but "zero?" Fuck off with that shit.
+Dingo also says it has "zero runtime overhead", which is just a fucking lie.
+
+Dingo generates code. Your enum becomes a tagged struct with a tag field, pointer fields for each variant's data, constructor functions, and helper methods. Your `Result<int>` isn't just `(int, error)` - it's a whole struct with `IsOk()`, `IsErr()`, `Unwrap()`, `UnwrapOr()`, `Map()`, etc. 
+
+This is real boilerplate code that executes at runtime. Extra allocations, extra indirection, extra function calls. You could say "minimal" if you have numbers to back it up (which wouldn't be hard, because I'm sure it doesn't have much of an impact), but "zero"? Fuck off with that shit.
 
 And how about it talking of a "pure Go implementation" like it's an improvement. I really don't think it is, and it shouldn't even matter if the eventual goal is to start dogfooding (which it should be).
 
@@ -48,7 +52,9 @@ However, I can attest - there are some nice things that come with a Go implement
 
 But that's also because of the different architectures between the two. At the time of writing, and from what I understand after reading the code - Dingo does not do any type checking, it's a simple syntax transform and codegen, then it hands it off to Go. It's basically a fancy preprocessor.
 
-This is not the correct approach. I don't understand why you'd add a new type (`enum`), but not type check it. What's the point? Like, yes you can rely on Go for type checking - but a big selling point to enums (especially in Rust) is that they are exhaustively matched, and that if you miss a variant - compile error. You can't do this if you aren't type checking it yourself, the Go compiler is dumb, that's its big selling point and why it's so fast.
+This is not the correct approach. I don't understand why you'd add a new type (`enum`), but not type check it properly. Yes, Dingo does attempt exhaustiveness checking - but it's done by pattern matching on variant names like "Ok" and "Err", not actual type information. It only works for built-in types (`Result`, `Option`) and falls back to "cannot determine type, skip exhaustiveness check" for anything it doesn't recognise. 
+
+And even after checking, they still add a `panic` to "unreachable" parts of the generated code because Go's compiler doesn't know the match is complete. "Unreachable" or not, I don't think you should ever be adding panics to your generated code.
 
 > Ever wonder what a dingo actually is?
 > 
@@ -157,7 +163,7 @@ So, Mr Dingo, here's a world renowned and ISO certified "beanpuppy code review" 
 
 The first thing that jumps out to me is the amount of `TODO`s. I know from experience Claude (and other LLMs probably) love adding `TODO`s because it thinks something is too complex to do right now, and it should leave it for later.
 
-This is usually bad because it means Claude hasn't/won't think about the problem holistically and has come up with some shit that it can't extend later without fucking everything up. Instead, it's just tried to find the first and simplest solution that solves whatever issue it's trying to solve. This is not good for long term code quality.
+This is usually bad because it means Claude hasn't/won't think about the problem holistically and has come up with some shit that it can't extend later without fucking everything up. Instead, it just tried to find the first and simplest solution that solves whatever issue it's trying to solve. This is not good for long term code quality.
 
 Another big problem is that Dingo doesn't use a lexer and runs regex directly on source code. [Lexical analysis](https://en.wikipedia.org/wiki/Lexical_analysis) is a pretty important step to compilation, so I dunno why you'd just... not do it?
 
@@ -176,17 +182,17 @@ Regex transforms text into Go code
       v
 *ast.File (creates an AST of Go code)  <- Go's standard library AST types
       v
-[Plugins modify the Go AST]
+Plugins modify the Go AST
       v
 [go/printer]
       v
 Output (.go)
 ```
 
-Again, I think it bears repeating - this is not a good architecture for a programming language. It works for simple cases. But:
+Again, I think it bears repeating - this is not a good architecture for a programming language compiler. It works for simple cases sure, but:
 
 1. No error recovery - if regex breaks, you get Go parser errors pointing at generated code, not your Dingo source
-2. No analysis - can't check exhaustiveness, can't track nil, can't do anything that requires understanding structure
+2. No analysis - can't check exhaustiveness (properly), can't track nil, can't do anything that requires understanding structure
 3. No reliable transforms - regex can't count braces, can't handle nesting, can't know if it's in a string
 4. No tooling foundation - can't build a formatter, linter, or proper LSP (not just relying on `gopls`) because there's no Dingo AST to work with (also yes I'm aware of the "source maps", but like... source maps? really?)
 
