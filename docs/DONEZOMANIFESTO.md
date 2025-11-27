@@ -1,0 +1,290 @@
+# THE DONEZO MANIFESTO
+
+I'd like to present to you Soppo's raison d'être:
+
+![screenshot of me complaining about dingo](./assets/donezo_1.png)
+
+> So I'm making a callout post on my Twitter.com: Claude, you've got a small dick. It's the size of this walnut except WAY smaller. And guess what? Here's what my dong looks like.
+> 
+> [Explosion sounds] That's right, baby. All points, no quills, no pillows — look at that, it looks like two balls and a bong. He fucked my wife, so guess what, I'm gonna fuck the Earth. That's right, this is what you get: MY SUPER LASER PISS!! Except I'm not gonna piss on the Earth, I'm gonna go higher; I'M PISSING ON THE MOON! How do you like that, Obama?! I PISSED ON THE MOON, YOU IDIOT!
+>
+> [https://www.youtube.com/watch?v=9XyEosgoGgg](https://www.youtube.com/watch?v=9XyEosgoGgg)
+
+Anyway I don't like Dingo and this "DONZEO MANIFESTO" is about why.
+
+Normally I wouldn't write something so aggressively *mean* about someone else's work, I'm not about that life. But I don't think this is someone else's work, this is AI language model Claude made by AI "safety" and research company Anthropic's work. And as such, the neurons of my brain which make me feel bad about shitting on other people just aren't lighting up right now.
+
+I have no issues calling Claude a piss-fuck dickhead cunt. It comes pretty naturally to me, actually.
+
+And that's because I use it too. OHH SHIT PLOT TWIST!
+
+I think AI tools are useful for writing code (see [this blog post](https://quaso.engineering/note/vibecoding) I wrote). The problems I have with Dingo aren't that it's "vibe coded", it's that it feels incredibly misguided - and that's probably because of Claude.
+
+And because of that, I think this project brings great shame to Australia. And that's super weird for me to say because I am not particularly patriotic or nationalistic, so this normally isn't a thing I care about. I guess it could also be the association with dingoes.
+
+Okay enough of the shit, what's up with Dingo? I think I can just go through the README and point to things I don't like. Hopefully you can withstand the rancid stench of Claudisms that infest it and all other documentation in the project. If not, maybe just leave now.
+
+> Think TypeScript, but for Go.
+>
+> Dingo is a language that compiles to clean, idiomatic Go code. Not some franken-runtime or a whole new ecosystem. Just better syntax that becomes regular Go.
+>
+> The pitch: Write code with Result types, pattern matching, and null safety. Get back perfect Go code that your team can read, your tools can process, and your production servers can run at exactly the same speed.
+> 
+> Zero runtime overhead. Zero new dependencies. Zero "what's this weird thing in my transpiled code?"
+>
+> Is this proven to work? Yes. Borgo (4.5k stars) already proved you can transpile to Go successfully. Dingo builds on that foundation with better IDE integration, source maps, and a pure Go implementation.
+
+Okay let's start with "TypeScript for Go".
+
+The value add of TypeScript is "static types for JavaScript". If we were to apply the same to Dingo - "static types for Go", yeah that doesn't make any fucking sense.
+
+A specific design goal of TypeScript is to "[impose no runtime overhead on emitted programs](https://github.com/Microsoft/TypeScript/wiki/TypeScript-Design-Goals#goals)." It's able to do this because it does NOT generate code, the resulting JS is essentially your original TS code minus the type annotations. There are some exceptions like enums, but enums are widely regarded a mistake in TypeScript, so I'm going to ignore it.
+
+Dingo also says it has "zero runtime overhead", which is just a fucking lie. The very nature of being a code generator means IT HAS OVERHEAD. You could say "minimal" if you have the numbers to back it up I guess, but "zero?" Fuck off with that shit.
+
+And how about it talking of a "pure Go implementation" like it's an improvement. I really don't think it is, and it shouldn't even matter if the eventual goal is to start dogfooding (which it should be).
+
+However, I can attest - there are some nice things that come with a Go implementation. The native "ast" package would have made writing Soppo a lot easier, and because of that Dingo will probably always have better Go interop than Soppo.
+
+But that's also because of the different architectures between the two. At the time of writing, and from what I understand after reading the code - Dingo does not do any type checking, it's a simple syntax transform and codegen, then it hands it off to Go. It's basically a fancy preprocessor.
+
+This is not the correct approach. I don't understand why you'd add a new type (`enum`), but not type check it. What's the point? Like, yes you can rely on Go for type checking - but a big selling point to enums (especially in Rust) is that they are exhaustively matched, and that if you miss a variant - compile error. You can't do this if you aren't type checking it yourself, the Go compiler is dumb, that's its big selling point and why it's so fast.
+
+> Ever wonder what a dingo actually is?
+> 
+> Thousands of years ago, they were domesticated dogs. Well-behaved. Following commands. Controlled.
+>
+> Then they escaped to the Australian wild and evolved into something science couldn't categorize. Not quite dog. Not quite wolf. Ungovernable.
+>
+> The Go Gopher? Created at Google. Lives by the rules. Does what it's told.
+>
+> Dingo broke free.
+>
+> Here's the beautiful part: dingos are still canines. They didn't reject their DNA—they just refused to be controlled. Same with our language.
+
+What? I hate everything about this.
+
+"Categorise" is also spelt wrong. Not very Australian of you.
+
+```go
+enum Result {
+    Ok(value: int),
+    Error(message: string)
+}
+
+func divide(a: int, b: int) Result {
+    if b == 0 {
+        return Error("division by zero")
+    }
+    return Ok(a / b)
+}
+
+let result = divide(10, 2)
+match result {
+    Ok(value) => fmt.Printf("Success: %d\n", value),
+    Error(msg) => fmt.Printf("Error: %s\n", msg)
+}
+```
+
+Finally, some code.
+
+WHY THE FUCK DOES IT LOOK LIKE RUST?
+
+Look, I love Rust more than anything else in the world. I DON'T WANT MY GO CODE LOOKING LIKE RUST WHAT BLASPHEMY IS THIS?
+
+BURN THIS SHIT TO THE GROUND STRAIGHT TO HELL AND THEN TO PURGATORY FOR A FALSE SENSE OF SECURITY BUT THEN DROP KICK IT BACK INTO SUPER HELL BECAUSE FUCK YOU AND YOUR FATHER SPECIFICALLY FOR REASONS I'M NOT EVEN SURE ABOUT.
+
+There's also a pretty severe design flaw with this, can you spot it?
+
+That's right! `Ok` and `Err` are bare identifiers! They aren't namespaced to `Result`. So what would happen if you wrote this:
+
+```go
+enum Result {
+    Ok(value: int),
+    Error(message: string)
+}
+
+enum NetworkResult {
+    Ok(data: string),
+    Error(code: int)
+}
+```
+
+What happens when you write `Ok(...)`? Which one is it?
+
+```go
+// Property access with safe navigation
+let city = user?.address?.city?.name ?? "Unknown"
+
+// Method calls with safe navigation
+let email = user?.getProfile()?.email ?? "noreply@example.com"
+
+// Works with Go pointers too!
+let timeout = config?.database?.timeout ?? 30
+
+// Chained defaults
+let theme = user?.theme ?? project?.theme ?? global?.theme ?? "light"
+```
+
+This is too many question marks. Especially when you add in using `?` to propagate errors. It's too fucking many dude.
+
+Like it's a fine idea... probably (I haven't thought about it very hard), but like... ugh.
+
+```go
+let numbers = []int{1, 2, 3, 4, 5}
+let doubled = numbers.map(func(x int) int { return x * 2 })
+let evens = numbers.filter(func(x int) bool { return x % 2 == 0 })
+let sum = numbers.reduce(0, func(acc int, x int) int { return acc + x })
+```
+
+Functional constructs outside of non-functional languages are overrated.
+
+In functional languages, `map`, `filter`, and `reduce` aren't valuable for what they do directly. They're valuable because they compose with other recursion schemes - calling a function `map` doesn't give you the same `map` you'd have in OCaml.
+
+OCaml's `map` over a list is a specialisation of a more general pattern: a functor. This means you can swap in a different data structure (trees, options, results) and map still works, with the same laws and guarantees. In JavaScript, `Array.prototype.map` is just a method on arrays. It doesn't compose with anything. You can't generalise it, swap the container, or build larger abstractions from it. 
+
+There's also a performance cost. Chaining `map`, `filter`, and `reduce` in most languages creates intermediate arrays at each step. Instead of one loop doing 3 things, you get 3 loops producing 3 arrays. Haskell solves this with fusion optimisations that collapse the chain back into a single pass. Rust solves it with lazy evaluation. Go does NOT solve this because it was never designed to.
+
+And that's fine, it doesn't need to. So stop trying to ham-fist it in.
+
+Fun fact: Soppo was almost written in Ocaml because I thought "if it was good enough for Rust, it's certainly good enough for this shit." But I decided against it because I'm not very confident in Ocaml (could have been a good excuse to get better though now that I'm thinking about it).
+
+Anyway, the rest of the README is kinda meandering and repeats a lot of the same talking points and information (thanks Claude), so I think I'm actually just done with this. Sorry, we didn't even get halfway through the README. Guess I was the one who couldn't handle the Claudisms...
+
+How about we actually go into the internals? Does that sound good to you baby girl?
+
+So, Mr Dingo, here's a world renowned and ISO certified "beanpuppy code review" given to you for FREE. I know, I am incredibly generous - you don't need to keep praising me.
+
+The first thing that jumps out to me is the amount of `TODO`s. I know from experience Claude (and other LLMs probably) love adding `TODO`s because it thinks something is too complex to do right now, and it should leave it for later.
+
+This is usually bad because it means Claude hasn't/won't think about the problem holistically and has come up with some shit that it can't extend later without fucking everything up. Instead, it's just tried to find the first and simplest solution that solves whatever issue it's trying to solve. This is not good for long term code quality.
+
+Another big problem is that Dingo doesn't use a lexer and runs regex directly on source code. [Lexical analysis](https://en.wikipedia.org/wiki/Lexical_analysis) is a pretty important step to compilation, so I dunno why you'd just... not do it?
+
+Without a lexer, you're doing surgery blindfolded - regex can't tell if `??` is an operator or inside a string, if `=>` is a lambda or in a comment, if `{` starts a block or is in a template literal. A lexer reads the source once, tracks state (am I in a string? a comment? how deep in braces?), and outputs a clean token stream where each piece is labelled and safe to transform.
+
+Any language that handles strings, comments, or nested structures (which is basically all of them) needs this foundation.
+
+Let me expand further on this. From what I can gather this is Dingo's architecture:
+
+```
+Source (.dingo)
+      v
+Regex transforms text into Go code
+      v
+[go/parser.ParseFile()]                <- Go's standard library parser
+      v
+*ast.File (creates an AST of Go code)  <- Go's standard library AST types
+      v
+[Plugins modify the Go AST]
+      v
+[go/printer]
+      v
+Output (.go)
+```
+
+Again, I think it bears repeating - this is not a good architecture for a programming language. It works for simple cases. But:
+
+1. No error recovery - if regex breaks, you get Go parser errors pointing at generated code, not your Dingo source
+2. No analysis - can't check exhaustiveness, can't track nil, can't do anything that requires understanding structure
+3. No reliable transforms - regex can't count braces, can't handle nesting, can't know if it's in a string
+4. No tooling foundation - can't build a formatter, linter, or proper LSP (not just relying on `gopls`) because there's no Dingo AST to work with (also yes I'm aware of the "source maps", but like... source maps? really?)
+
+If this were a human writing it, I'd tell them to read one of the canonical books on this stuff ["Crafting Interpreters"](https://craftinginterpreters.com/) to actually understand how things like this are supposed to be made.
+
+But anyway, if we look back at the architecture diagram, you might have noticed "Plugins modify the Go AST" - what's that about?
+
+Plugins are Dingo's "second stage". Regex handles text transforms (`x?` -> error handling boilerplate), but can't do semantic work like figuring out types. So after regex runs, Dingo parses the output with Go's parser and runs "plugins" on the Go AST. From what I've read, this system is meant to be extensible by anyone, and anyone can add new features.
+
+The plugins walk the AST looking for patterns - see a function call named `Ok`? That's probably a `Result` constructor, so infer the type from the argument, generate a struct declaration, and rewrite the call. It's not ideal since you're pattern matching on naming conventions rather than actual Dingo semantics, but it works for the common cases I guess? Seems highly brittle though.
+
+This two-stage approach is unusual. Most languages have a unified pipeline where the parser understands the full language. 
+
+I'm completely speculating here, but I think Dingo's architecture emerged because Claude started using regex first as it's simple and handles most syntax transforms, along with using Go's parser because why bother making your own?
+
+Then plugins then came to fill the gap for things regex can't handle. I mean, I honestly doubt this is correct - but it really *feels* like it, and that isn't a good sign. 
+
+The "extensible plugin system" framing is optimistic. Yes, someone could theoretically write a plugin, but they'd need to understand Go's AST types, what the regex stage already transformed, and how to coordinate with other plugins in order to not break each other. 
+
+I think it would be more accurate to say plugins are more how Dingo organises its internal code than a community extension point. Though I think it would be nice to be proven wrong, as it's an interesting idea *in theory*, but there's probably a reason other languages haven't done it. 
+
+Wait... aren't I supposed to be mean? Uhh... what I meant to say was "why the fuck would anyone even want to contribute a plugin to this garbage dumpster fire of a so-called 'language'?"
+
+Finally, I get that like this isn't really supposed to be read by humans (which is a bad thing btw), but I don't think that excuses these all files being here.
+
+```bash
+[I] justin@vingtcinq ~/d/l/d/p/preprocessor (main)> ls -1a
+./
+../
+config.go
+config_test.go
+enum.go
+enum_test.go
+enum_v2_test.go
+enum_v2_test.go.bak2
+enum_v2_test.go.bak3
+error_prop.go
+error_prop_v2_test.go
+function_cache.go
+function_cache_test.go
+generic_syntax.go
+import_edge_cases_test.go
+keywords.go
+lambda_bench_test.go
+lambda_errors_test.go
+lambda.go
+lambda.go.backup
+lambda.go.backup-c1
+lambda_test.go
+lambda_v2_test.go
+lambda_v2_test.go.bak2
+lambda_v2_test.go.bak3
+null_coalesce_bench_test.go
+null_coalesce.go
+null_coalesce_test.go
+null_coalesce_v2_test.go
+null_coalesce_v2_test.go.bak2
+null_coalesce_v2_test.go.bak3
+null_coalesce_v2_test.go.bak5
+null_coalesce_v2_test.go.bak6
+package_context.go
+package_context_test.go
+preprocessor_cache_test.go
+preprocessor.go
+preprocessor_test.go
+README.md
+rust_match.go
+rust_match_nested_test.go
+rust_match_test.go
+safe_nav_bench_test.go
+safe_nav.go
+safe_nav_test.go
+safe_nav_v2_test.go
+safe_nav_v2_test.go.bak2
+safe_nav_v2_test.go.bak3
+safe_nav_v2_test.go.bak5
+safe_nav_v2_test.go.bak6
+sourcemap.go
+SOURCEMAP.md
+sourcemap_test.go
+sourcemap_validation_test.go
+stdlib_registry.go
+stdlib_registry_test.go
+ternary.go
+ternary_test.go
+tuples_destructuring_test.go
+tuples.go
+tuples_test.go
+type_annot.go
+type_annot_v2_test.go
+type_annot_v2_test.go.bak2
+type_annot_v2_test.go.bak3
+type_annot_v2_test.go.bak4
+type_detector.go
+type_detector_test.go
+unqualified_imports.go
+unqualified_imports_method_test.go
+unqualified_imports_test.go
+```
+
+Like seriously... have some respect.

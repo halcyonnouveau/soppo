@@ -12,9 +12,9 @@ A language that compiles to Go, adding enums, pattern matching, and safer error/
 ## Architecture
 
 ```
-Source (.sop) → Parser → AST → Type Checking/Inference → Codegen → Output (.go)
-                                        ↑
-                            Go packages (tree-sitter)
+Source (.sop) -> Parser -> AST -> Type Checking/Inference -> Codegen -> Output (.go)
+                                            ^
+                                   External .go packages
 ```
 
 Go imports are resolved by parsing Go source files with tree-sitter to extract type signatures.

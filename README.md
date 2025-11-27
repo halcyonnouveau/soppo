@@ -1,4 +1,4 @@
-<img src="./docs/soppo.png" alt="soppo" style="max-width: 100%;">
+<img src="./docs/assets/soppo.png" alt="soppo" style="max-width: 100%;">
 
 # Soppo
 
