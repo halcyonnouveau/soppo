@@ -24,14 +24,13 @@ enum Command {
         #[arg()]
         files: Vec<PathBuf>,
 
-        /// Output directory (default: gen/ for project, same dir for files)
+        /// Output directory
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
     /// Type-check without generating code
     Check {
         /// Files to check (glob patterns expanded by shell)
-        /// If empty, checks entire project from go.mod root
         #[arg()]
         files: Vec<PathBuf>,
     },
@@ -82,11 +81,12 @@ fn build_project(output: Option<PathBuf>) -> Result<()> {
 fn build_files(files: &[PathBuf], output: Option<PathBuf>) -> Result<()> {
     for file in files {
         let output_path = if let Some(ref dir) = output {
-            let filename = file.file_name().unwrap_or_default();
-            let mut out = dir.join(filename);
+            // Preserve structure: --out-dir gen/ with pkg/main.sop -> gen/pkg/main.go
+            let mut out = dir.join(file);
             out.set_extension("go");
             out
         } else {
+            // Default: .go next to .sop
             let mut out = file.clone();
             out.set_extension("go");
             out
