@@ -42,6 +42,16 @@ pub enum Token {
     Struct,
     #[token("var")]
     Var,
+    #[token("go")]
+    Go,
+    #[token("defer")]
+    Defer,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
+    #[token("range")]
+    Range,
 
     // Identifiers and literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", priority = 1, callback = |lex| lex.slice().to_string())]
@@ -77,6 +87,8 @@ pub enum Token {
     Ne,
     #[token("<")]
     Lt,
+    #[token("<-")]
+    Arrow,
     #[token("<=")]
     Le,
     #[token(">")]
@@ -89,6 +101,8 @@ pub enum Token {
     Or,
     #[token("!")]
     Not,
+    #[token("&")]
+    Ampersand,
 
     // Delimiters
     #[token("(")]

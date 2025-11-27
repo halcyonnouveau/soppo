@@ -43,6 +43,23 @@ func sum(numbers int) int {
     return total
 }
 
+// Channel helper functions
+func sender(ch chan int) {
+    ch <- 42
+}
+
+func receiver(ch chan int) int {
+    return <-ch
+}
+
+func worker(id int) {
+    fmt.Println(id)
+}
+
+func cleanup() {
+    fmt.Println("cleanup")
+}
+
 // String manipulation
 func processString(s string) string {
     if s == "" {
@@ -202,6 +219,93 @@ func main() {
 
     // Multi-var with multi-return function
     var q2, r2 = divide(20, 6)
+
+    // === Pointers ===
+    px := &x
+    fmt.Println(*px)
+    *px = 100
+    fmt.Println(x)
+    pq := new(int)
+    *pq = 55
+    fmt.Println(*pq)
+
+    // === Slices ===
+    nums := []int{1, 2, 3, 4, 5}
+    fmt.Println(nums[0])
+    data := make([]int, 10)
+    data[0] = 42
+    fmt.Println(data[0])
+
+    // === Maps ===
+    ages := map[string]int{"Alice": 30, "Bob": 25}
+    fmt.Println(ages["Alice"])
+    scores := make(map[string]int)
+    scores["test"] = 100
+    fmt.Println(scores["test"])
+
+    // === Channels ===
+    ch := make(chan int, 1)
+    ch <- 100
+    value := <-ch
+    fmt.Println(value)
+    ch2 := make(chan int, 1)
+    sender(ch2)
+    result := receiver(ch2)
+    fmt.Println(result)
+
+    // === Goroutines ===
+    go worker(1)
+    go func() {
+        fmt.Println("anonymous goroutine")
+    }()
+
+    // === Defer ===
+    defer cleanup()
+    defer fmt.Println("deferred")
+
+    // === Break/Continue ===
+    loopIdx := 0
+    for loopIdx < 10 {
+        if loopIdx == 3 {
+            loopIdx = loopIdx + 1
+            continue
+        }
+        if loopIdx == 7 {
+            break
+        }
+        fmt.Println(loopIdx)
+        loopIdx = loopIdx + 1
+    }
+
+    // === Range loops ===
+    for idx, val := range nums {
+        fmt.Println(idx, val)
+    }
+    for k, v := range ages {
+        fmt.Println(k, v)
+    }
+    for rangeIdx := range nums {
+        fmt.Println(rangeIdx)
+    }
+
+    // === Anonymous functions ===
+    add := func(a int, b int) int {
+        return a + b
+    }
+    fmt.Println(add(1, 2))
+
+    multiply := func(a int, b int) int {
+        return a * b
+    }
+    fmt.Println(multiply(3, 4))
+
+    // === Unary operators ===
+    unaryNum := 10
+    fmt.Println(-unaryNum)
+    boolVal := true
+    fmt.Println(!boolVal)
+
+    fmt.Println("done")
 
     // Print results
     fmt.Printf("Sum: %d\n", sum)

@@ -172,6 +172,13 @@ pub enum StmtKind {
         condition: Expr,
         body: Block,
     },
+    // for key := range collection or for key, value := range collection
+    ForRange {
+        key: String,           // First variable (index/key)
+        value: Option<String>, // Second variable (value) - None for single-var form
+        collection: Expr,      // The collection being ranged over
+        body: Block,
+    },
     If {
         condition: Expr,
         then_block: Block,
@@ -184,6 +191,19 @@ pub enum StmtKind {
         scrutinee: Expr,
         arms: Vec<Arm>,
     },
+    // ch <- value (channel send)
+    Send {
+        channel: Expr,
+        value: Expr,
+    },
+    // go expr (goroutine)
+    Go(Expr),
+    // defer expr (deferred call)
+    DeferStmt(Expr),
+    // break
+    Break,
+    // continue
+    Continue,
     Expr(Expr),
 }
 
@@ -228,7 +248,31 @@ pub enum ExprKind {
         ty: Type,                    // The struct type name
         fields: Vec<(String, Expr)>, // field_name: value pairs
     },
+    MapLit {
+        ty: Type,                   // The map type: map[K]V
+        entries: Vec<(Expr, Expr)>, // key: value pairs
+    },
+    Unary {
+        op: UnaryOp,
+        operand: Box<Expr>,
+    },
+    // Anonymous function: func(params) returnTypes { body }
+    FuncLit {
+        params: Vec<Param>,
+        return_types: Vec<Type>,
+        body: Block,
+    },
     Block(Block),
+}
+
+/// Unary operator
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,   // -x
+    Not,   // !x
+    Deref, // *p
+    Ref,   // &x
+    Recv,  // <-ch (channel receive)
 }
 
 /// Binary operator

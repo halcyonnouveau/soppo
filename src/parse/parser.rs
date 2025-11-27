@@ -148,6 +148,102 @@ impl Parser {
         })?;
 
         match tok {
+            // Unary operators
+            Token::Ampersand => {
+                // &x - address of
+                let operand = self.parse_primary()?;
+                let end_span = operand.span.clone();
+                Ok(Expr {
+                    kind: ExprKind::Unary {
+                        op: UnaryOp::Ref,
+                        operand: Box::new(operand),
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
+            Token::Star => {
+                // *p - dereference (when used as unary prefix)
+                let operand = self.parse_primary()?;
+                let end_span = operand.span.clone();
+                Ok(Expr {
+                    kind: ExprKind::Unary {
+                        op: UnaryOp::Deref,
+                        operand: Box::new(operand),
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
+            Token::Minus => {
+                // -x - negation
+                let operand = self.parse_primary()?;
+                let end_span = operand.span.clone();
+                Ok(Expr {
+                    kind: ExprKind::Unary {
+                        op: UnaryOp::Neg,
+                        operand: Box::new(operand),
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
+            Token::Not => {
+                // !x - logical not
+                let operand = self.parse_primary()?;
+                let end_span = operand.span.clone();
+                Ok(Expr {
+                    kind: ExprKind::Unary {
+                        op: UnaryOp::Not,
+                        operand: Box::new(operand),
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
+            Token::Arrow => {
+                // <-ch - channel receive
+                let operand = self.parse_primary()?;
+                let end_span = operand.span.clone();
+                Ok(Expr {
+                    kind: ExprKind::Unary {
+                        op: UnaryOp::Recv,
+                        operand: Box::new(operand),
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
             Token::Integer(n) => Ok(Expr {
                 kind: ExprKind::Integer(n),
                 span,
@@ -173,6 +269,117 @@ impl Parser {
                 span,
             }),
 
+            Token::Ident(name) if name == "map" => {
+                // Map literal: map[K]V{key: val, ...}
+                self.expect(Token::LBracket)?;
+                let key_ty = self.parse_type()?;
+                self.expect(Token::RBracket)?;
+                let val_ty = self.parse_type()?;
+
+                let map_ty = Type {
+                    name: format!("map[{}]{}", key_ty.name, val_ty.name),
+                    args: vec![key_ty, val_ty],
+                    span: span.clone(),
+                };
+
+                self.expect(Token::LBrace)?;
+
+                let mut entries = Vec::new();
+                if !matches!(self.peek(), Some(Token::RBrace)) {
+                    loop {
+                        let key = self.parse_expr()?;
+                        self.expect(Token::Colon)?;
+                        let value = self.parse_expr()?;
+                        entries.push((key, value));
+
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
+                        // Allow trailing comma
+                        if matches!(self.peek(), Some(Token::RBrace)) {
+                            break;
+                        }
+                    }
+                }
+
+                let end_span = self.expect(Token::RBrace)?;
+
+                Ok(Expr {
+                    kind: ExprKind::MapLit {
+                        ty: map_ty,
+                        entries,
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
+            Token::Ident(name) if name == "make" => {
+                // make(type, args...) - built-in for creating slices, maps, channels
+                self.expect(Token::LParen)?;
+
+                // First argument is a type
+                let ty = self.parse_type()?;
+
+                // Optional additional arguments (size, capacity)
+                let mut args = Vec::new();
+                while self.consume(&Token::Comma) {
+                    args.push(self.parse_expr()?);
+                }
+
+                let end_span = self.expect(Token::RParen)?;
+
+                // Generate as a call to make with type as first "argument" (special handling in codegen)
+                // We'll encode the type in the call expression using a special type argument
+                Ok(Expr {
+                    kind: ExprKind::Call {
+                        func: Box::new(Expr {
+                            kind: ExprKind::Ident("make".to_string()),
+                            span: span.clone(),
+                        }),
+                        type_args: vec![ty],
+                        args,
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
+            Token::Ident(name) if name == "new" => {
+                // new(type) - built-in for creating pointer to zero value
+                self.expect(Token::LParen)?;
+                let ty = self.parse_type()?;
+                let end_span = self.expect(Token::RParen)?;
+
+                Ok(Expr {
+                    kind: ExprKind::Call {
+                        func: Box::new(Expr {
+                            kind: ExprKind::Ident("new".to_string()),
+                            span: span.clone(),
+                        }),
+                        type_args: vec![ty],
+                        args: vec![],
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
             Token::Ident(name) => Ok(Expr {
                 kind: ExprKind::Ident(name),
                 span,
@@ -185,42 +392,166 @@ impl Parser {
             }
 
             Token::LBracket => {
+                // Slice literal: []type{elements}
                 // Array literal: [size]type{elements}
-                // Parse the size (which is an expression)
-                let _size = self.parse_expr()?;
-                self.expect(Token::RBracket)?;
+                if self.consume(&Token::RBracket) {
+                    // []type{elements} - slice literal
+                    let elem_ty = self.parse_type()?;
+                    // Create a slice type with [] prefix
+                    let slice_ty = Type {
+                        name: format!("[]{}", elem_ty.name),
+                        args: elem_ty.args.clone(),
+                        span: elem_ty.span.clone(),
+                    };
+                    self.expect(Token::LBrace)?;
 
-                // Parse the element type
-                let ty = self.parse_type()?;
+                    let mut elements = Vec::new();
+                    if !matches!(self.peek(), Some(Token::RBrace)) {
+                        loop {
+                            elements.push(self.parse_expr()?);
+                            // Allow trailing comma
+                            if !self.consume(&Token::Comma) {
+                                break;
+                            }
+                            // Check for closing brace after trailing comma
+                            if matches!(self.peek(), Some(Token::RBrace)) {
+                                break;
+                            }
+                        }
+                    }
 
-                // Expect opening brace for the composite literal
-                self.expect(Token::LBrace)?;
+                    let end_span = self.expect(Token::RBrace)?;
 
-                // Parse array elements
-                let mut elements = Vec::new();
-                if !matches!(self.peek(), Some(Token::RBrace)) {
+                    Ok(Expr {
+                        kind: ExprKind::ArrayLit {
+                            ty: Some(slice_ty),
+                            elements,
+                        },
+                        span: Span::with_bytes(
+                            span.start,
+                            end_span.end,
+                            self.file,
+                            span.byte_start,
+                            end_span.byte_end,
+                        ),
+                    })
+                } else {
+                    // [size]type{elements} - array literal
+                    // Consume the size (we don't validate it)
+                    while !matches!(self.peek(), Some(Token::RBracket) | None) {
+                        self.advance();
+                    }
+                    self.expect(Token::RBracket)?;
+
+                    let ty = self.parse_type()?;
+                    self.expect(Token::LBrace)?;
+
+                    let mut elements = Vec::new();
+                    if !matches!(self.peek(), Some(Token::RBrace)) {
+                        loop {
+                            elements.push(self.parse_expr()?);
+                            if !self.consume(&Token::Comma) {
+                                break;
+                            }
+                            if matches!(self.peek(), Some(Token::RBrace)) {
+                                break;
+                            }
+                        }
+                    }
+
+                    let end_span = self.expect(Token::RBrace)?;
+
+                    Ok(Expr {
+                        kind: ExprKind::ArrayLit {
+                            ty: Some(ty),
+                            elements,
+                        },
+                        span: Span::with_bytes(
+                            span.start,
+                            end_span.end,
+                            self.file,
+                            span.byte_start,
+                            end_span.byte_end,
+                        ),
+                    })
+                }
+            }
+
+            Token::Func => {
+                // Anonymous function: func(params) returnTypes { body }
+                self.expect(Token::LParen)?;
+
+                // Parse parameters
+                let mut params = Vec::new();
+                if !matches!(self.peek(), Some(Token::RParen)) {
                     loop {
-                        elements.push(self.parse_expr()?);
+                        let (param_name, param_span) = match self.advance() {
+                            Some((Token::Ident(name), span)) => (name, span),
+                            Some((tok, span)) => {
+                                return Err(SoppoError::Parse {
+                                    message: format!("Expected parameter name, found {:?}", tok),
+                                    span,
+                                });
+                            }
+                            None => {
+                                return Err(SoppoError::Parse {
+                                    message: "Unexpected end of input".to_string(),
+                                    span: Span::dummy(),
+                                });
+                            }
+                        };
+
+                        let param_ty = self.parse_type()?;
+                        params.push(Param {
+                            name: param_name,
+                            ty: param_ty,
+                            span: param_span,
+                        });
 
                         if !self.consume(&Token::Comma) {
                             break;
                         }
                     }
                 }
+                self.expect(Token::RParen)?;
 
-                let end_span = self.expect(Token::RBrace)?;
+                // Parse return types
+                let mut return_types = Vec::new();
+                // Check for multi-return: (type1, type2)
+                if self.consume(&Token::LParen) {
+                    if !matches!(self.peek(), Some(Token::RParen)) {
+                        loop {
+                            return_types.push(self.parse_type()?);
+                            if !self.consume(&Token::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                } else if matches!(
+                    self.peek(),
+                    Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+                ) && !matches!(self.peek(), Some(Token::LBrace))
+                {
+                    // Single return type (not followed by {)
+                    return_types.push(self.parse_type()?);
+                }
+
+                // Parse body
+                let body = self.parse_block()?;
 
                 Ok(Expr {
-                    kind: ExprKind::ArrayLit {
-                        ty: Some(ty),
-                        elements,
+                    kind: ExprKind::FuncLit {
+                        params,
+                        return_types,
+                        body: body.clone(),
                     },
                     span: Span::with_bytes(
                         span.start,
-                        end_span.end,
+                        body.span.end,
                         self.file,
                         span.byte_start,
-                        end_span.byte_end,
+                        body.span.byte_end,
                     ),
                 })
             }
@@ -1017,6 +1348,22 @@ impl Parser {
                             value,
                         },
                     })
+                } else if self.consume(&Token::Arrow) {
+                    // Channel send: ch <- value
+                    let value = self.parse_expr()?;
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            first_target.span.start,
+                            value.span.end,
+                            self.file,
+                            first_target.span.byte_start,
+                            value.span.byte_end,
+                        ),
+                        kind: StmtKind::Send {
+                            channel: first_target,
+                            value,
+                        },
+                    })
                 } else {
                     // Just an expression statement
                     Ok(Stmt {
@@ -1103,7 +1450,10 @@ impl Parser {
                         }
                         let end = vals.last().unwrap().span.clone();
                         (None, vals, end)
-                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                    } else if matches!(
+                        self.peek(),
+                        Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+                    ) {
                         // var a, b, c type or var a, b type = 1, 2
                         let ty = self.parse_type()?;
                         let ty_span = ty.span.clone();
@@ -1156,7 +1506,10 @@ impl Parser {
                         let expr = self.parse_expr()?;
                         let span = expr.span.clone();
                         (None, Some(expr), span)
-                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                    } else if matches!(
+                        self.peek(),
+                        Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+                    ) {
                         // var name type ... (explicit type)
                         let ty = self.parse_type()?;
                         let ty_span = ty.span.clone();
@@ -1270,7 +1623,10 @@ impl Parser {
                         }
                         let end = vals.last().unwrap().span.clone();
                         (None, vals, end)
-                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                    } else if matches!(
+                        self.peek(),
+                        Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+                    ) {
                         // const a, b type = 1, 2
                         let ty = self.parse_type()?;
                         let ty_span = ty.span.clone();
@@ -1321,7 +1677,10 @@ impl Parser {
                     let ty = if self.consume(&Token::Assign) {
                         // const name = value (type inference)
                         None
-                    } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+                    } else if matches!(
+                        self.peek(),
+                        Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+                    ) {
                         // const name type = value (explicit type)
                         let ty = self.parse_type()?;
                         let ty_span = ty.span.clone();
@@ -1377,6 +1736,61 @@ impl Parser {
 
             Some(Token::For) => {
                 self.advance();
+
+                // Check if this is a range loop: for x := range ... or for x, y := range ...
+                // We need to look ahead to see if we have: ident [, ident] := range
+                let saved_pos = self.pos;
+
+                // Try to parse range loop
+                if let Some(Token::Ident(first_name)) = self.peek().cloned() {
+                    self.advance();
+                    let first_name = first_name.clone();
+
+                    // Check for second variable: for x, y := range
+                    let second_name = if self.consume(&Token::Comma) {
+                        if let Some(Token::Ident(second)) = self.peek().cloned() {
+                            self.advance();
+                            Some(second)
+                        } else {
+                            // Not a valid range pattern, backtrack
+                            self.pos = saved_pos;
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    // Check for := range
+                    if (second_name.is_some() || matches!(self.peek(), Some(Token::ColonAssign)))
+                        && self.consume(&Token::ColonAssign)
+                        && self.consume(&Token::Range)
+                    {
+                        // This is a range loop
+                        let collection = self.parse_expr()?;
+                        let body = self.parse_block()?;
+
+                        return Ok(Stmt {
+                            span: Span::with_bytes(
+                                start_span.start,
+                                body.span.end,
+                                self.file,
+                                start_span.byte_start,
+                                body.span.byte_end,
+                            ),
+                            kind: StmtKind::ForRange {
+                                key: first_name,
+                                value: second_name,
+                                collection,
+                                body,
+                            },
+                        });
+                    }
+
+                    // Not a range loop, backtrack
+                    self.pos = saved_pos;
+                }
+
+                // Regular for loop with condition
                 let condition = self.parse_expr()?;
                 let body = self.parse_block()?;
 
@@ -1470,12 +1884,97 @@ impl Parser {
                 self.parse_match_stmt(start_span)
             }
 
-            _ => {
+            Some(Token::Go) => {
+                self.advance();
                 let expr = self.parse_expr()?;
+                let end_span = expr.span.clone();
                 Ok(Stmt {
-                    span: expr.span.clone(),
-                    kind: StmtKind::Expr(expr),
+                    span: Span::with_bytes(
+                        start_span.start,
+                        end_span.end,
+                        self.file,
+                        start_span.byte_start,
+                        end_span.byte_end,
+                    ),
+                    kind: StmtKind::Go(expr),
                 })
+            }
+
+            Some(Token::Defer) => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                let end_span = expr.span.clone();
+                Ok(Stmt {
+                    span: Span::with_bytes(
+                        start_span.start,
+                        end_span.end,
+                        self.file,
+                        start_span.byte_start,
+                        end_span.byte_end,
+                    ),
+                    kind: StmtKind::DeferStmt(expr),
+                })
+            }
+
+            Some(Token::Break) => {
+                self.advance();
+                Ok(Stmt {
+                    span: start_span,
+                    kind: StmtKind::Break,
+                })
+            }
+
+            Some(Token::Continue) => {
+                self.advance();
+                Ok(Stmt {
+                    span: start_span,
+                    kind: StmtKind::Continue,
+                })
+            }
+
+            _ => {
+                // Parse as expression, then check for assignment
+                let expr = self.parse_expr()?;
+
+                if self.consume(&Token::Assign) {
+                    // Assignment to a dereference or other expression: *p = value
+                    let value = self.parse_expr()?;
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            expr.span.start,
+                            value.span.end,
+                            self.file,
+                            expr.span.byte_start,
+                            value.span.byte_end,
+                        ),
+                        kind: StmtKind::Assign {
+                            target: expr,
+                            value,
+                        },
+                    })
+                } else if self.consume(&Token::Arrow) {
+                    // Channel send: ch <- value
+                    let value = self.parse_expr()?;
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            expr.span.start,
+                            value.span.end,
+                            self.file,
+                            expr.span.byte_start,
+                            value.span.byte_end,
+                        ),
+                        kind: StmtKind::Send {
+                            channel: expr,
+                            value,
+                        },
+                    })
+                } else {
+                    // Just an expression statement
+                    Ok(Stmt {
+                        span: expr.span.clone(),
+                        kind: StmtKind::Expr(expr),
+                    })
+                }
             }
         }
     }
@@ -1509,7 +2008,47 @@ impl Parser {
     }
 
     /// Parse a type annotation
+    /// Supports: T, []T, [N]T, *T, map[K]V, chan T, T[A, B]
     fn parse_type(&mut self) -> Result<Type> {
+        let start_span = self.peek_span();
+
+        // Slice type: []T
+        if self.consume(&Token::LBracket) {
+            if self.consume(&Token::RBracket) {
+                // []T - slice
+                let elem_ty = self.parse_type()?;
+                return Ok(Type {
+                    name: format!("[]{}", elem_ty.name),
+                    args: vec![elem_ty],
+                    span: start_span,
+                });
+            } else {
+                // [N]T - array (consume the size, we don't validate it)
+                // Could be a number or ...
+                while !matches!(self.peek(), Some(Token::RBracket) | None) {
+                    self.advance();
+                }
+                self.expect(Token::RBracket)?;
+                let elem_ty = self.parse_type()?;
+                return Ok(Type {
+                    name: format!("[]{}", elem_ty.name), // Treat arrays as slices for simplicity
+                    args: vec![elem_ty],
+                    span: start_span,
+                });
+            }
+        }
+
+        // Pointer type: *T
+        if self.consume(&Token::Star) {
+            let pointee_ty = self.parse_type()?;
+            return Ok(Type {
+                name: format!("*{}", pointee_ty.name),
+                args: vec![pointee_ty],
+                span: start_span,
+            });
+        }
+
+        // Now we need an identifier
         let (name, span) = match self.advance() {
             Some((Token::Ident(name), span)) => (name, span),
             Some((tok, span)) => {
@@ -1525,6 +2064,29 @@ impl Parser {
                 });
             }
         };
+
+        // Map type: map[K]V
+        if name == "map" {
+            self.expect(Token::LBracket)?;
+            let key_ty = self.parse_type()?;
+            self.expect(Token::RBracket)?;
+            let val_ty = self.parse_type()?;
+            return Ok(Type {
+                name: format!("map[{}]{}", key_ty.name, val_ty.name),
+                args: vec![key_ty, val_ty],
+                span,
+            });
+        }
+
+        // Channel type: chan T, <-chan T, chan<- T
+        if name == "chan" {
+            let elem_ty = self.parse_type()?;
+            return Ok(Type {
+                name: format!("chan {}", elem_ty.name),
+                args: vec![elem_ty],
+                span,
+            });
+        }
 
         // Check for type arguments: Type[T, U]
         let args = if self.consume(&Token::LBracket) {
@@ -1967,7 +2529,10 @@ impl Parser {
         let ty = if self.consume(&Token::Assign) {
             // const NAME = VALUE (type inference)
             None
-        } else if matches!(self.peek(), Some(Token::Ident(_)) | Some(Token::LBracket)) {
+        } else if matches!(
+            self.peek(),
+            Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+        ) {
             // const NAME TYPE = VALUE (explicit type)
             let ty = self.parse_type()?;
             self.expect(Token::Assign)?;

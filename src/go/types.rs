@@ -115,7 +115,7 @@ pub fn parse_go_type(s: &str) -> Type {
         "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" => Type::int(), // Treat unsigned as int for now
         "byte" => Type::int(), // byte is alias for uint8
         "rune" => Type::int(), // rune is alias for int32
-        "float32" | "float64" => Type::float(),
+        "float32" | "float64" => Type::simple(s),
         "complex64" | "complex128" => Type::simple("complex"),
         "string" => Type::string(),
         "bool" => Type::bool(),
@@ -284,7 +284,7 @@ mod tests {
         assert_eq!(parse_go_type("int").to_string(), "int");
         assert_eq!(parse_go_type("string").to_string(), "string");
         assert_eq!(parse_go_type("bool").to_string(), "bool");
-        assert_eq!(parse_go_type("float64").to_string(), "float");
+        assert_eq!(parse_go_type("float64").to_string(), "float64");
         assert_eq!(parse_go_type("byte").to_string(), "int");
         assert_eq!(parse_go_type("error").to_string(), "error");
     }

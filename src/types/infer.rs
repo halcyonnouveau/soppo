@@ -364,6 +364,15 @@ impl Infer {
                 Ok(())
             }
 
+            // Compatible numeric types: allow int/int8/int16/etc. to unify
+            (Type::Con { name: n1, args: a1 }, Type::Con { name: n2, args: a2 })
+                if a1.is_empty()
+                    && a2.is_empty()
+                    && Self::are_compatible_numeric(&n1.name, &n2.name) =>
+            {
+                Ok(())
+            }
+
             // Same constructor: unify arguments
             (Type::Con { name: n1, args: a1 }, Type::Con { name: n2, args: a2 })
                 if n1.name == n2.name =>
@@ -455,6 +464,28 @@ impl Infer {
         }
     }
 
+    /// Check if two type names are compatible numeric types.
+    /// In Go, numeric literals are untyped and can be assigned to any compatible numeric type.
+    fn are_compatible_numeric(t1: &str, t2: &str) -> bool {
+        const INT_TYPES: &[&str] = &[
+            "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32",
+            "uint64", "uintptr", "byte", "rune",
+        ];
+        const FLOAT_TYPES: &[&str] = &["float32", "float64"];
+
+        // Both are integer types
+        if INT_TYPES.contains(&t1) && INT_TYPES.contains(&t2) {
+            return true;
+        }
+
+        // Both are float types
+        if FLOAT_TYPES.contains(&t1) && FLOAT_TYPES.contains(&t2) {
+            return true;
+        }
+
+        false
+    }
+
     /// Check if type variable occurs in type (for occurs check)
     fn occurs(var: i32, ty: &Type) -> bool {
         match ty {
@@ -536,9 +567,34 @@ impl Infer {
 
             ExprKind::Call {
                 func,
-                type_args: _,
+                type_args,
                 args,
             } => {
+                // Handle built-in make(type, ...) and new(type)
+                if let ExprKind::Ident(name) = &func.kind {
+                    if name == "make" && !type_args.is_empty() {
+                        // make(type, ...) - returns the type
+                        // Validate additional arguments are integers (size, capacity)
+                        for arg in args {
+                            let arg_ty = self.infer_expr(arg)?;
+                            self.unify(&arg_ty, &Type::int(), &arg.span)?;
+                        }
+                        // Return the type being made (properly resolving type args)
+                        let ty = &type_args[0];
+                        return Ok(self.resolve_type(ty));
+                    }
+
+                    if name == "new" && !type_args.is_empty() {
+                        // new(type) - returns *type
+                        // Return a pointer to the type
+                        let ty = &type_args[0];
+                        let inner_ty = self.resolve_type(ty);
+                        // Use *{type} naming pattern consistent with UnaryOp::Ref
+                        let ptr_name = format!("*{}", inner_ty);
+                        return Ok(Type::generic(&ptr_name, vec![inner_ty]));
+                    }
+                }
+
                 // Check if this is a type conversion: TypeName(value)
                 if let ExprKind::Ident(type_name) = &func.kind
                     && self.global_state.has_type(type_name)
@@ -786,33 +842,59 @@ impl Infer {
             }
 
             ExprKind::Index { expr, index } => {
-                let array_ty = self.infer_expr(expr)?;
-                let array_ty = self.substitute(array_ty);
+                let container_ty = self.infer_expr(expr)?;
+                let container_ty = self.substitute(container_ty);
                 let index_ty = self.infer_expr(index)?;
 
-                // Index must be int
-                self.unify(&index_ty, &Type::int(), &index.span)?;
+                if let Type::Con { name, args } = &container_ty {
+                    // Map indexing: map[K]V - index is K, result is V
+                    if (name.name == "map" || name.name.starts_with("map[")) && args.len() == 2 {
+                        self.unify(&index_ty, &args[0], &index.span)?;
+                        return Ok(args[1].clone());
+                    }
 
-                // Extract element type from array type
-                if let Type::Con { name, args } = &array_ty
-                    && name.name == "array"
-                    && args.len() == 1
-                {
-                    return Ok(args[0].clone());
+                    // Slice indexing: []T - index is int, result is T
+                    if name.name.starts_with("[]") {
+                        self.unify(&index_ty, &Type::int(), &index.span)?;
+                        if args.len() == 1 {
+                            return Ok(args[0].clone());
+                        }
+                        let elem_name = &name.name[2..];
+                        return Ok(Type::simple(elem_name));
+                    }
+
+                    // Array indexing: array or [N]T - index is int
+                    if name.name == "array" && args.len() == 1 {
+                        self.unify(&index_ty, &Type::int(), &index.span)?;
+                        return Ok(args[0].clone());
+                    }
+
+                    // String indexing - index is int, result is byte
+                    if name.name == "string" {
+                        self.unify(&index_ty, &Type::int(), &index.span)?;
+                        return Ok(Type::simple("byte"));
+                    }
                 }
 
-                // If we can't determine the array type, return a type variable
+                // Default: assume int index
+                self.unify(&index_ty, &Type::int(), &index.span)?;
                 Ok(self.fresh_ty_var())
             }
 
             ExprKind::ArrayLit { ty, elements } => {
-                // Infer element type from the first element or use the declared type
-                let elem_ty = if let Some(ty) = ty {
-                    Type::simple(&ty.name)
+                // Infer element type from the declared type or first element
+                let (elem_ty, is_slice) = if let Some(ty) = ty {
+                    // Extract element type from []T or T
+                    if ty.name.starts_with("[]") {
+                        let elem_name = &ty.name[2..];
+                        (Type::simple(elem_name), true)
+                    } else {
+                        (Type::simple(&ty.name), false)
+                    }
                 } else if !elements.is_empty() {
-                    self.infer_expr(&elements[0])?
+                    (self.infer_expr(&elements[0])?, false)
                 } else {
-                    self.fresh_ty_var()
+                    (self.fresh_ty_var(), false)
                 };
 
                 // All elements must have the same type
@@ -821,8 +903,12 @@ impl Infer {
                     self.unify(&elem_ty, &elem_ty_actual, &elem.span)?;
                 }
 
-                // Return proper array type with element type
-                Ok(Type::array(elem_ty))
+                // Return proper slice/array type with element type
+                if is_slice {
+                    Ok(Type::generic("slice", vec![elem_ty]))
+                } else {
+                    Ok(Type::array(elem_ty))
+                }
             }
 
             ExprKind::StructLit { ty, fields } => {
@@ -843,6 +929,142 @@ impl Infer {
 
                 // Return the struct type
                 Ok(Type::simple(&ty.name))
+            }
+
+            ExprKind::MapLit { ty, entries } => {
+                // Extract key and value types from map[K]V
+                let (key_ty, val_ty) = if ty.args.len() == 2 {
+                    (
+                        Type::simple(&ty.args[0].name),
+                        Type::simple(&ty.args[1].name),
+                    )
+                } else {
+                    // Fallback: infer from first entry
+                    if let Some((k, v)) = entries.first() {
+                        (self.infer_expr(k)?, self.infer_expr(v)?)
+                    } else {
+                        (self.fresh_ty_var(), self.fresh_ty_var())
+                    }
+                };
+
+                // Type check all entries
+                for (key, value) in entries {
+                    let k_ty = self.infer_expr(key)?;
+                    let v_ty = self.infer_expr(value)?;
+                    self.unify(&key_ty, &k_ty, &key.span)?;
+                    self.unify(&val_ty, &v_ty, &value.span)?;
+                }
+
+                // Return map[K]V type
+                Ok(Type::generic("map", vec![key_ty, val_ty]))
+            }
+
+            ExprKind::Unary { op, operand } => {
+                use crate::parse::UnaryOp;
+                let operand_ty = self.infer_expr(operand)?;
+
+                match op {
+                    UnaryOp::Neg => {
+                        // -x: operand must be numeric, result is same type
+                        // We allow any numeric type here
+                        Ok(operand_ty)
+                    }
+                    UnaryOp::Not => {
+                        // !x: operand must be bool, result is bool
+                        self.unify(&operand_ty, &Type::bool(), &operand.span)?;
+                        Ok(Type::bool())
+                    }
+                    UnaryOp::Ref => {
+                        // &x: result is *T where T is the operand type
+                        let operand_ty = self.substitute(operand_ty);
+                        let ptr_name = format!("*{}", operand_ty);
+                        Ok(Type::generic(&ptr_name, vec![operand_ty]))
+                    }
+                    UnaryOp::Deref => {
+                        // *p: operand must be *T, result is T
+                        let operand_ty = self.substitute(operand_ty);
+                        // Extract the pointee type from *T
+                        if let Type::Con { name, args } = &operand_ty {
+                            if name.name.starts_with('*') && args.len() == 1 {
+                                return Ok(args[0].clone());
+                            }
+                            // Also handle case where type name encodes the pointee
+                            if name.name.starts_with('*') {
+                                let pointee_name = &name.name[1..];
+                                return Ok(Type::simple(pointee_name));
+                            }
+                        }
+                        // If we can't determine the pointer type, return a type variable
+                        Ok(self.fresh_ty_var())
+                    }
+                    UnaryOp::Recv => {
+                        // <-ch: operand must be chan T, result is T
+                        let operand_ty = self.substitute(operand_ty);
+                        // Extract the element type from chan T
+                        if let Type::Con { name, args } = &operand_ty {
+                            // Handle "chan T" type with args
+                            if name.name.starts_with("chan ") && args.len() == 1 {
+                                return Ok(args[0].clone());
+                            }
+                            // Also handle case where type name encodes the element type
+                            if name.name.starts_with("chan ") {
+                                let elem_name = &name.name[5..]; // skip "chan "
+                                return Ok(Type::simple(elem_name));
+                            }
+                        }
+                        // If we can't determine the channel type, return a type variable
+                        Ok(self.fresh_ty_var())
+                    }
+                }
+            }
+
+            ExprKind::FuncLit {
+                params,
+                return_types,
+                body,
+            } => {
+                // Save the current expected return types
+                let prev_expected = self.expected_return_types.take();
+
+                // Create a new scope for the function body
+                self.push_scope();
+
+                // Add parameters to scope
+                for param in params {
+                    let param_ty = Type::simple(&param.ty.name);
+                    self.insert_var(param.name.clone(), param_ty);
+                }
+
+                // Set expected return types for this function
+                let expected_ret_types: Vec<Type> =
+                    return_types.iter().map(|t| Type::simple(&t.name)).collect();
+                if !expected_ret_types.is_empty() {
+                    self.expected_return_types = Some(expected_ret_types.clone());
+                }
+
+                // Infer body
+                self.infer_block(body)?;
+
+                self.pop_scope();
+
+                // Restore previous expected return types
+                self.expected_return_types = prev_expected;
+
+                // Build function type
+                let param_types: Vec<Type> =
+                    params.iter().map(|p| Type::simple(&p.ty.name)).collect();
+                let ret_ty = if return_types.is_empty() {
+                    Type::unit()
+                } else if return_types.len() == 1 {
+                    Type::simple(&return_types[0].name)
+                } else {
+                    // Multiple return types - use a tuple type
+                    let ret_types: Vec<Type> =
+                        return_types.iter().map(|t| Type::simple(&t.name)).collect();
+                    Type::generic("tuple", ret_types)
+                };
+
+                Ok(Type::fun(param_types, ret_ty))
             }
 
             ExprKind::Block(block) => self.infer_block(block),
@@ -871,12 +1093,14 @@ impl Infer {
                         name: type_name,
                         args,
                     } = &value_ty
-                        && type_name.name == "_tuple" && args.len() == names.len() {
-                            for (name, ty) in names.iter().zip(args.iter()) {
-                                self.insert_var(name.clone(), ty.clone());
-                            }
-                            return Ok(Type::unit());
+                        && type_name.name == "_tuple"
+                        && args.len() == names.len()
+                    {
+                        for (name, ty) in names.iter().zip(args.iter()) {
+                            self.insert_var(name.clone(), ty.clone());
                         }
+                        return Ok(Type::unit());
+                    }
 
                     // Not a tuple type or wrong arity
                     Err(SoppoError::Type {
@@ -954,19 +1178,21 @@ impl Infer {
                         name: type_name,
                         args,
                     } = &value_ty
-                        && type_name.name == "_tuple" && args.len() == names.len() {
-                            for (name, arg_ty) in names.iter().zip(args.iter()) {
-                                let var_ty = if let Some(t) = ty {
-                                    let declared_ty = Type::from_ast(t);
-                                    self.unify(&declared_ty, arg_ty, &value.span)?;
-                                    declared_ty
-                                } else {
-                                    arg_ty.clone()
-                                };
-                                self.insert_var(name.clone(), var_ty);
-                            }
-                            return Ok(Type::unit());
+                        && type_name.name == "_tuple"
+                        && args.len() == names.len()
+                    {
+                        for (name, arg_ty) in names.iter().zip(args.iter()) {
+                            let var_ty = if let Some(t) = ty {
+                                let declared_ty = Type::from_ast(t);
+                                self.unify(&declared_ty, arg_ty, &value.span)?;
+                                declared_ty
+                            } else {
+                                arg_ty.clone()
+                            };
+                            self.insert_var(name.clone(), var_ty);
                         }
+                        return Ok(Type::unit());
+                    }
 
                     return Err(SoppoError::Type {
                         message: format!(
@@ -1047,13 +1273,15 @@ impl Infer {
                         name: type_name,
                         args,
                     } = &value_ty
-                        && type_name.name == "_tuple" && args.len() == targets.len() {
-                            for (target, expected_ty) in targets.iter().zip(args.iter()) {
-                                let target_ty = self.infer_expr(target)?;
-                                self.unify(&target_ty, expected_ty, &target.span)?;
-                            }
-                            return Ok(Type::unit());
+                        && type_name.name == "_tuple"
+                        && args.len() == targets.len()
+                    {
+                        for (target, expected_ty) in targets.iter().zip(args.iter()) {
+                            let target_ty = self.infer_expr(target)?;
+                            self.unify(&target_ty, expected_ty, &target.span)?;
                         }
+                        return Ok(Type::unit());
+                    }
 
                     // Not a tuple type or wrong arity
                     Err(SoppoError::Type {
@@ -1079,6 +1307,67 @@ impl Infer {
                 // Check condition is bool
                 let cond_ty = self.infer_expr(condition)?;
                 self.unify(&Type::bool(), &cond_ty, &condition.span)?;
+
+                // Type check body
+                self.infer_block(body)?;
+
+                Ok(Type::unit())
+            }
+
+            StmtKind::ForRange {
+                key,
+                value,
+                collection,
+                body,
+            } => {
+                // Infer collection type
+                let coll_ty = self.infer_expr(collection)?;
+                let coll_ty = self.substitute(coll_ty);
+
+                // Determine key and value types based on collection type
+                let (key_ty, value_ty) = if let Type::Con { name, args } = &coll_ty {
+                    if name.name.starts_with("[]") {
+                        // Slice: key is int, value is element type
+                        let elem_ty = if args.len() == 1 {
+                            args[0].clone()
+                        } else {
+                            let elem_name = &name.name[2..];
+                            Type::simple(elem_name)
+                        };
+                        (Type::int(), elem_ty)
+                    } else if name.name.starts_with("map[") {
+                        // Map: key is key type, value is value type
+                        if args.len() == 2 {
+                            (args[0].clone(), args[1].clone())
+                        } else {
+                            (self.fresh_ty_var(), self.fresh_ty_var())
+                        }
+                    } else if name.name.starts_with("chan ") {
+                        // Channel: only one variable (value type)
+                        let elem_ty = if args.len() == 1 {
+                            args[0].clone()
+                        } else {
+                            let elem_name = &name.name[5..];
+                            Type::simple(elem_name)
+                        };
+                        (elem_ty.clone(), elem_ty)
+                    } else if name.name == "string" {
+                        // String: key is int (index), value is rune
+                        (Type::int(), Type::simple("rune"))
+                    } else {
+                        (self.fresh_ty_var(), self.fresh_ty_var())
+                    }
+                } else {
+                    (self.fresh_ty_var(), self.fresh_ty_var())
+                };
+
+                // Bind the key variable
+                self.insert_var(key.clone(), key_ty);
+
+                // Bind the value variable if present
+                if let Some(val_name) = value {
+                    self.insert_var(val_name.clone(), value_ty);
+                }
 
                 // Type check body
                 self.infer_block(body)?;
@@ -1214,6 +1503,43 @@ impl Infer {
                     }
                 }
 
+                Ok(Type::unit())
+            }
+
+            StmtKind::Send { channel, value } => {
+                // ch <- value: channel must be chan T, value must be T
+                let channel_ty = self.infer_expr(channel)?;
+                let channel_ty = self.substitute(channel_ty);
+                let value_ty = self.infer_expr(value)?;
+
+                // Extract element type from channel
+                if let Type::Con { name, args } = &channel_ty {
+                    if name.name.starts_with("chan ") && args.len() == 1 {
+                        self.unify(&args[0], &value_ty, &value.span)?;
+                    } else if name.name.starts_with("chan ") {
+                        let elem_name = &name.name[5..]; // skip "chan "
+                        let elem_ty = Type::simple(elem_name);
+                        self.unify(&elem_ty, &value_ty, &value.span)?;
+                    }
+                }
+
+                Ok(Type::unit())
+            }
+
+            StmtKind::Go(expr) => {
+                // go expr: expr should be a function call
+                self.infer_expr(expr)?;
+                Ok(Type::unit())
+            }
+
+            StmtKind::DeferStmt(expr) => {
+                // defer expr: expr should be a function call
+                self.infer_expr(expr)?;
+                Ok(Type::unit())
+            }
+
+            StmtKind::Break | StmtKind::Continue => {
+                // break/continue don't have types, just return unit
                 Ok(Type::unit())
             }
 

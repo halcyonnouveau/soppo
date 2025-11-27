@@ -591,6 +591,26 @@ impl Codegen {
                 self.output.push('\n');
             }
 
+            StmtKind::ForRange {
+                key,
+                value,
+                collection,
+                body,
+            } => {
+                self.emit_indent();
+                self.emit("for ");
+                self.emit(key);
+                if let Some(val) = value {
+                    self.emit(", ");
+                    self.emit(val);
+                }
+                self.emit(" := range ");
+                self.gen_expr(collection);
+                self.emit(" ");
+                self.gen_block(body);
+                self.output.push('\n');
+            }
+
             StmtKind::If {
                 condition,
                 then_block,
@@ -729,6 +749,38 @@ impl Codegen {
                 self.emit("}\n");
             }
 
+            StmtKind::Send { channel, value } => {
+                self.emit_indent();
+                self.gen_expr(channel);
+                self.emit(" <- ");
+                self.gen_expr(value);
+                self.emit("\n");
+            }
+
+            StmtKind::Go(expr) => {
+                self.emit_indent();
+                self.emit("go ");
+                self.gen_expr(expr);
+                self.emit("\n");
+            }
+
+            StmtKind::DeferStmt(expr) => {
+                self.emit_indent();
+                self.emit("defer ");
+                self.gen_expr(expr);
+                self.emit("\n");
+            }
+
+            StmtKind::Break => {
+                self.emit_indent();
+                self.emit("break\n");
+            }
+
+            StmtKind::Continue => {
+                self.emit_indent();
+                self.emit("continue\n");
+            }
+
             StmtKind::Expr(expr) => {
                 self.emit_indent();
                 self.gen_expr(expr);
@@ -779,6 +831,25 @@ impl Codegen {
                 type_args,
                 args,
             } => {
+                // Special handling for make and new built-ins
+                if let ExprKind::Ident(name) = &func.kind
+                    && (name == "make" || name == "new")
+                    && !type_args.is_empty()
+                {
+                    // make(type, args...) or new(type)
+                    self.emit(name);
+                    self.emit("(");
+                    // Type is first argument
+                    self.emit(&type_args[0].name);
+                    // Additional arguments
+                    for arg in args {
+                        self.emit(", ");
+                        self.gen_expr(arg);
+                    }
+                    self.emit(")");
+                    return;
+                }
+
                 self.gen_expr(func);
                 // Emit type arguments if present: func[int, string](args)
                 if !type_args.is_empty() {
@@ -830,12 +901,24 @@ impl Codegen {
             }
 
             ExprKind::ArrayLit { ty, elements } => {
-                // Generate [size]type{elements}
-                self.emit("[");
-                self.emit(&elements.len().to_string());
-                self.emit("]");
+                // Generate []type{elements} for slices or [size]type{elements} for arrays
                 if let Some(ty) = ty {
-                    self.emit(self.go_type(&ty.name));
+                    let type_name = &ty.name;
+                    if type_name.starts_with("[]") {
+                        // Slice literal: []type{elements}
+                        self.emit(self.go_type(type_name));
+                    } else {
+                        // Array literal: [size]type{elements}
+                        self.emit("[");
+                        self.emit(&elements.len().to_string());
+                        self.emit("]");
+                        self.emit(self.go_type(type_name));
+                    }
+                } else {
+                    // No type - infer as array with size
+                    self.emit("[");
+                    self.emit(&elements.len().to_string());
+                    self.emit("]");
                 }
                 self.emit("{");
                 for (i, elem) in elements.iter().enumerate() {
@@ -868,6 +951,87 @@ impl Codegen {
                 self.emit("}");
             }
 
+            ExprKind::MapLit { ty, entries } => {
+                // Generate map[K]V{key: value, ...}
+                self.emit(&ty.name);
+                self.emit("{");
+                for (i, (key, value)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(key);
+                    self.emit(": ");
+                    self.gen_expr(value);
+                }
+                self.emit("}");
+            }
+
+            ExprKind::Unary { op, operand } => {
+                use crate::parse::UnaryOp;
+                match op {
+                    UnaryOp::Neg => {
+                        self.emit("(-");
+                        self.gen_expr(operand);
+                        self.emit(")");
+                    }
+                    UnaryOp::Not => {
+                        self.emit("(!");
+                        self.gen_expr(operand);
+                        self.emit(")");
+                    }
+                    UnaryOp::Ref => {
+                        self.emit("(&");
+                        self.gen_expr(operand);
+                        self.emit(")");
+                    }
+                    UnaryOp::Deref => {
+                        self.emit("(*");
+                        self.gen_expr(operand);
+                        self.emit(")");
+                    }
+                    UnaryOp::Recv => {
+                        self.emit("(<-");
+                        self.gen_expr(operand);
+                        self.emit(")");
+                    }
+                }
+            }
+
+            ExprKind::FuncLit {
+                params,
+                return_types,
+                body,
+            } => {
+                self.emit("func(");
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit(&param.name);
+                    self.emit(" ");
+                    self.emit(self.go_type(&param.ty.name));
+                }
+                self.emit(")");
+
+                // Return types
+                if return_types.len() == 1 {
+                    self.emit(" ");
+                    self.emit(self.go_type(&return_types[0].name));
+                } else if return_types.len() > 1 {
+                    self.emit(" (");
+                    for (i, ty) in return_types.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(self.go_type(&ty.name));
+                    }
+                    self.emit(")");
+                }
+
+                self.emit(" ");
+                self.gen_block(body);
+            }
+
             ExprKind::Block(block) => {
                 self.gen_block(block);
             }
@@ -877,9 +1041,14 @@ impl Codegen {
     /// Convert Soppo type to Go type
     fn go_type<'a>(&self, ty: &'a str) -> &'a str {
         match ty {
-            "int" => "int",
-            "string" => "string",
-            "bool" => "bool",
+            // Primitive types - pass through as-is
+            "int" | "int8" | "int16" | "int32" | "int64" => ty,
+            "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" => ty,
+            "float32" | "float64" => ty,
+            "complex64" | "complex128" => ty,
+            "byte" | "rune" => ty,
+            "string" | "bool" | "error" => ty,
+            // Unit type
             "()" => "",
             _ => ty,
         }

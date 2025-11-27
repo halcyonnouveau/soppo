@@ -51,9 +51,9 @@ impl Type {
         Type::simple("bool")
     }
 
-    /// Built-in type: float
-    pub fn float() -> Self {
-        Type::simple("float")
+    /// Built-in type: float64 (Go's default float type)
+    pub fn float64() -> Self {
+        Type::simple("float64")
     }
 
     /// Built-in type: error (Go's error interface)
