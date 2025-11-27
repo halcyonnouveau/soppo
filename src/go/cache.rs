@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use miette::Result;
 
@@ -33,21 +34,19 @@ impl GoCache {
         import_path: &str,
         project: Option<&Project>,
     ) -> Result<&GoPackage> {
-        // Check cache first
-        if self.packages.contains_key(import_path) {
-            return Ok(self.packages.get(import_path).unwrap());
+        // Use entry API to avoid double lookup
+        if let Entry::Vacant(entry) = self.packages.entry(import_path.to_string()) {
+            let kind = self.resolver.resolve(import_path, project)?;
+            let source_dir = match &kind {
+                ImportKind::LocalSoppo { source_dir } => source_dir,
+                ImportKind::GoStdlib { source_dir, .. } => source_dir,
+                ImportKind::ExternalGo { source_dir, .. } => source_dir,
+            };
+
+            let pkg = extract::extract(source_dir)?;
+            entry.insert(pkg);
         }
 
-        // Resolve and parse
-        let kind = self.resolver.resolve(import_path, project)?;
-        let source_dir = match &kind {
-            ImportKind::LocalSoppo { source_dir } => source_dir,
-            ImportKind::GoStdlib { source_dir, .. } => source_dir,
-            ImportKind::ExternalGo { source_dir, .. } => source_dir,
-        };
-
-        let pkg = extract::extract(source_dir)?;
-        self.packages.insert(import_path.to_string(), pkg);
         Ok(self.packages.get(import_path).unwrap())
     }
 

@@ -750,13 +750,13 @@ impl Infer {
     /// Infer the type of an expression
     pub fn infer_expr(&mut self, expr: &Expr) -> Result<Type> {
         match &expr.kind {
-            ExprKind::Integer(_) => Ok(Type::int()),
+            ExprKind::Integer(_) => Ok(Type::simple("int")),
 
             ExprKind::Float(_) => Ok(Type::simple("float64")),
 
-            ExprKind::String(_) => Ok(Type::string()),
+            ExprKind::String(_) => Ok(Type::simple("string")),
 
-            ExprKind::Bool(_) => Ok(Type::bool()),
+            ExprKind::Bool(_) => Ok(Type::simple("bool")),
 
             ExprKind::Ident(name) => {
                 self.lookup_var(name)
@@ -800,13 +800,13 @@ impl Infer {
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                         // Comparison: both must be same type, result is bool
                         self.unify(&left_ty, &right_ty, &expr.span)?;
-                        Ok(Type::bool())
+                        Ok(Type::simple("bool"))
                     }
                     BinOp::And | BinOp::Or => {
                         // Logical: both must be bool, result is bool
-                        self.unify(&left_ty, &Type::bool(), &left.span)?;
-                        self.unify(&right_ty, &Type::bool(), &right.span)?;
-                        Ok(Type::bool())
+                        self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
+                        self.unify(&right_ty, &Type::simple("bool"), &right.span)?;
+                        Ok(Type::simple("bool"))
                     }
                 }
             }
@@ -823,7 +823,7 @@ impl Infer {
                         // Validate additional arguments are integers (size, capacity)
                         for arg in args {
                             let arg_ty = self.infer_expr(arg)?;
-                            self.unify(&arg_ty, &Type::int(), &arg.span)?;
+                            self.unify(&arg_ty, &Type::simple("int"), &arg.span)?;
                         }
                         // Return the type being made (properly resolving type args)
                         let ty = &type_args[0];
@@ -1083,7 +1083,7 @@ impl Infer {
                     && field == "Error"
                 {
                     // error.Error() returns string
-                    return Ok(Type::fun(vec![], Type::string()));
+                    return Ok(Type::fun(vec![], Type::simple("string")));
                 }
 
                 // Look up the struct type to validate field access
@@ -1131,7 +1131,7 @@ impl Infer {
 
                     // Slice indexing: []T - index is int, result is T
                     if name.name.starts_with("[]") {
-                        self.unify(&index_ty, &Type::int(), &index.span)?;
+                        self.unify(&index_ty, &Type::simple("int"), &index.span)?;
                         if args.len() == 1 {
                             return Ok(args[0].clone());
                         }
@@ -1141,19 +1141,19 @@ impl Infer {
 
                     // Array indexing: array or [N]T - index is int
                     if name.name == "array" && args.len() == 1 {
-                        self.unify(&index_ty, &Type::int(), &index.span)?;
+                        self.unify(&index_ty, &Type::simple("int"), &index.span)?;
                         return Ok(args[0].clone());
                     }
 
                     // String indexing - index is int, result is byte
                     if name.name == "string" {
-                        self.unify(&index_ty, &Type::int(), &index.span)?;
+                        self.unify(&index_ty, &Type::simple("int"), &index.span)?;
                         return Ok(Type::simple("byte"));
                     }
                 }
 
                 // Default: assume int index
-                self.unify(&index_ty, &Type::int(), &index.span)?;
+                self.unify(&index_ty, &Type::simple("int"), &index.span)?;
                 Ok(self.fresh_ty_var())
             }
 
@@ -1247,8 +1247,8 @@ impl Infer {
                     }
                     UnaryOp::Not => {
                         // !x: operand must be bool, result is bool
-                        self.unify(&operand_ty, &Type::bool(), &operand.span)?;
-                        Ok(Type::bool())
+                        self.unify(&operand_ty, &Type::simple("bool"), &operand.span)?;
+                        Ok(Type::simple("bool"))
                     }
                     UnaryOp::Ref => {
                         // &x: result is *T where T is the operand type
@@ -1582,7 +1582,7 @@ impl Infer {
             StmtKind::For { condition, body } => {
                 // Check condition is bool
                 let cond_ty = self.infer_expr(condition)?;
-                self.unify(&Type::bool(), &cond_ty, &condition.span)?;
+                self.unify(&Type::simple("bool"), &cond_ty, &condition.span)?;
 
                 // Type check body
                 self.infer_block(body)?;
@@ -1610,7 +1610,7 @@ impl Infer {
                             let elem_name = &name.name[2..];
                             Type::simple(elem_name)
                         };
-                        (Type::int(), elem_ty)
+                        (Type::simple("int"), elem_ty)
                     } else if name.name.starts_with("map[") {
                         // Map: key is key type, value is value type
                         if args.len() == 2 {
@@ -1629,7 +1629,7 @@ impl Infer {
                         (elem_ty.clone(), elem_ty)
                     } else if name.name == "string" {
                         // String: key is int (index), value is rune
-                        (Type::int(), Type::simple("rune"))
+                        (Type::simple("int"), Type::simple("rune"))
                     } else {
                         (self.fresh_ty_var(), self.fresh_ty_var())
                     }
@@ -1658,7 +1658,7 @@ impl Infer {
             } => {
                 // Check condition is bool
                 let cond_ty = self.infer_expr(condition)?;
-                self.unify(&Type::bool(), &cond_ty, &condition.span)?;
+                self.unify(&Type::simple("bool"), &cond_ty, &condition.span)?;
 
                 // Type check then block
                 let then_ty = self.infer_block(then_block)?;
@@ -2054,46 +2054,46 @@ mod tests {
     #[test]
     fn test_infer_integer() {
         let ty = infer_expr_helper("42").unwrap();
-        assert_eq!(ty, Type::int());
+        assert_eq!(ty, Type::simple("int"));
     }
 
     #[test]
     fn test_infer_string() {
         let ty = infer_expr_helper(r#""hello""#).unwrap();
-        assert_eq!(ty, Type::string());
+        assert_eq!(ty, Type::simple("string"));
     }
 
     #[test]
     fn test_infer_bool() {
         let ty = infer_expr_helper("true").unwrap();
-        assert_eq!(ty, Type::bool());
+        assert_eq!(ty, Type::simple("bool"));
     }
 
     #[test]
     fn test_infer_arithmetic() {
         let ty = infer_expr_helper("1 + 2").unwrap();
-        assert_eq!(ty, Type::int());
+        assert_eq!(ty, Type::simple("int"));
 
         let ty = infer_expr_helper("10 * 5").unwrap();
-        assert_eq!(ty, Type::int());
+        assert_eq!(ty, Type::simple("int"));
     }
 
     #[test]
     fn test_infer_comparison() {
         let ty = infer_expr_helper("1 < 2").unwrap();
-        assert_eq!(ty, Type::bool());
+        assert_eq!(ty, Type::simple("bool"));
 
         let ty = infer_expr_helper("5 == 5").unwrap();
-        assert_eq!(ty, Type::bool());
+        assert_eq!(ty, Type::simple("bool"));
     }
 
     #[test]
     fn test_infer_complex_expr() {
         let ty = infer_expr_helper("(1 + 2) * 3").unwrap();
-        assert_eq!(ty, Type::int());
+        assert_eq!(ty, Type::simple("int"));
 
         let ty = infer_expr_helper("(1 + 2) < (3 * 4)").unwrap();
-        assert_eq!(ty, Type::bool());
+        assert_eq!(ty, Type::simple("bool"));
     }
 
     #[test]
@@ -2110,11 +2110,11 @@ mod tests {
         // Unify two type variables
         let t1 = infer.fresh_ty_var();
         let t2 = infer.fresh_ty_var();
-        infer.unify(&t1, &Type::int(), &Span::dummy()).unwrap();
+        infer.unify(&t1, &Type::simple("int"), &Span::dummy()).unwrap();
         infer.unify(&t2, &t1, &Span::dummy()).unwrap();
 
         let t2_subst = infer.substitute(t2);
-        assert_eq!(t2_subst, Type::int());
+        assert_eq!(t2_subst, Type::simple("int"));
     }
 
     #[test]
@@ -2147,7 +2147,7 @@ mod tests {
         let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_block(&block).unwrap();
 
-        assert_eq!(ty, Type::int());
+        assert_eq!(ty, Type::simple("int"));
     }
 
     #[test]
@@ -2159,7 +2159,7 @@ mod tests {
         let mut infer = Infer::new().expect("Failed to create Infer");
         let ty = infer.infer_block(&block).unwrap();
 
-        assert_eq!(ty, Type::int());
+        assert_eq!(ty, Type::simple("int"));
     }
 
     #[test]
@@ -2229,7 +2229,7 @@ mod tests {
         let ty = infer.infer_block(&block).unwrap();
 
         // Inner block shadows x with bool, so result is bool
-        assert_eq!(ty, Type::bool());
+        assert_eq!(ty, Type::simple("bool"));
     }
 
     #[test]
@@ -2349,7 +2349,7 @@ mod tests {
         if let Type::Con { name, args } = ty {
             assert_eq!(name.name, "array");
             assert_eq!(args.len(), 1);
-            assert_eq!(args[0], Type::int());
+            assert_eq!(args[0], Type::simple("int"));
         } else {
             panic!("Expected array type, got: {:?}", ty);
         }
@@ -2369,7 +2369,7 @@ mod tests {
         let ty = infer.infer_block(&block).unwrap();
 
         // Should be int (the element type)
-        assert_eq!(ty, Type::int());
+        assert_eq!(ty, Type::simple("int"));
     }
 
     #[test]

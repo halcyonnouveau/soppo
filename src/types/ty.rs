@@ -19,7 +19,7 @@ pub enum Type {
 }
 
 impl Type {
-    /// Dummy type for initialization
+    /// Dummy type for initialisation
     pub fn dummy() -> Self {
         Type::Var(-1)
     }
@@ -34,31 +34,6 @@ impl Type {
             },
             args: vec![],
         }
-    }
-
-    /// Built-in type: int
-    pub fn int() -> Self {
-        Type::simple("int")
-    }
-
-    /// Built-in type: string
-    pub fn string() -> Self {
-        Type::simple("string")
-    }
-
-    /// Built-in type: bool
-    pub fn bool() -> Self {
-        Type::simple("bool")
-    }
-
-    /// Built-in type: float64 (Go's default float type)
-    pub fn float64() -> Self {
-        Type::simple("float64")
-    }
-
-    /// Built-in type: error (Go's error interface)
-    pub fn error() -> Self {
-        Type::simple("error")
     }
 
     /// Create a generic type with string name and type arguments
@@ -161,13 +136,13 @@ mod tests {
 
     #[test]
     fn test_simple_types() {
-        let int_ty = Type::int();
+        let int_ty = Type::simple("int");
         assert_eq!(int_ty.to_string(), "int");
 
-        let string_ty = Type::string();
+        let string_ty = Type::simple("string");
         assert_eq!(string_ty.to_string(), "string");
 
-        let bool_ty = Type::bool();
+        let bool_ty = Type::simple("bool");
         assert_eq!(bool_ty.to_string(), "bool");
     }
 
@@ -182,7 +157,7 @@ mod tests {
 
     #[test]
     fn test_function_type() {
-        let func = Type::fun(vec![Type::int(), Type::string()], Type::bool());
+        let func = Type::fun(vec![Type::simple("int"), Type::simple("string")], Type::simple("bool"));
         assert_eq!(func.to_string(), "fn(int, string) -> bool");
     }
 
@@ -194,7 +169,7 @@ mod tests {
                 name: "Option".to_string(),
                 span: Span::dummy(),
             },
-            vec![Type::int()],
+            vec![Type::simple("int")],
         );
         assert_eq!(option_int.to_string(), "Option[int]");
     }
@@ -214,9 +189,9 @@ mod tests {
                         name: "Option".to_string(),
                         span: Span::dummy(),
                     },
-                    vec![Type::int()],
+                    vec![Type::simple("int")],
                 ),
-                Type::string(),
+                Type::simple("string"),
             ],
         );
         assert_eq!(result.to_string(), "Result[Option[int], string]");

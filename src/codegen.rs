@@ -94,6 +94,15 @@ impl Codegen {
         }
     }
 
+    /// Format generic names in brackets if not empty: "[T, E]" or ""
+    fn format_generic_name_brackets(&self, generics: &[Generic]) -> String {
+        if generics.is_empty() {
+            String::new()
+        } else {
+            format!("[{}]", self.format_generic_names(generics))
+        }
+    }
+
     /// Generate code for an entire file
     pub fn gen_file(&mut self, file: &File) {
         // Package declaration
@@ -177,11 +186,7 @@ impl Codegen {
                             // Unit variant: empty struct with generics if present
                             let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = if !type_decl.generics.is_empty() {
-                                format!("[{}]", self.format_generic_names(&type_decl.generics))
-                            } else {
-                                String::new()
-                            };
+                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "type {}{} struct {{}}",
@@ -201,11 +206,7 @@ impl Codegen {
                             // Single value variant: struct with Value field and generics if present
                             let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = if !type_decl.generics.is_empty() {
-                                format!("[{}]", self.format_generic_names(&type_decl.generics))
-                            } else {
-                                String::new()
-                            };
+                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "type {}{} struct {{",
@@ -225,11 +226,7 @@ impl Codegen {
                             // Struct variant: struct with all fields and generics if present
                             let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = if !type_decl.generics.is_empty() {
-                                format!("[{}]", self.format_generic_names(&type_decl.generics))
-                            } else {
-                                String::new()
-                            };
+                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "type {}{} struct {{",
@@ -288,11 +285,7 @@ impl Codegen {
                             let func_name = format!("{}{}", type_decl.name, name);
                             let type_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = if !type_decl.generics.is_empty() {
-                                format!("[{}]", self.format_generic_names(&type_decl.generics))
-                            } else {
-                                String::new()
-                            };
+                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "func {}{}(value {}) {}{} {{",
@@ -319,10 +312,8 @@ impl Codegen {
                             if !type_decl.generics.is_empty() {
                                 let func_name = format!("{}{}", type_decl.name, name);
                                 let type_name = format!("{}_{}", type_decl.name, name);
-                                let generic_params =
-                                    self.format_generic_brackets(&type_decl.generics);
-                                let generic_names =
-                                    format!("[{}]", self.format_generic_names(&type_decl.generics));
+                                let generic_params = self.format_generic_brackets(&type_decl.generics);
+                                let generic_names = self.format_generic_name_brackets(&type_decl.generics);
 
                                 self.emit_line(&format!(
                                     "func {}{}() {}{} {{",

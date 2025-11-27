@@ -9,9 +9,9 @@ use crate::types::Type;
 /// Parse a Go type string into a Soppo Type.
 ///
 /// Examples:
-/// - `"int"` → `Type::int()`
-/// - `"[]string"` → `Type::generic("slice", [Type::string()])`
-/// - `"map[string]int"` → `Type::generic("map", [Type::string(), Type::int()])`
+/// - `"int"` → `Type::simple("int")`
+/// - `"[]string"` → `Type::generic("slice", [Type::simple("string")])`
+/// - `"map[string]int"` → `Type::generic("map", [Type::simple("string"), Type::simple("int")])`
 /// - `"*Point"` → `Type::generic("ptr", [Type::simple("Point")])`
 /// - `"func(int) string"` → `Type::Fun { args: [int], ret: string }`
 pub fn parse_go_type(s: &str) -> Type {
@@ -109,17 +109,11 @@ pub fn parse_go_type(s: &str) -> Type {
         };
     }
 
-    // Primitive types
+    // Primitive types - pass through as Type::simple
+    // Aliases map to their underlying types
     match s {
-        "int" | "int8" | "int16" | "int32" | "int64" => Type::int(),
-        "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" => Type::int(), // Treat unsigned as int for now
-        "byte" => Type::int(), // byte is alias for uint8
-        "rune" => Type::int(), // rune is alias for int32
-        "float32" | "float64" => Type::simple(s),
-        "complex64" | "complex128" => Type::simple("complex"),
-        "string" => Type::string(),
-        "bool" => Type::bool(),
-        "error" => Type::simple("error"),
+        "byte" => Type::simple("uint8"),
+        "rune" => Type::simple("int32"),
         _ => Type::simple(s),
     }
 }
@@ -285,7 +279,10 @@ mod tests {
         assert_eq!(parse_go_type("string").to_string(), "string");
         assert_eq!(parse_go_type("bool").to_string(), "bool");
         assert_eq!(parse_go_type("float64").to_string(), "float64");
-        assert_eq!(parse_go_type("byte").to_string(), "int");
+        assert_eq!(parse_go_type("byte").to_string(), "uint8");
+        assert_eq!(parse_go_type("uint").to_string(), "uint");
+        assert_eq!(parse_go_type("uint32").to_string(), "uint32");
+        assert_eq!(parse_go_type("uintptr").to_string(), "uintptr");
         assert_eq!(parse_go_type("error").to_string(), "error");
     }
 

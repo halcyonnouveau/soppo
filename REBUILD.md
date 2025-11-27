@@ -82,7 +82,6 @@ Currently `...` is only used in struct destructuring patterns to ignore remainin
 3. **Generic constraints required**: `[T any]` not `[T]` (matches Go 1.18+)
 4. **Type checking mandatory**: No codegen without successful type check
 5. **Snapshot tests for codegen**: Unit tests for internal logic
-6. **No multiple return values**: Use `Result[T, E]` for error handling (Rust-style)
 
 ## Variable Declaration Rules (Go-style)
 
