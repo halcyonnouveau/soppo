@@ -182,6 +182,41 @@ func test() int {
     return 0
 }
 
+func isPrimary(c Color) bool {
+    var result bool
+    switch c.(type) {
+    case Color_Red, Color_Yellow:
+        result = true
+    case Color_Green:
+        result = false
+    }
+    return result
+}
+
+func classify(x int) string {
+    var result string
+    switch {
+    case (x > 0):
+        result = "positive"
+    case (x < 0):
+        result = "negative"
+    default:
+        result = "zero"
+    }
+    return result
+}
+
+func isSmall(x int) bool {
+    var result bool
+    switch x {
+    case 1, 2, 3:
+        result = true
+    default:
+        result = false
+    }
+    return result
+}
+
 func main() {
     ok := MyResultOk(42)
     err := MyResultErr("failed")

@@ -1,6 +1,6 @@
 use crate::parse::{
     BinOp, Block, ConstDecl, Decl, EnumVariant, Expr, ExprKind, File, FuncDecl, Generic, Literal,
-    PatternKind, Stmt, StmtKind, TypeDecl, TypeKind,
+    Pattern, PatternKind, Stmt, StmtKind, TypeDecl, TypeKind,
 };
 use crate::types::GlobalState;
 
@@ -186,7 +186,8 @@ impl Codegen {
                             // Unit variant: empty struct with generics if present
                             let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "type {}{} struct {{}}",
@@ -206,7 +207,8 @@ impl Codegen {
                             // Single value variant: struct with Value field and generics if present
                             let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "type {}{} struct {{",
@@ -226,7 +228,8 @@ impl Codegen {
                             // Struct variant: struct with all fields and generics if present
                             let full_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "type {}{} struct {{",
@@ -285,7 +288,8 @@ impl Codegen {
                             let func_name = format!("{}{}", type_decl.name, name);
                             let type_name = format!("{}_{}", type_decl.name, name);
                             let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names = self.format_generic_name_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
 
                             self.emit_line(&format!(
                                 "func {}{}(value {}) {}{} {{",
@@ -312,8 +316,10 @@ impl Codegen {
                             if !type_decl.generics.is_empty() {
                                 let func_name = format!("{}{}", type_decl.name, name);
                                 let type_name = format!("{}_{}", type_decl.name, name);
-                                let generic_params = self.format_generic_brackets(&type_decl.generics);
-                                let generic_names = self.format_generic_name_brackets(&type_decl.generics);
+                                let generic_params =
+                                    self.format_generic_brackets(&type_decl.generics);
+                                let generic_names =
+                                    self.format_generic_name_brackets(&type_decl.generics);
 
                                 self.emit_line(&format!(
                                     "func {}{}() {}{} {{",
@@ -639,92 +645,96 @@ impl Codegen {
             StmtKind::Match { scrutinee, arms } => {
                 self.emit_indent();
 
+                // Expression-less match: `match { case x > 0: ... }` -> `switch { case x > 0: ... }`
+                let is_expression_less = scrutinee.is_none();
+
                 // Check if this is a type switch or value switch
-                let is_type_switch = arms.iter().any(|arm| {
-                    matches!(
-                        &arm.pattern.kind,
-                        PatternKind::Variant(_)
-                            | PatternKind::Destructor { .. }
-                            | PatternKind::StructDestructor { .. }
-                    )
-                });
+                let is_type_switch = !is_expression_less
+                    && arms.iter().any(|arm| {
+                        arm.patterns.iter().any(|p| {
+                            matches!(
+                                &p.kind,
+                                PatternKind::Variant(_)
+                                    | PatternKind::Destructor { .. }
+                                    | PatternKind::StructDestructor { .. }
+                            )
+                        })
+                    });
 
                 // Check if any arm needs the bound variable (Destructor or StructDestructor patterns)
                 let needs_binding = arms.iter().any(|arm| {
-                    matches!(
-                        &arm.pattern.kind,
-                        PatternKind::Destructor { .. } | PatternKind::StructDestructor { .. }
-                    )
+                    arm.patterns.iter().any(|p| {
+                        matches!(
+                            &p.kind,
+                            PatternKind::Destructor { .. } | PatternKind::StructDestructor { .. }
+                        )
+                    })
                 });
 
-                if is_type_switch {
+                if is_expression_less {
+                    // Expression-less match: `switch { ... }`
+                    self.emit("switch {\n");
+                } else if is_type_switch {
                     if needs_binding {
                         self.emit("switch __v := ");
                     } else {
                         self.emit("switch ");
                     }
-                    self.gen_expr(scrutinee);
+                    self.gen_expr(scrutinee.as_ref().unwrap());
                     self.emit(".(type) {\n");
                 } else {
                     self.emit("switch ");
-                    self.gen_expr(scrutinee);
+                    self.gen_expr(scrutinee.as_ref().unwrap());
                     self.emit(" {\n");
                 }
 
                 for arm in arms {
                     self.emit_indent();
 
-                    // Emit pattern - default is special (default:, not case default:)
-                    if matches!(&arm.pattern.kind, PatternKind::Default) {
+                    // Check if this arm is a default case
+                    let is_default = arm
+                        .patterns
+                        .iter()
+                        .any(|p| matches!(&p.kind, PatternKind::Default));
+
+                    if is_default {
                         self.emit("default:\n");
                     } else {
                         self.emit("case ");
-                        match &arm.pattern.kind {
-                            PatternKind::Variant(name) => {
-                                // Convert qualified name (Color.Red) to namespaced (Color_Red)
-                                let full_name = name.replace('.', "_");
-                                self.emit(&full_name);
+
+                        // Emit comma-separated patterns
+                        for (i, pattern) in arm.patterns.iter().enumerate() {
+                            if i > 0 {
+                                self.emit(", ");
                             }
-                            PatternKind::Literal(lit) => match lit {
-                                Literal::Integer(n) => self.emit(&n.to_string()),
-                                Literal::String(s) => self.emit(&format!("\"{}\"", s)),
-                                Literal::Bool(b) => self.emit(&b.to_string()),
-                            },
-                            PatternKind::Destructor { name, .. } => {
-                                // Convert qualified name (MyResult.Ok) to namespaced (MyResult_Ok)
-                                let full_name = name.replace('.', "_");
-                                self.emit(&full_name);
-                            }
-                            PatternKind::StructDestructor { name, .. } => {
-                                // Convert qualified name (Shape.Circle) to namespaced (Shape_Circle)
-                                let full_name = name.replace('.', "_");
-                                self.emit(&full_name);
-                            }
-                            PatternKind::Default => unreachable!(),
+                            self.gen_pattern(pattern);
                         }
+
                         self.emit(":\n");
                     }
                     self.indent();
 
-                    // Extract pattern bindings for destructor patterns
-                    if let PatternKind::Destructor { name: _, binding } = &arm.pattern.kind {
-                        // __v is already the concrete type from the switch statement
-                        self.emit_indent();
-                        self.emit(&format!("{} := __v.Value\n", binding));
-                        // Add blank assignment to avoid unused variable warnings
-                        self.emit_indent();
-                        self.emit(&format!("_ = {}\n", binding));
-                    }
-
-                    // Extract pattern bindings for struct destructor patterns
-                    if let PatternKind::StructDestructor { fields, .. } = &arm.pattern.kind {
-                        // __v is already the concrete type from the switch statement
-                        for (field_name, binding_name) in fields {
+                    // Extract pattern bindings for destructor patterns (from first pattern only)
+                    if let Some(first_pattern) = arm.patterns.first() {
+                        if let PatternKind::Destructor { binding, .. } = &first_pattern.kind {
+                            // __v is already the concrete type from the switch statement
                             self.emit_indent();
-                            self.emit(&format!("{} := __v.{}\n", binding_name, field_name));
+                            self.emit(&format!("{} := __v.Value\n", binding));
                             // Add blank assignment to avoid unused variable warnings
                             self.emit_indent();
-                            self.emit(&format!("_ = {}\n", binding_name));
+                            self.emit(&format!("_ = {}\n", binding));
+                        }
+
+                        // Extract pattern bindings for struct destructor patterns
+                        if let PatternKind::StructDestructor { fields, .. } = &first_pattern.kind {
+                            // __v is already the concrete type from the switch statement
+                            for (field_name, binding_name) in fields {
+                                self.emit_indent();
+                                self.emit(&format!("{} := __v.{}\n", binding_name, field_name));
+                                // Add blank assignment to avoid unused variable warnings
+                                self.emit_indent();
+                                self.emit(&format!("_ = {}\n", binding_name));
+                            }
                         }
                     }
 
@@ -776,6 +786,40 @@ impl Codegen {
                 self.emit_indent();
                 self.gen_expr(expr);
                 self.emit("\n");
+            }
+        }
+    }
+
+    /// Generate a pattern for match arms
+    fn gen_pattern(&mut self, pattern: &Pattern) {
+        match &pattern.kind {
+            PatternKind::Variant(name) => {
+                // Convert qualified name (Color.Red) to namespaced (Color_Red)
+                let full_name = name.replace('.', "_");
+                self.emit(&full_name);
+            }
+            PatternKind::Literal(lit) => match lit {
+                Literal::Integer(n) => self.emit(&n.to_string()),
+                Literal::String(s) => self.emit(&format!("\"{}\"", s)),
+                Literal::Bool(b) => self.emit(&b.to_string()),
+            },
+            PatternKind::Destructor { name, .. } => {
+                // Convert qualified name (MyResult.Ok) to namespaced (MyResult_Ok)
+                let full_name = name.replace('.', "_");
+                self.emit(&full_name);
+            }
+            PatternKind::StructDestructor { name, .. } => {
+                // Convert qualified name (Shape.Circle) to namespaced (Shape_Circle)
+                let full_name = name.replace('.', "_");
+                self.emit(&full_name);
+            }
+            PatternKind::Guard(expr) => {
+                // For expression-less match, emit the boolean expression
+                self.gen_expr(expr.as_ref());
+            }
+            PatternKind::Default => {
+                // Default is handled separately, shouldn't reach here
+                self.emit("default");
             }
         }
     }

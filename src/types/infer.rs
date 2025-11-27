@@ -333,20 +333,20 @@ impl Infer {
         // Check if left is a defined type with numeric underlying, and right is numeric primitive
         if let Some(ref left_pkg) = left_module
             && let Some(left_underlying) = self.get_underlying_type(left_pkg, &left_name)
-                && is_numeric_primitive(&left_underlying)
-                    && self.is_compatible_with_underlying(&right_name, &left_underlying)
-                {
-                    return Some(left.clone());
-                }
+            && is_numeric_primitive(&left_underlying)
+            && self.is_compatible_with_underlying(&right_name, &left_underlying)
+        {
+            return Some(left.clone());
+        }
 
         // Check if right is a defined type with numeric underlying, and left is numeric primitive
         if let Some(ref right_pkg) = right_module
             && let Some(right_underlying) = self.get_underlying_type(right_pkg, &right_name)
-                && is_numeric_primitive(&right_underlying)
-                    && self.is_compatible_with_underlying(&left_name, &right_underlying)
-                {
-                    return Some(right.clone());
-                }
+            && is_numeric_primitive(&right_underlying)
+            && self.is_compatible_with_underlying(&left_name, &right_underlying)
+        {
+            return Some(right.clone());
+        }
 
         None
     }
@@ -467,11 +467,9 @@ impl Infer {
                 // Default doesn't bind anything
                 Ok(())
             }
-            PatternKind::Variant(name) => {
-                // In the context of a tuple/struct pattern, this is a binding variable
-                // (e.g., Ok(value) where "value" is parsed as Variant)
-                // Add it to scope with the scrutinee type
-                self.insert_var(name.clone(), scrutinee_ty.clone());
+            PatternKind::Variant(_name) => {
+                // Qualified variant names like Color.Red don't create bindings
+                // They just match against enum variants
                 Ok(())
             }
             PatternKind::Literal(_) => {
@@ -562,7 +560,104 @@ impl Infer {
                 }
                 Ok(())
             }
+            PatternKind::Guard(_) => {
+                // Guard expressions don't bind anything
+                Ok(())
+            }
         }
+    }
+
+    /// Collect pattern bindings without inserting them (for multi-pattern validation)
+    fn collect_pattern_bindings(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee_ty: &Type,
+    ) -> Result<std::collections::HashMap<String, Type>> {
+        use std::collections::HashMap;
+
+        let mut bindings = HashMap::new();
+
+        match &pattern.kind {
+            PatternKind::Default | PatternKind::Literal(_) | PatternKind::Guard(_) => {
+                // These patterns don't bind anything
+            }
+            PatternKind::Variant(_name) => {
+                // Qualified variant names like Color.Red don't create bindings
+                // They just match against enum variants
+            }
+            PatternKind::Destructor { name, binding } => {
+                let variant_name = name.rsplit('.').next().unwrap_or(name);
+
+                let binding_ty = if let Type::Con {
+                    name: type_name, ..
+                } = scrutinee_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
+                    && let super::module::TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    variants
+                        .iter()
+                        .find_map(|variant| {
+                            if let EnumVariant::Single {
+                                name: vname, ty, ..
+                            } = variant
+                                && vname == variant_name
+                            {
+                                Some(Type::simple(&ty.name))
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_else(|| self.fresh_ty_var())
+                } else {
+                    self.fresh_ty_var()
+                };
+
+                bindings.insert(binding.clone(), binding_ty);
+            }
+            PatternKind::StructDestructor {
+                name,
+                fields,
+                rest: _,
+            } => {
+                let variant_name = name.rsplit('.').next().unwrap_or(name);
+
+                if let Type::Con {
+                    name: type_name, ..
+                } = scrutinee_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
+                    && let super::module::TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    for variant in variants {
+                        if let EnumVariant::Struct {
+                            name: vname,
+                            fields: variant_fields,
+                            ..
+                        } = variant
+                            && vname == variant_name
+                        {
+                            for (field_name, binding_name) in fields {
+                                if let Some(field) =
+                                    variant_fields.iter().find(|f| &f.name == field_name)
+                                {
+                                    let field_ty = Type::simple(&field.ty.name);
+                                    bindings.insert(binding_name.clone(), field_ty);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback for any bindings not found
+                for (_field_name, binding_name) in fields {
+                    bindings
+                        .entry(binding_name.clone())
+                        .or_insert_with(|| self.fresh_ty_var());
+                }
+            }
+        }
+
+        Ok(bindings)
     }
 
     /// Unify two types (solve constraint)
@@ -1706,16 +1801,75 @@ impl Infer {
             }
 
             StmtKind::Match { scrutinee, arms } => {
-                // Infer the type of the scrutinee
-                let scrutinee_ty = self.infer_expr(scrutinee)?;
-                let scrutinee_ty = self.substitute(scrutinee_ty);
+                // Expression-less match has no scrutinee
+                let scrutinee_ty = if let Some(scrutinee) = scrutinee {
+                    let ty = self.infer_expr(scrutinee)?;
+                    Some(self.substitute(ty))
+                } else {
+                    None
+                };
 
                 for arm in arms {
                     // Create a new scope for pattern bindings
                     self.push_scope();
 
-                    // Add pattern bindings to scope
-                    self.add_pattern_bindings(&arm.pattern, &scrutinee_ty)?;
+                    if let Some(ref scr_ty) = scrutinee_ty {
+                        // Normal match with scrutinee
+                        // Handle multiple patterns: validate bindings match across patterns
+                        if arm.patterns.len() > 1 {
+                            // Collect bindings from first pattern
+                            let first_bindings =
+                                self.collect_pattern_bindings(&arm.patterns[0], scr_ty)?;
+
+                            // Validate subsequent patterns have matching bindings
+                            for pattern in &arm.patterns[1..] {
+                                let bindings = self.collect_pattern_bindings(pattern, scr_ty)?;
+
+                                // Check binding names match
+                                let first_keys: HashSet<_> = first_bindings.keys().collect();
+                                let other_keys: HashSet<_> = bindings.keys().collect();
+                                if first_keys != other_keys {
+                                    return Err(SoppoError::Type {
+                                        message: format!(
+                                            "Pattern bindings must match: expected {:?}, found {:?}",
+                                            first_keys, other_keys
+                                        ),
+                                        span: pattern.span.clone(),
+                                    });
+                                }
+
+                                // Unify types of matching bindings
+                                for (name, ty) in &bindings {
+                                    if let Some(first_ty) = first_bindings.get(name) {
+                                        self.unify(first_ty, ty, &pattern.span)?;
+                                    }
+                                }
+                            }
+
+                            // Add first pattern's bindings to scope
+                            for (name, ty) in first_bindings {
+                                self.insert_var(name, ty);
+                            }
+                        } else if let Some(pattern) = arm.patterns.first() {
+                            // Single pattern
+                            self.add_pattern_bindings(pattern, scr_ty)?;
+                        }
+                    } else {
+                        // Expression-less match: patterns must be Guard expressions
+                        for pattern in &arm.patterns {
+                            if let PatternKind::Guard(expr) = &pattern.kind {
+                                let ty = self.infer_expr(expr)?;
+                                self.unify(&ty, &Type::simple("bool"), &expr.span)?;
+                            } else if !matches!(pattern.kind, PatternKind::Default) {
+                                return Err(SoppoError::Type {
+                                    message:
+                                        "Expression-less match requires boolean guard expressions"
+                                            .to_string(),
+                                    span: pattern.span.clone(),
+                                });
+                            }
+                        }
+                    }
 
                     // Type check the arm body
                     self.infer_block(&arm.body)?;
@@ -1724,21 +1878,25 @@ impl Infer {
                     self.pop_scope();
                 }
 
-                // Exhaustiveness check for enum types
-                if let Type::Con { name, .. } = &scrutinee_ty
+                // Exhaustiveness check for enum types (only for normal match)
+                if let Some(ref scrutinee_ty) = scrutinee_ty
+                    && let Type::Con { name, .. } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&name.name)
                     && let super::module::TypeDefKind::Enum { variants } = &type_def.kind
                 {
                     // Check if any arm is Default (catch-all)
-                    let has_default = arms
-                        .iter()
-                        .any(|arm| matches!(&arm.pattern.kind, PatternKind::Default));
+                    let has_default = arms.iter().any(|arm| {
+                        arm.patterns
+                            .iter()
+                            .any(|p| matches!(&p.kind, PatternKind::Default))
+                    });
 
                     if !has_default {
-                        // Collect covered variants from patterns
+                        // Collect covered variants from all patterns in all arms
                         let covered: HashSet<String> = arms
                             .iter()
-                            .filter_map(|arm| match &arm.pattern.kind {
+                            .flat_map(|arm| arm.patterns.iter())
+                            .filter_map(|pattern| match &pattern.kind {
                                 PatternKind::Variant(v) => {
                                     // Extract variant name from qualified name like "Color.Red"
                                     Some(v.rsplit('.').next().unwrap_or(v).to_string())
@@ -2110,7 +2268,9 @@ mod tests {
         // Unify two type variables
         let t1 = infer.fresh_ty_var();
         let t2 = infer.fresh_ty_var();
-        infer.unify(&t1, &Type::simple("int"), &Span::dummy()).unwrap();
+        infer
+            .unify(&t1, &Type::simple("int"), &Span::dummy())
+            .unwrap();
         infer.unify(&t2, &t1, &Span::dummy()).unwrap();
 
         let t2_subst = infer.substitute(t2);

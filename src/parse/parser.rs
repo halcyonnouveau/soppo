@@ -565,7 +565,13 @@ impl Parser {
 
     /// Parse match statement
     fn parse_match_stmt(&mut self, start_span: Span) -> Result<Stmt> {
-        let scrutinee = self.parse_expr()?;
+        // Check for expression-less match: `match {`
+        let (scrutinee, is_expression_less) = if matches!(self.peek(), Some(Token::LBrace)) {
+            (None, true)
+        } else {
+            (Some(self.parse_expr()?), false)
+        };
+
         self.expect(Token::LBrace)?;
         // Skip terminators after opening brace
         self.skip_terminators();
@@ -573,7 +579,7 @@ impl Parser {
         let mut arms = Vec::new();
 
         while !matches!(self.peek(), Some(Token::RBrace) | None) {
-            let arm = self.parse_match_arm()?;
+            let arm = self.parse_match_arm(is_expression_less)?;
             arms.push(arm);
 
             // Skip terminators between arms
@@ -594,24 +600,24 @@ impl Parser {
         })
     }
 
-    /// Parse a match arm: case pattern: statements (until next case/default/})
-    fn parse_match_arm(&mut self) -> Result<Arm> {
+    /// Parse a match arm: case pattern, pattern: statements (until next case/default/})
+    fn parse_match_arm(&mut self, is_expression_less: bool) -> Result<Arm> {
         // Handle both 'case Pattern:' and 'default:'
-        let pattern = if let Some(Token::Ident(s)) = self.peek() {
+        let patterns = if let Some(Token::Ident(s)) = self.peek() {
             if s == "default" {
                 let span = self.peek_span();
                 self.advance(); // consume 'default'
-                Pattern {
+                vec![Pattern {
                     kind: PatternKind::Default,
                     span,
-                }
+                }]
             } else {
                 self.expect(Token::Case)?;
-                self.parse_pattern()?
+                self.parse_patterns(is_expression_less)?
             }
         } else {
             self.expect(Token::Case)?;
-            self.parse_pattern()?
+            self.parse_patterns(is_expression_less)?
         };
 
         self.expect(Token::Colon)?;
@@ -645,19 +651,48 @@ impl Parser {
             span: body_end.clone(),
         };
 
+        let first_span = &patterns[0].span;
         let span = Span::with_bytes(
-            pattern.span.start,
+            first_span.start,
             body.span.end,
             self.file,
-            pattern.span.byte_start,
+            first_span.byte_start,
             body.span.byte_end,
         );
 
         Ok(Arm {
-            pattern,
+            patterns,
             body,
             span,
         })
+    }
+
+    /// Parse comma-separated patterns for a match arm
+    fn parse_patterns(&mut self, is_expression_less: bool) -> Result<Vec<Pattern>> {
+        let mut patterns = vec![self.parse_pattern_or_guard(is_expression_less)?];
+
+        // Parse additional comma-separated patterns
+        while matches!(self.peek(), Some(Token::Comma)) {
+            self.advance(); // consume comma
+            patterns.push(self.parse_pattern_or_guard(is_expression_less)?);
+        }
+
+        Ok(patterns)
+    }
+
+    /// Parse a pattern or guard expression (for expression-less match)
+    fn parse_pattern_or_guard(&mut self, is_expression_less: bool) -> Result<Pattern> {
+        if is_expression_less {
+            // For expression-less match, parse an expression as the guard
+            let expr = self.parse_expr()?;
+            let span = expr.span.clone();
+            Ok(Pattern {
+                kind: PatternKind::Guard(Box::new(expr)),
+                span,
+            })
+        } else {
+            self.parse_pattern()
+        }
     }
 
     /// Parse a pattern
@@ -2764,11 +2799,13 @@ mod tests {
 
         match stmt.kind {
             StmtKind::Match { scrutinee, arms } => {
+                let scrutinee = scrutinee.unwrap();
                 assert!(matches!(scrutinee.kind, ExprKind::Ident(s) if s == "x"));
                 assert_eq!(arms.len(), 2);
 
                 // First arm: Ok(value) -> result = value
-                match &arms[0].pattern.kind {
+                assert_eq!(arms[0].patterns.len(), 1);
+                match &arms[0].patterns[0].kind {
                     PatternKind::Destructor { name, binding } => {
                         assert_eq!(name, "Ok");
                         assert_eq!(binding, "value");
@@ -2779,7 +2816,8 @@ mod tests {
                 assert_eq!(arms[0].body.stmts.len(), 1);
 
                 // Second arm: Err(msg) -> result = 0
-                match &arms[1].pattern.kind {
+                assert_eq!(arms[1].patterns.len(), 1);
+                match &arms[1].patterns[0].kind {
                     PatternKind::Destructor { name, binding } => {
                         assert_eq!(name, "Err");
                         assert_eq!(binding, "msg");

@@ -188,7 +188,7 @@ pub enum StmtKind {
         values: Vec<Expr>, // Empty = no return, one = single, many = multi-value
     },
     Match {
-        scrutinee: Expr,
+        scrutinee: Option<Expr>, // None for expression-less match
         arms: Vec<Arm>,
     },
     // ch <- value (channel send)
@@ -296,7 +296,7 @@ pub enum BinOp {
 /// Match arm
 #[derive(Debug, Clone, PartialEq)]
 pub struct Arm {
-    pub pattern: Pattern,
+    pub patterns: Vec<Pattern>, // Multiple patterns: case a, b, c:
     pub body: Block,
     pub span: Span,
 }
@@ -324,6 +324,8 @@ pub enum PatternKind {
         fields: Vec<(String, String)>, // (field_name, binding_name) pairs
         rest: bool,                    // true if `...` was used to ignore remaining fields
     },
+    /// Guard expression for expression-less match: case x > 0:
+    Guard(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

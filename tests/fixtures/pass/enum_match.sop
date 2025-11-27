@@ -97,6 +97,44 @@ func test() int {
     return 0
 }
 
+// Multiple patterns in match arms
+func isPrimary(c Color) bool {
+    var result bool
+    match c {
+    case Color.Red, Color.Yellow:
+        result = true
+    case Color.Green:
+        result = false
+    }
+    return result
+}
+
+// Expression-less match (like if/else chain)
+func classify(x int) string {
+    var result string
+    match {
+    case x > 0:
+        result = "positive"
+    case x < 0:
+        result = "negative"
+    default:
+        result = "zero"
+    }
+    return result
+}
+
+// Multiple literal patterns
+func isSmall(x int) bool {
+    var result bool
+    match x {
+    case 1, 2, 3:
+        result = true
+    default:
+        result = false
+    }
+    return result
+}
+
 func main() {
     ok := MyResult.Ok(42)
     err := MyResult.Err("failed")

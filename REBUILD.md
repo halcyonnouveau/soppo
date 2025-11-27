@@ -18,12 +18,12 @@
 - Unary operators (`-x`, `!x`)
 - Full numeric types (int8-64, uint8-64, float32/64, complex64/128)
 - Multi-value returns
+- Multiple patterns in match arms (`case 1, 2, 3:`)
+- Expression-less match (`match { case x > 0: ... }`)
 
 ## Not Yet Implemented
 
 **Core:**
-- Multiple patterns in match arms
-- Expression-less match
 - `?` operator (error propagation)
 - Nil safety (flow-sensitive tracking)
 - Named arguments

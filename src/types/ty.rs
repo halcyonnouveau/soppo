@@ -157,7 +157,10 @@ mod tests {
 
     #[test]
     fn test_function_type() {
-        let func = Type::fun(vec![Type::simple("int"), Type::simple("string")], Type::simple("bool"));
+        let func = Type::fun(
+            vec![Type::simple("int"), Type::simple("string")],
+            Type::simple("bool"),
+        );
         assert_eq!(func.to_string(), "fn(int, string) -> bool");
     }
 

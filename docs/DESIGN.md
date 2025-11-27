@@ -53,6 +53,8 @@ type Option[T any] enum {
 
 ## Pattern Matching
 
+`match` replaces `swtich` in Soppo.
+
 ```go
 match color {
 case Color.Red:
