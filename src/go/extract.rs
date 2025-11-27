@@ -61,6 +61,8 @@ pub struct TypeDef {
     pub generics: Vec<String>,
     pub kind: String, // "struct", "interface", "alias"
     pub fields: Vec<Field>,
+    /// For type aliases, the underlying type (e.g., "int64" for "type Duration int64")
+    pub underlying: Option<String>,
 }
 
 /// Struct field
@@ -387,6 +389,7 @@ fn extract_type_spec(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
         generics: Vec::new(),
         kind: "alias".to_string(),
         fields: Vec::new(),
+        underlying: None,
     };
 
     // Extract type parameters
@@ -406,6 +409,8 @@ fn extract_type_spec(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
             }
             _ => {
                 type_def.kind = "alias".to_string();
+                // For type aliases, store the underlying type
+                type_def.underlying = Some(extract_type_string(type_node, source));
             }
         }
     }
@@ -457,17 +462,31 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
 }
 
 fn extract_const_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+    // In Go, const blocks can have implicit typing:
+    // const (
+    //     Nanosecond Duration = 1       // explicit type
+    //     Microsecond = 1000 * Nanosecond  // inherits Duration type
+    // )
+    // Track the inherited type across const_specs in the block
+    let mut inherited_type = String::new();
+
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "const_spec" {
-            extract_const_spec(child, source, pkg);
+            inherited_type = extract_const_spec_with_type(child, source, pkg, &inherited_type);
         }
     }
 }
 
-fn extract_const_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+/// Extract a single const spec and return its type (for inheritance)
+fn extract_const_spec_with_type(
+    node: tree_sitter::Node,
+    source: &str,
+    pkg: &mut GoPackage,
+    inherited_type: &str,
+) -> String {
     let mut names = Vec::new();
-    let mut ty = String::new();
+    let mut explicit_ty = String::new();
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -476,21 +495,26 @@ fn extract_const_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage
                 names.push(node_text(child, source).to_string());
             }
             _ if is_type_node(child.kind()) => {
-                ty = extract_type_string(child, source);
+                explicit_ty = extract_type_string(child, source);
             }
             "expression_list" => {
-                // Try to infer type from value if not explicitly typed
-                if ty.is_empty() {
-                    ty = infer_const_type(child);
+                // Try to infer type from value if not explicitly typed and no inherited type
+                if explicit_ty.is_empty() && inherited_type.is_empty() {
+                    explicit_ty = infer_const_type(child);
                 }
             }
             _ => {}
         }
     }
 
-    if ty.is_empty() {
-        ty = "untyped".to_string();
-    }
+    // Determine the type to use: explicit > inherited > inferred/untyped
+    let ty = if !explicit_ty.is_empty() {
+        explicit_ty.clone()
+    } else if !inherited_type.is_empty() {
+        inherited_type.to_string()
+    } else {
+        "untyped".to_string()
+    };
 
     for name in names {
         if is_exported(&name) {
@@ -502,6 +526,14 @@ fn extract_const_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage
                 },
             );
         }
+    }
+
+    // Return the type for inheritance: if this spec had an explicit type, use it
+    // Otherwise, keep using the inherited type
+    if !explicit_ty.is_empty() {
+        explicit_ty
+    } else {
+        inherited_type.to_string()
     }
 }
 

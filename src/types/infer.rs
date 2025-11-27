@@ -9,6 +9,55 @@ use crate::parse::{
     PatternKind, Span, Stmt, StmtKind, Symbol, Type as AstType, TypeDecl, TypeKind,
 };
 
+/// Check if a type name is a Go primitive/built-in type
+fn is_primitive_type(ty: &str) -> bool {
+    matches!(
+        ty,
+        "bool"
+            | "string"
+            | "int"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "uintptr"
+            | "byte"
+            | "rune"
+            | "float32"
+            | "float64"
+            | "complex64"
+            | "complex128"
+            | "error"
+    )
+}
+
+/// Check if a type name is a numeric primitive type
+fn is_numeric_primitive(ty: &str) -> bool {
+    matches!(
+        ty,
+        "int"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "uintptr"
+            | "byte"
+            | "rune"
+            | "float32"
+            | "float64"
+    )
+}
+
 /// Type inference engine
 pub struct Infer {
     /// Global state tracking all modules
@@ -151,7 +200,20 @@ impl Infer {
 
         // Check if it's a constant
         if let Some(const_def) = pkg.constants.get(type_name) {
-            return Some(parse_go_type(&const_def.ty));
+            let const_ty = &const_def.ty;
+            // If the constant's type is a type defined in this package, return it with module info
+            if pkg.types.contains_key(const_ty) {
+                return Some(Type::Con {
+                    name: Symbol {
+                        module: ModuleId::new(package_name),
+                        name: const_ty.to_string(),
+                        span: Span::dummy(),
+                    },
+                    args: vec![],
+                });
+            }
+            // Otherwise parse it as a Go type (for primitive types, etc.)
+            return Some(parse_go_type(const_ty));
         }
 
         None
@@ -160,6 +222,170 @@ impl Infer {
     /// Check if a name refers to an imported Go package
     fn is_imported_package(&self, name: &str) -> bool {
         self.imported_packages.contains_key(name)
+    }
+
+    /// Get the ultimate underlying type for a type alias chain.
+    /// For example, if we have:
+    ///   type Duration int64
+    ///   type MyDuration Duration
+    /// Then get_underlying_type("time", "MyDuration") returns Some("int64")
+    ///
+    /// Returns None if the type is not found or is not an alias (e.g., struct, interface).
+    fn get_underlying_type(&mut self, package_name: &str, type_name: &str) -> Option<String> {
+        let import_path = self.imported_packages.get(package_name)?.clone();
+        self.resolve_underlying_type_recursive(&import_path, type_name, 0)
+    }
+
+    /// Recursively resolve through type alias chains to find the ultimate underlying type.
+    /// The depth parameter prevents infinite loops in case of circular type definitions.
+    fn resolve_underlying_type_recursive(
+        &mut self,
+        import_path: &str,
+        type_name: &str,
+        depth: usize,
+    ) -> Option<String> {
+        // Prevent infinite recursion (shouldn't happen with valid Go code, but be safe)
+        if depth > 20 {
+            return None;
+        }
+
+        // Extract all needed info from the package in one go to avoid borrow issues
+        let (underlying, is_in_same_pkg) = {
+            let pkg = self
+                .go_cache
+                .get_or_parse(import_path, self.project.as_ref())
+                .ok()?;
+
+            let type_def = pkg.types.get(type_name)?;
+
+            // If it's not an alias, it has no underlying type in the relevant sense
+            if type_def.kind != "alias" {
+                return None;
+            }
+
+            let underlying = type_def.underlying.as_ref()?.clone();
+            let is_in_same_pkg = pkg.types.contains_key(&underlying);
+            (underlying, is_in_same_pkg)
+        };
+
+        // Check if the underlying type is a primitive/built-in type
+        if is_primitive_type(&underlying) {
+            return Some(underlying);
+        }
+
+        // Check if the underlying type is qualified (pkg.Type)
+        if let Some(dot_idx) = underlying.find('.') {
+            let pkg_name = underlying[..dot_idx].to_string();
+            let inner_type_name = underlying[dot_idx + 1..].to_string();
+
+            // Look up the package's import path
+            if let Some(inner_import_path) = self.imported_packages.get(&pkg_name).cloned() {
+                return self.resolve_underlying_type_recursive(
+                    &inner_import_path,
+                    &inner_type_name,
+                    depth + 1,
+                );
+            }
+        }
+
+        // The underlying type might be in the same package
+        if is_in_same_pkg {
+            return self.resolve_underlying_type_recursive(import_path, &underlying, depth + 1);
+        }
+
+        // Otherwise, it's a type we can't resolve further - return it as-is
+        Some(underlying)
+    }
+
+    /// Check if two types are compatible for arithmetic via underlying type resolution.
+    /// Returns Some(result_type) if compatible, None if not.
+    ///
+    /// This handles cases like `time.Duration * int` where Duration has underlying type int64,
+    /// which is compatible with int literals.
+    fn check_numeric_underlying_compatibility(
+        &mut self,
+        left: &Type,
+        right: &Type,
+    ) -> Option<Type> {
+        let (left_name, left_module) = match left {
+            Type::Con { name, .. } => {
+                let module = if name.module.0.is_empty() {
+                    None
+                } else {
+                    Some(name.module.0.clone())
+                };
+                (name.name.clone(), module)
+            }
+            _ => return None,
+        };
+        let (right_name, right_module) = match right {
+            Type::Con { name, .. } => {
+                let module = if name.module.0.is_empty() {
+                    None
+                } else {
+                    Some(name.module.0.clone())
+                };
+                (name.name.clone(), module)
+            }
+            _ => return None,
+        };
+
+        // Check if left is a defined type with numeric underlying, and right is numeric primitive
+        if let Some(ref left_pkg) = left_module
+            && let Some(left_underlying) = self.get_underlying_type(left_pkg, &left_name)
+                && is_numeric_primitive(&left_underlying)
+                    && self.is_compatible_with_underlying(&right_name, &left_underlying)
+                {
+                    return Some(left.clone());
+                }
+
+        // Check if right is a defined type with numeric underlying, and left is numeric primitive
+        if let Some(ref right_pkg) = right_module
+            && let Some(right_underlying) = self.get_underlying_type(right_pkg, &right_name)
+                && is_numeric_primitive(&right_underlying)
+                    && self.is_compatible_with_underlying(&left_name, &right_underlying)
+                {
+                    return Some(right.clone());
+                }
+
+        None
+    }
+
+    /// Check if a type name is compatible with an underlying type.
+    /// This handles Go's untyped constant promotion - an `int` literal can be used where
+    /// `int64` is expected, etc.
+    fn is_compatible_with_underlying(&self, ty_name: &str, underlying: &str) -> bool {
+        // Exact match
+        if ty_name == underlying {
+            return true;
+        }
+
+        // Int literals (represented as "int") are compatible with any integer type
+        if ty_name == "int" {
+            return matches!(
+                underlying,
+                "int"
+                    | "int8"
+                    | "int16"
+                    | "int32"
+                    | "int64"
+                    | "uint"
+                    | "uint8"
+                    | "uint16"
+                    | "uint32"
+                    | "uint64"
+                    | "uintptr"
+                    | "byte"
+                    | "rune"
+            );
+        }
+
+        // Float literals are compatible with float types
+        if ty_name == "float64" {
+            return matches!(underlying, "float32" | "float64");
+        }
+
+        false
     }
 
     /// Generate a fresh type variable
@@ -546,9 +772,29 @@ impl Infer {
 
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                        // Arithmetic: both must be same numeric type (int or float64), result is that type
-                        self.unify(&left_ty, &right_ty, &expr.span)?;
-                        // The result type is the same as the operand type
+                        // Arithmetic: try normal unification first
+                        // Point error at right operand since left is typically the "expected" type
+                        if self.unify(&left_ty, &right_ty, &right.span).is_ok() {
+                            return Ok(self.substitute(left_ty));
+                        }
+
+                        // If unification failed, check if we have a defined type with numeric
+                        // underlying type on one side and a compatible numeric on the other.
+                        // In Go: `time.Duration * int` is allowed because Duration's underlying
+                        // type is int64.
+                        let left_ty_sub = self.substitute(left_ty.clone());
+                        let right_ty_sub = self.substitute(right_ty.clone());
+
+                        // Try to check if types are compatible via underlying type
+                        if let Some(result_ty) =
+                            self.check_numeric_underlying_compatibility(&left_ty_sub, &right_ty_sub)
+                        {
+                            return Ok(result_ty);
+                        }
+
+                        // Neither worked - return the original unification error
+                        // Point to right operand as the "found" type
+                        self.unify(&left_ty, &right_ty, &right.span)?;
                         Ok(self.substitute(left_ty))
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
@@ -595,7 +841,7 @@ impl Infer {
                     }
                 }
 
-                // Check if this is a type conversion: TypeName(value)
+                // Check if this is a type conversion: TypeName(value) or pkg.TypeName(value)
                 if let ExprKind::Ident(type_name) = &func.kind
                     && self.global_state.has_type(type_name)
                 {
@@ -616,6 +862,36 @@ impl Infer {
 
                     // Return the target type
                     return Ok(Type::simple(type_name));
+                }
+
+                // Check if this is a type conversion from an imported package: pkg.TypeName(value)
+                if let ExprKind::Field {
+                    expr: pkg_expr,
+                    field: type_name,
+                    ..
+                } = &func.kind
+                    && let ExprKind::Ident(pkg_name) = &pkg_expr.kind
+                    && self.is_imported_package(pkg_name)
+                {
+                    // Look up the type from the package
+                    if let Some(ty) = self.lookup_go_type(pkg_name, type_name) {
+                        // This is a type conversion
+                        if args.len() != 1 {
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "Type conversion requires exactly 1 argument, but got {}",
+                                    args.len()
+                                ),
+                                span: expr.span.clone(),
+                            });
+                        }
+
+                        // Infer the argument type (we don't need to use it, just check it's valid)
+                        self.infer_expr(&args[0])?;
+
+                        // Return the target type
+                        return Ok(ty);
+                    }
                 }
 
                 // Regular function call

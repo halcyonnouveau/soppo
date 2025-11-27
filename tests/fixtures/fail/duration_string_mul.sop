@@ -1,0 +1,10 @@
+package main
+
+import "time"
+import "fmt"
+
+func main() {
+    // Duration * string should fail - string is not compatible with int64
+    d := time.Millisecond * "hello"
+    fmt.Println(d)
+}

@@ -2,6 +2,7 @@ package main
 
 import "fmt"
 import "strings"
+import "time"
 
 // Constants
 const MAX_SIZE int = 100
@@ -304,6 +305,16 @@ func main() {
     fmt.Println(-unaryNum)
     boolVal := true
     fmt.Println(!boolVal)
+
+    // === Duration arithmetic (tests const type inheritance + underlying type compatibility) ===
+    // time.Millisecond is a const with inherited type Duration (underlying int64)
+    // These test that Duration * int works via underlying type resolution
+    dur1 := time.Millisecond * 100           // Duration * int
+    dur2 := 100 * time.Millisecond           // int * Duration
+    dur3 := time.Second + time.Millisecond   // Duration + Duration
+    dur4 := dur1 + dur2                      // Duration + Duration (variables)
+    dur5 := time.Duration(500) * 2           // Explicit conversion
+    fmt.Println(dur1, dur2, dur3, dur4, dur5)
 
     fmt.Println("done")
 

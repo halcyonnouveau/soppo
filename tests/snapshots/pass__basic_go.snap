@@ -6,6 +6,7 @@ package main
 
 import "fmt"
 import "strings"
+import "time"
 
 const MAX_SIZE int = 100
 
@@ -239,6 +240,12 @@ func main() {
     fmt.Println((-unaryNum))
     boolVal := true
     fmt.Println((!boolVal))
+    dur1 := (time.Millisecond * 100)
+    dur2 := (100 * time.Millisecond)
+    dur3 := (time.Second + time.Millisecond)
+    dur4 := (dur1 + dur2)
+    dur5 := (time.Duration(500) * 2)
+    fmt.Println(dur1, dur2, dur3, dur4, dur5)
     fmt.Println("done")
     fmt.Printf("Sum: %d\n", sum)
     fmt.Printf("Area: %f\n", area)

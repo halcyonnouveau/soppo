@@ -70,3 +70,13 @@ fn test_go_wrong_arg_type() {
     assert!(result.is_err(), "Expected error for wrong argument type");
     insta::assert_snapshot!(result.unwrap_err());
 }
+
+#[test]
+fn test_duration_string_mul() {
+    let result = compile_soppo_file("tests/fixtures/fail/duration_string_mul.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for Duration * string (incompatible types)"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
