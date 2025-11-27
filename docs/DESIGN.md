@@ -146,7 +146,6 @@ log(level: "info", "msg1", "msg2")  // ok
 name := "alice"
 age := 30
 msg := "hello {name}, you are {age}"
-
 // Codegens to: fmt.Sprintf("hello %v, you are %v", name, age)
 ```
 

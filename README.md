@@ -6,6 +6,18 @@ A language that compiles to Go, adding ergonomic and type safety features that G
 
 See [docs/DESIGN.md](docs/DESIGN.md) for language design.
 
+Soppo is not production ready.
+
+## Features
+
+- **Nil safety:** Compile-time nil checks
+- **Enums:** Tagged unions with struct variants
+- **Pattern matching:** Exhaustive matching with destructuring
+- **Error handling:** `?` propagation and `? err { }` custom handling
+- **String interpolation:** `"value: {var}"` syntax
+- **Named arguments:** `func(name: value)` for clarity
+- **Detailed error messages:** Rust-inspired compiler diagnostics
+
 ## Quick Look
 
 ```go
@@ -53,6 +65,26 @@ func main() {
 		os.Exit(1)
 	}
 }
+```
+
+### Error Messages
+
+The compiler catches errors early with helpful messages:
+
+```
+  × Non-exhaustive match
+    ╭─[main.sop:11:5]
+ 10 │         var message string
+ 11 │ ╭─▶     match color {
+ 12 │ │       case Color.Red:
+ 13 │ │           message = "Stop"
+ 14 │ │       case Color.Yellow:
+ 15 │ │           message = "Wait"
+ 16 │ ├─▶     }
+    · ╰──── missing variants: Green
+ 17 │     }
+    ╰────
+  help: Ensure all enum variants are handled, or add a `default` case
 ```
 
 ## License
