@@ -18,7 +18,7 @@ I have no issues calling Claude a piss-fuck dickhead cunt. It comes pretty natur
 
 And that's because I use it too. OHH SHIT PLOT TWIST!
 
-I think AI tools are useful for writing code (see [this blog post](https://quaso.engineering/note/vibecoding) I wrote). The problems I have with Dingo aren't that it's "vibe coded", it's that it feels incredibly misguided - and that's probably because of Claude.
+I think AI tools are useful for writing code (see [this blog post](https://quaso.engineering/note/vibecoding) I wrote). The problems I have with Dingo aren't that it's "vibecoded", it's that it feels incredibly misguided - and that's probably because it was "vibecoded," if that makes literally any sense. Yeah, I'm sure you get it.
 
 And because of that, I think this project brings great shame to Australia. And that's super weird for me to say because I am not particularly patriotic or nationalistic, so this normally isn't a thing I care about. I guess it could also be the association with dingoes.
 
