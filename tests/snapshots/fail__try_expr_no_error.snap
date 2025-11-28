@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::try_expr_no_error
+
+  × `?` requires expression to return error
+    ╭─[try_expr_no_error.sop:9:15]
+  8 │ func tryOnNonError() error {
+  9 │     result := add(1, 2) ?
+    ·               ────┬────
+    ·                   ╰── this expression doesn't return error
+ 10 │     return nil
+    ╰────
+  help: the expression must return `error` or `(T, error)`

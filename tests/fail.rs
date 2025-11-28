@@ -120,3 +120,23 @@ fn test_nil_reassign_resets() {
     );
     insta::assert_snapshot!(result.unwrap_err());
 }
+
+#[test]
+fn test_try_no_return_error() {
+    let result = compile_soppo_file("tests/fixtures/fail/try_no_return_error.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for ? in function not returning error"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_try_expr_no_error() {
+    let result = compile_soppo_file("tests/fixtures/fail/try_expr_no_error.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for ? on expression not returning error"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}

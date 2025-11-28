@@ -149,8 +149,17 @@ fmt.Println(user.Name)      // OK: user is non-nil after the guard
 Some expressions are automatically non-nil:
 - `&expr` (address-of) - always points to a valid value
 - `new(T)` - allocates and returns a valid pointer
+- Pointer results after `?` succeeds:
 
-### Escape Hatch: `.(!nil)`
+```go
+func getUser(id int) (*User, error)
+
+func process() error {
+    user := getUser(1) ?      // If we get here, error was nil
+    fmt.Println(user.name)    // OK: user is non-null after ?
+    return nil
+}
+```
 
 When you know a pointer is non-nil from external context (e.g., API guarantees), use `.(!nil)` to assert it:
 

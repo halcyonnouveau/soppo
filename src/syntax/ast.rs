@@ -233,6 +233,13 @@ pub enum StmtKind {
     // continue
     Continue,
     Expr(Expr),
+    // stmt ? or stmt ? { handler } or stmt ? errName { handler }
+    TryStmt {
+        stmt: Box<Stmt>,
+        error_name: Option<String>,
+        handler: Option<Block>,
+        try_span: Span,
+    },
 }
 
 /// Expression

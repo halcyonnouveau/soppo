@@ -5,8 +5,58 @@ use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
 impl Parser {
-    /// Parse a statement
+    /// Parse a statement, including optional ? error propagation
     pub fn parse_stmt(&mut self) -> Result<Stmt> {
+        let stmt = self.parse_stmt_inner()?;
+
+        // Check for ? error propagation
+        if self.consume(&Token::Question) {
+            let try_span = self.previous_span();
+            let stmt_span = stmt.span; // Save span before moving
+
+            // Check for handler block: ? { ... } or ? errName { ... }
+            let (error_name, handler) = if self.check(&Token::LBrace) {
+                // ? { block } form
+                (None, Some(self.parse_block()?))
+            } else if matches!(self.peek(), Some(Token::Ident(_)))
+                && self.peek_next_is(&Token::LBrace)
+            {
+                // ? errName { block } form
+                let name = match self.advance() {
+                    Some((Token::Ident(name), _)) => name,
+                    _ => unreachable!(),
+                };
+                let block = self.parse_block()?;
+                (Some(name), Some(block))
+            } else {
+                // Simple ? form
+                (None, None)
+            };
+
+            let end_span = handler.as_ref().map(|b| b.span).unwrap_or(try_span);
+
+            return Ok(Stmt {
+                kind: StmtKind::TryStmt {
+                    stmt: Box::new(stmt),
+                    error_name,
+                    handler,
+                    try_span,
+                },
+                span: Span::with_bytes(
+                    stmt_span.start,
+                    end_span.end,
+                    self.file,
+                    stmt_span.byte_start,
+                    end_span.byte_end,
+                ),
+            });
+        }
+
+        Ok(stmt)
+    }
+
+    /// Parse a statement (inner implementation, without ? handling)
+    fn parse_stmt_inner(&mut self) -> Result<Stmt> {
         let start_span = self.peek_span();
 
         match self.peek() {

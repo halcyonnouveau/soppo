@@ -781,6 +781,112 @@ impl Infer {
                 self.infer_expr(target)?;
                 Ok(Type::unit())
             }
+
+            StmtKind::TryStmt {
+                stmt: inner_stmt,
+                error_name,
+                handler,
+                try_span,
+            } => {
+                // Check current function returns error as last type
+                let return_types = self
+                    .expected_return_types
+                    .as_ref()
+                    .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
+
+                let last_type = return_types
+                    .last()
+                    .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
+
+                if !self.is_error_type(last_type) {
+                    return Err(SoppoError::TryNoErrorReturn { span: *try_span });
+                }
+
+                // Infer inner statement and extract expression type + span
+                // For ? operator, we need to strip the error from tuple types
+                let (expr_ty, expr_span) = match &inner_stmt.kind {
+                    StmtKind::Decl { name, value } => {
+                        let value_ty = self.infer_expr(value)?;
+                        let value_ty_sub = self.substitute(value_ty.clone());
+
+                        // Strip error from tuple type for the variable
+                        let var_ty = self.strip_error_from_tuple(&value_ty_sub);
+                        self.insert_var(name.clone(), var_ty.clone());
+                        self.update_nil_state_for_assignment(name, value, &var_ty);
+                        (value_ty_sub, value.span)
+                    }
+                    StmtKind::MultiDecl { names, values } if values.len() == 1 => {
+                        let value_ty = self.infer_expr(&values[0])?;
+                        let value_ty_sub = self.substitute(value_ty.clone());
+
+                        // For multi-return, the type is a tuple
+                        // Unpack and assign to each name, excluding the error
+                        if let Type::Con { name: tname, args } = &value_ty_sub
+                            && tname.name == "tuple"
+                        {
+                            // Exclude the last element (error) when assigning
+                            let non_error_count = args.len().saturating_sub(1);
+                            for (i, var_name) in names.iter().enumerate() {
+                                if i < non_error_count
+                                    && let Some(ty) = args.get(i)
+                                {
+                                    self.insert_var(var_name.clone(), ty.clone());
+                                }
+                            }
+                        }
+                        (value_ty_sub, values[0].span)
+                    }
+                    StmtKind::Assign { target, value } => {
+                        let value_ty = self.infer_expr(value)?;
+                        let value_ty_sub = self.substitute(value_ty.clone());
+
+                        // For assignment, we expect the target to already have the non-error type
+                        let target_ty = self.infer_expr(target)?;
+                        let expected_ty = self.strip_error_from_tuple(&value_ty_sub);
+                        self.unify(&target_ty, &expected_ty, &inner_stmt.span)?;
+                        (value_ty_sub, value.span)
+                    }
+                    StmtKind::Expr(expr) => {
+                        let expr_ty = self.infer_expr(expr)?;
+                        (self.substitute(expr_ty), expr.span)
+                    }
+                    _ => {
+                        return Err(SoppoError::Type {
+                            message: "`?` can only be used with declarations, assignments, or expression statements".to_string(),
+                            span: inner_stmt.span,
+                        });
+                    }
+                };
+
+                let expr_ty_sub = self.substitute(expr_ty.clone());
+
+                // Verify expression returns error
+                if !self.returns_error(&expr_ty_sub) {
+                    return Err(SoppoError::TryExprNoError { span: expr_span });
+                }
+
+                // If handler present, infer it with error_name in scope
+                if let Some(block) = handler {
+                    self.push_scope();
+                    if let Some(name) = error_name {
+                        self.insert_var(name.clone(), Type::simple("error"));
+                    }
+                    self.infer_block(block)?;
+                    self.pop_scope();
+                }
+
+                // Mark assigned pointer variables as non-null (success implies valid result)
+                if let Some(var_name) = self.get_assigned_var_name(inner_stmt)
+                    && let Some(var_type) = self.lookup_var(&var_name)
+                {
+                    let var_type_sub = self.substitute(var_type);
+                    if Self::is_pointer_type(&var_type_sub) {
+                        self.set_nil_state(var_name, Nullability::NonNull);
+                    }
+                }
+
+                Ok(Type::unit())
+            }
         }
     }
 }

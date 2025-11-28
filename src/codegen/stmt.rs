@@ -438,6 +438,112 @@ impl Codegen {
                 self.gen_expr(expr);
                 self.emit_stmt_end(stmt_line);
             }
+
+            StmtKind::TryStmt {
+                stmt: inner_stmt,
+                error_name,
+                handler,
+                ..
+            } => {
+                // Generate the inner statement with error capture
+                let err_var = self.fresh_error_var();
+
+                // Emit the inner statement with error variable added
+                self.emit_indent();
+                self.gen_try_inner_stmt(inner_stmt, &err_var);
+                self.emit("\n");
+
+                // Generate error check: if err != nil { ... }
+                self.emit_indent();
+                self.emit(&format!("if {} != nil ", err_var));
+                self.emit("{\n");
+                self.indent();
+
+                if let Some(block) = handler {
+                    // Custom handler block
+                    if let Some(name) = error_name {
+                        // Bind error to the named variable
+                        self.emit_indent();
+                        self.emit(&format!("{} := {}\n", name, err_var));
+                    }
+                    // Emit handler body
+                    for handler_stmt in &block.stmts {
+                        self.gen_stmt(handler_stmt);
+                    }
+                } else {
+                    // Default: return zero values + error
+                    self.emit_indent();
+                    self.emit("return ");
+
+                    // Generate zero values for all return types except last (error)
+                    let return_types = self.current_return_types.clone();
+                    let zero_values: Vec<String> = return_types
+                        .iter()
+                        .take(return_types.len().saturating_sub(1))
+                        .map(|ty| self.zero_value(ty))
+                        .collect();
+
+                    self.emit(&zero_values.join(", "));
+
+                    // Add error variable
+                    if !zero_values.is_empty() {
+                        self.emit(", ");
+                    }
+                    self.emit(&err_var);
+                    self.emit("\n");
+                }
+
+                self.dedent();
+                self.emit_indent();
+                self.emit("}\n");
+            }
+        }
+    }
+
+    /// Generate inner statement with error capture for ? operator
+    /// Transforms: x := f() -> x, _err := f()
+    /// Transforms: x = f()  -> x, _err = f()
+    /// Transforms: f()      -> _, _err := f()
+    fn gen_try_inner_stmt(&mut self, stmt: &Stmt, err_var: &str) {
+        match &stmt.kind {
+            StmtKind::Decl { name, value } => {
+                // x := f() -> x, _err := f()
+                self.emit(&format!("{}, {} := ", name, err_var));
+                self.gen_expr(value);
+            }
+            StmtKind::MultiDecl { names, values } if values.len() == 1 => {
+                // x, y := f() -> x, y, _err := f()
+                self.emit(&names.join(", "));
+                self.emit(&format!(", {} := ", err_var));
+                self.gen_expr(&values[0]);
+            }
+            StmtKind::Assign { target, value } => {
+                // x = f() -> x, _err = f()
+                self.gen_expr(target);
+                self.emit(&format!(", {} = ", err_var));
+                self.gen_expr(value);
+            }
+            StmtKind::MultiAssign { targets, values } if values.len() == 1 => {
+                // x, y = f() -> x, y, _err = f()
+                for (i, target) in targets.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(target);
+                }
+                self.emit(&format!(", {} = ", err_var));
+                self.gen_expr(&values[0]);
+            }
+            StmtKind::Expr(expr) => {
+                // f() -> _err := f() for error-only returns like deleteFile()
+                // Note: If function returns multiple values, user should use declaration form
+                self.emit(&format!("{} := ", err_var));
+                self.gen_expr(expr);
+            }
+            _ => {
+                // Fallback - shouldn't happen after type checking
+                self.emit("/* unsupported try statement */");
+            }
         }
     }
 }

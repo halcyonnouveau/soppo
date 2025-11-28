@@ -12,4 +12,4 @@ Error: soppo::nil_pointer
     ·                   ╰── this pointer may be nil
  26 │ }
     ╰────
-  help: check for nil first, or use .(!nil) to assert non-nil
+  help: check for nil first, or use `.(!nil)` to assert non-nil

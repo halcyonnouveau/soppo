@@ -830,9 +830,10 @@ impl Infer {
 
                 // If this is a pointer type with an identifier, mark it as non-nil
                 if Self::is_pointer_type(&ty)
-                    && let ExprKind::Ident(name) = &expr.kind {
-                        self.set_nil_state(name.clone(), Nullability::NonNull);
-                    }
+                    && let ExprKind::Ident(name) = &expr.kind
+                {
+                    self.set_nil_state(name.clone(), Nullability::NonNull);
+                }
 
                 // Return the same type - the assertion doesn't change the type,
                 // only the nullability state

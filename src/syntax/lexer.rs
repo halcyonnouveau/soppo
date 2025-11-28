@@ -184,6 +184,8 @@ pub enum Token {
     Underscore,
     #[token(";")]
     Semicolon,
+    #[token("?")]
+    Question,
 }
 
 /// A comment with its span information

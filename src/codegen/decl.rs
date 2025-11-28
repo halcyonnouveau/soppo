@@ -304,6 +304,12 @@ impl Codegen {
         self.emit(")");
 
         // Return type(s)
+        self.current_return_types = func
+            .return_types
+            .iter()
+            .map(|t| self.go_type(&t.name).to_string())
+            .collect();
+
         if !func.return_types.is_empty() {
             if func.return_types.len() == 1 {
                 // Single return type
@@ -326,11 +332,15 @@ impl Codegen {
 
         self.emit(" ");
 
+        // Reset error variable counter for this function
+        self.reset_error_vars();
+
         // Body
         self.gen_block(&func.body);
 
         // Clear return type after function is done
         self.current_func_return_type = None;
+        self.current_return_types.clear();
 
         self.output.push('\n');
     }

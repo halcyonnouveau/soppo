@@ -80,6 +80,33 @@ impl Parser {
             .unwrap_or_else(Span::dummy)
     }
 
+    /// Get span of previous token (the one we just consumed)
+    fn previous_span(&self) -> Span {
+        if self.pos > 0 {
+            self.tokens[self.pos - 1].1
+        } else {
+            Span::dummy()
+        }
+    }
+
+    /// Check if current token matches expected (without consuming)
+    fn check(&self, expected: &Token) -> bool {
+        self.peek() == Some(expected)
+    }
+
+    /// Check if next non-newline token matches expected
+    fn peek_next_is(&self, expected: &Token) -> bool {
+        let mut offset = 1;
+        while let Some(tok) = self.peek_at(offset) {
+            if tok == &Token::Newline {
+                offset += 1;
+                continue;
+            }
+            return tok == expected;
+        }
+        false
+    }
+
     /// Consume current token and return it with span
     fn advance(&mut self) -> Option<(Token, Span)> {
         if self.pos < self.tokens.len() {

@@ -77,6 +77,26 @@ pub enum SoppoError {
         #[label("this pointer may be nil")]
         span: Span,
     },
+
+    #[error("`?` requires enclosing function to return error")]
+    #[diagnostic(
+        code(soppo::try_no_error_return),
+        help("add `error` as the last return type of this function")
+    )]
+    TryNoErrorReturn {
+        #[label("`?` cannot be used here")]
+        span: Span,
+    },
+
+    #[error("`?` requires expression to return error")]
+    #[diagnostic(
+        code(soppo::try_expr_no_error),
+        help("the expression must return `error` or `(T, error)`")
+    )]
+    TryExprNoError {
+        #[label("this expression doesn't return error")]
+        span: Span,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, SoppoError>;

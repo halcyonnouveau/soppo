@@ -1,0 +1,15 @@
+package main
+
+func add(a int, b int) int {
+    return a + b
+}
+
+// ERROR: add() doesn't return error, can't use ?
+func tryOnNonError() error {
+    result := add(1, 2) ?
+    return nil
+}
+
+func main() {
+    tryOnNonError()
+}

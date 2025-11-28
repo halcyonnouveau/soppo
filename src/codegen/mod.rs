@@ -14,6 +14,10 @@ pub struct Codegen {
     indent_level: usize,
     pub(crate) global_state: GlobalCtxt,
     pub(crate) current_func_return_type: Option<String>,
+    /// Current function's return types (for ? operator zero value generation)
+    pub(crate) current_return_types: Vec<String>,
+    /// Counter for generating unique error variable names (_err0, _err1, etc.)
+    pub(crate) error_var_counter: usize,
     comments: Vec<Comment>,
     comment_idx: usize,
     /// Go module path for resolving local imports (e.g., "github.com/user/project")
@@ -31,6 +35,8 @@ impl Codegen {
             indent_level: 0,
             global_state: GlobalCtxt::new(),
             current_func_return_type: None,
+            current_return_types: Vec::new(),
+            error_var_counter: 0,
             comments: Vec::new(),
             comment_idx: 0,
             module_path: None,
@@ -45,6 +51,8 @@ impl Codegen {
             indent_level: 0,
             global_state,
             current_func_return_type: None,
+            current_return_types: Vec::new(),
+            error_var_counter: 0,
             comments: Vec::new(),
             comment_idx: 0,
             module_path: None,
@@ -65,11 +73,53 @@ impl Codegen {
             indent_level: 0,
             global_state,
             current_func_return_type: None,
+            current_return_types: Vec::new(),
+            error_var_counter: 0,
             comments: Vec::new(),
             comment_idx: 0,
             module_path: Some(module_path),
             output_dir,
             project_root: Some(project_root),
+        }
+    }
+
+    /// Generate a fresh error variable name (_err0, _err1, etc.)
+    pub(crate) fn fresh_error_var(&mut self) -> String {
+        let name = format!("_err{}", self.error_var_counter);
+        self.error_var_counter += 1;
+        name
+    }
+
+    /// Reset the error variable counter (called at start of each function)
+    pub(crate) fn reset_error_vars(&mut self) {
+        self.error_var_counter = 0;
+    }
+
+    /// Generate zero value for a type
+    pub(crate) fn zero_value(&self, ty: &str) -> String {
+        match ty {
+            "int" | "int8" | "int16" | "int32" | "int64" => "0".to_string(),
+            "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" | "byte" | "rune" => {
+                "0".to_string()
+            }
+            "float32" | "float64" => "0".to_string(),
+            "bool" => "false".to_string(),
+            "string" => "\"\"".to_string(),
+            "" | "()" => "".to_string(), // unit type
+            _ if ty.starts_with('*')
+                || ty.starts_with("[]")
+                || ty.starts_with("map[")
+                || ty.starts_with("chan ")
+                || ty == "error"
+                || ty.starts_with("func(") =>
+            {
+                // Pointers, slices, maps, channels, error, functions -> nil
+                "nil".to_string()
+            }
+            _ => {
+                // Struct types -> TypeName{}
+                format!("{}{{}}", ty)
+            }
         }
     }
 

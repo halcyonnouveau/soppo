@@ -1,0 +1,135 @@
+package main
+
+import "fmt"
+import "errors"
+
+// === Helper functions that return errors ===
+
+func parsePort(s string) (int, error) {
+    if s == "" {
+        return 0, errors.New("empty string")
+    }
+    return 8080, nil
+}
+
+func deleteFile(path string) error {
+    if path == "" {
+        return errors.New("empty path")
+    }
+    return nil
+}
+
+func getConfig() (string, string, error) {
+    return "host", "port", nil
+}
+
+type User struct {
+    name string
+    age  int
+}
+
+func getUser(id int) (*User, error) {
+    if id <= 0 {
+        return nil, errors.New("invalid id")
+    }
+    u := User{}
+    u.name = "Alice"
+    u.age = 30
+    return &u, nil
+}
+
+// === Simple ? propagation ===
+
+func simplePropagate() error {
+    port := parsePort("8080") ?
+    fmt.Println(port)
+    return nil
+}
+
+// === Custom handler without error access ===
+
+func customHandler() error {
+    port := parsePort("") ? {
+        return errors.New("custom error: parse failed")
+    }
+    fmt.Println(port)
+    return nil
+}
+
+// === Custom handler with named error ===
+
+func namedError() error {
+    port := parsePort("") ? parseErr {
+        return fmt.Errorf("parse failed: %v", parseErr)
+    }
+    fmt.Println(port)
+    return nil
+}
+
+// === Error-only return ===
+
+func errorOnly() error {
+    deleteFile("/tmp/test") ?
+    return nil
+}
+
+// === Multi-value return with ? ===
+
+func multiReturn() error {
+    host, port := getConfig() ?
+    fmt.Println(host, port)
+    return nil
+}
+
+// === Nil safety: pointer is non-null after ? ===
+
+func nilSafety() error {
+    user := getUser(1) ?
+    // After ?, user is known to be non-nil
+    fmt.Println(user.name)
+    return nil
+}
+
+// === Multiple ? in same function ===
+
+func multipleTry() error {
+    port := parsePort("8080") ?
+    deleteFile("/tmp/test") ?
+    user := getUser(1) ?
+    fmt.Printf("port=%d, user=%s\n", port, user.name)
+    return nil
+}
+
+// === ? with int return ===
+
+func tryWithIntReturn() (int, error) {
+    port := parsePort("8080") ?
+    return port, nil
+}
+
+// === ? with string return ===
+
+func tryWithStringReturn() (string, error) {
+    user := getUser(1) ?
+    return user.name, nil
+}
+
+// === ? with struct return ===
+
+func tryWithStructReturn() (User, error) {
+    user := getUser(1) ?
+    return *user, nil
+}
+
+func main() {
+    simplePropagate()
+    customHandler()
+    namedError()
+    errorOnly()
+    multiReturn()
+    nilSafety()
+    multipleTry()
+    tryWithIntReturn()
+    tryWithStringReturn()
+    tryWithStructReturn()
+}

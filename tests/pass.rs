@@ -43,3 +43,10 @@ fn test_nil_safety() {
         .expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_try_operator() {
+    let output = compile_soppo_file("tests/fixtures/pass/try_operator.sop")
+        .expect("Compilation should succeed");
+    insta::assert_snapshot!(output);
+}

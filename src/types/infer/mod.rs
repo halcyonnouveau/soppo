@@ -720,6 +720,82 @@ impl Infer {
             self.set_nil_state(name.to_string(), nullability);
         }
     }
+
+    /// Check if a type is the `error` type
+    pub(super) fn is_error_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Con { name, .. } => name.name == "error",
+            _ => false,
+        }
+    }
+
+    /// Check if a type returns error (either `error` or `(T, error)`)
+    /// Error must be the last element for multi-return types
+    pub(super) fn returns_error(&self, ty: &Type) -> bool {
+        // Simple error type
+        if self.is_error_type(ty) {
+            return true;
+        }
+
+        // Tuple type with error as last element
+        if let Type::Con { name, args } = ty
+            && name.name == "tuple"
+            && !args.is_empty()
+            && let Some(last) = args.last()
+        {
+            return self.is_error_type(last);
+        }
+
+        false
+    }
+
+    /// Strip the error type from a tuple, returning the non-error portion
+    /// For `tuple[T, error]` returns `T`
+    /// For `tuple[T, U, error]` returns `tuple[T, U]`
+    /// For `error` returns `()`
+    /// For non-tuple types, returns the type unchanged
+    pub(super) fn strip_error_from_tuple(&self, ty: &Type) -> Type {
+        if self.is_error_type(ty) {
+            return Type::unit();
+        }
+
+        if let Type::Con { name, args } = ty
+            && name.name == "tuple"
+            && !args.is_empty()
+        {
+            // Check if last element is error
+            if let Some(last) = args.last()
+                && self.is_error_type(last)
+            {
+                let non_error_args: Vec<_> = args.iter().take(args.len() - 1).cloned().collect();
+                return match non_error_args.len() {
+                    0 => Type::unit(),
+                    1 => non_error_args.into_iter().next().unwrap(),
+                    _ => Type::generic("tuple", non_error_args),
+                };
+            }
+        }
+
+        ty.clone()
+    }
+
+    /// Extract the variable name from a declaration or assignment statement
+    pub(super) fn get_assigned_var_name(&self, stmt: &crate::syntax::Stmt) -> Option<String> {
+        use crate::syntax::StmtKind;
+
+        match &stmt.kind {
+            StmtKind::Decl { name, .. } => Some(name.clone()),
+            StmtKind::Assign { target, .. } => {
+                if let ExprKind::Ident(name) = &target.kind {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            }
+            StmtKind::MultiDecl { names, .. } if names.len() == 1 => Some(names[0].clone()),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
