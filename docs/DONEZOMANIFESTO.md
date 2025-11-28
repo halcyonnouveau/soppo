@@ -313,8 +313,16 @@ Now obviously if what Soppo adds is actually in Go's vision, Go would have, you 
 
 And I settled on "type safety and developer ergonomics" because that is what I think is missing from Go for me to actually want to use it. I dunno man, the fact that it just straight up lets you access a nil reference... what the fuck guys? Like what are we even doing here?
 
-That being said, I'm not confident Soppo will make me want to use Go even if it achieves all its goals. As you know, it's a project built from pure hater energy, and once all the spite started to run out as I was in fact able to confirm "yeah I could do this better", what reasons do I have for doing this?
+That being said, I'm not confident Soppo will make me want to use Go even if it achieves all its goals. As you know, it's a project built from pure hater energy, and once all the venom starts to wear off as I'm able to affirm to myself that "yeah I could do this better", what reasons do I have for doing this?
 
 Because at the end of the day, why not just use Rust?
 
-Well, I guess just for the fun of it.
+Well, I guess just for the fun of it. I'd do anything for my wife.
+
+<p align="center">
+  <img src="./assets/sopmod2.gif" alt="m4 sopmod 2" height="400">
+</p>
+
+(THAT WAS ALSO A JOKE I AM NOT MARRIED TO AN ANIME RAIFU*)
+
+*Rifle waifu
