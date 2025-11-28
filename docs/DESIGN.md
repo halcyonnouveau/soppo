@@ -156,8 +156,8 @@ Variables only, no expressions. Use `{{` to escape literal braces.
 Flow-sensitive nil tracking:
 
 ```go
-user := findUser(1)       // *User, may be nil
-fmt.Println(user.Name)    // ERROR: user may be nil
+user := findUser(1)         // *User, may be nil
+fmt.Println(user.Name)      // ERROR: user may be nil
 
 if user != nil {
     fmt.Println(user.Name)  // OK
@@ -167,16 +167,14 @@ if user != nil {
 ## Imports
 
 ```go
-// Single imports
 import "fmt"
 import "github.com/user/project/helpers"
 
-// Grouped imports
 import (
     "fmt"
     "net/http"
     "github.com/user/project/util/helpers"
-    myHelpers "github.com/user/project/util/helpers"  // aliased
+    myHelpers "github.com/user/project/util/helpers"
 )
 ```
 
