@@ -7,32 +7,32 @@ package main
 import "fmt"
 
 /*soppo:enum
-Color {
+Colour {
     Red
     Yellow
     Green
 }
 */
-type Color interface {
-    isColor()
+type Colour interface {
+    isColour()
 }
 
-type Color_Red struct {}
-func (Color_Red) isColor() {}
-func (Color_Red) String() string { return "Red" }
+type Colour_Red struct {}
+func (Colour_Red) isColour() {}
+func (Colour_Red) String() string { return "Red" }
 
-type Color_Yellow struct {}
-func (Color_Yellow) isColor() {}
-func (Color_Yellow) String() string { return "Yellow" }
+type Colour_Yellow struct {}
+func (Colour_Yellow) isColour() {}
+func (Colour_Yellow) String() string { return "Yellow" }
 
-type Color_Green struct {}
-func (Color_Green) isColor() {}
-func (Color_Green) String() string { return "Green" }
+type Colour_Green struct {}
+func (Colour_Green) isColour() {}
+func (Colour_Green) String() string { return "Green" }
 
 var (
-    ColorRed Color = Color_Red{}
-    ColorYellow Color = Color_Yellow{}
-    ColorGreen Color = Color_Green{}
+    ColourRed Colour = Colour_Red{}
+    ColourYellow Colour = Colour_Yellow{}
+    ColourGreen Colour = Colour_Green{}
 )
 
 /*soppo:enum
@@ -199,14 +199,14 @@ func unwrapOr(r MyResult, defaultVal int) int {
 }
 
 func test() int {
-    color := ColorRed
+    colour := ColourRed
     var message string
-    switch color.(type) {
-    case Color_Red:
+    switch colour.(type) {
+    case Colour_Red:
         message = "Stop"
-    case Color_Yellow:
+    case Colour_Yellow:
         message = "Wait"
-    case Color_Green:
+    case Colour_Green:
         return 1
     }
     fmt.Printf("%s\n", message)
@@ -214,12 +214,12 @@ func test() int {
 }
 
 // Multiple patterns in match arms
-func isPrimary(c Color) bool {
+func isPrimary(c Colour) bool {
     var result bool
     switch c.(type) {
-    case Color_Red, Color_Yellow:
+    case Colour_Red, Colour_Yellow:
         result = true
-    case Color_Green:
+    case Colour_Green:
         result = false
     }
     return result

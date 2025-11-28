@@ -734,15 +734,15 @@ mod tests {
     #[test]
     fn test_parse_complete_file() {
         let source = r#"
-            type Color enum {
+            type Colour enum {
                 Red
                 Green
                 Blue
             }
 
             func main() {
-                color := Color.Red
-                return color
+                colour := Colour.Red
+                return colour
             }
         "#;
         let mut parser = Parser::new(source, FileId(0));

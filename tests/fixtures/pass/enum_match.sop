@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-type Color enum {
+type Colour enum {
     Red
     Yellow
     Green
@@ -80,15 +80,15 @@ func unwrapOr(r MyResult, defaultVal int) int {
 }
 
 func test() int {
-    color := Color.Red
+    colour := Colour.Red
 
     var message string
-    match color {
-    case Color.Red:
+    match colour {
+    case Colour.Red:
         message = "Stop"
-    case Color.Yellow:
+    case Colour.Yellow:
         message = "Wait"
-    case Color.Green:
+    case Colour.Green:
         return 1
     }
 
@@ -98,12 +98,12 @@ func test() int {
 }
 
 // Multiple patterns in match arms
-func isPrimary(c Color) bool {
+func isPrimary(c Colour) bool {
     var result bool
     match c {
-    case Color.Red, Color.Yellow:
+    case Colour.Red, Colour.Yellow:
         result = true
-    case Color.Green:
+    case Colour.Green:
         result = false
     }
     return result

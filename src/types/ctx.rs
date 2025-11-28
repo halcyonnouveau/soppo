@@ -245,7 +245,7 @@ mod tests {
         let mut gs = GlobalCtxt::new();
 
         let type_decl = TypeDecl {
-            name: "Color".to_string(),
+            name: "Colour".to_string(),
             generics: vec![],
             kind: TypeKind::Enum { variants: vec![] },
             span: Span::dummy(),
@@ -253,8 +253,8 @@ mod tests {
 
         gs.register_type(&type_decl);
 
-        let type_def = gs.lookup_type("Color").unwrap();
-        assert_eq!(type_def.name, "Color");
+        let type_def = gs.lookup_type("Colour").unwrap();
+        assert_eq!(type_def.name, "Colour");
         assert_eq!(type_def.generics.len(), 0);
     }
 

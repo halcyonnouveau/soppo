@@ -281,7 +281,7 @@ impl Parser {
                         }
                     } else {
                         return Err(SoppoError::Parse {
-                            message: "Multi-variable declaration requires a type or initializers"
+                            message: "Multi-variable declaration requires a type or initialisers"
                                 .to_string(),
                             span: start_span,
                         });
@@ -325,7 +325,7 @@ impl Parser {
                         // var name (no type, no value - error)
                         return Err(SoppoError::Parse {
                             message:
-                                "Variable declaration requires either a type or an initializer"
+                                "Variable declaration requires either a type or an initialiser"
                                     .to_string(),
                             span: first_name_span,
                         });
@@ -431,7 +431,7 @@ impl Parser {
 
                         if !self.consume(&Token::Assign) {
                             return Err(SoppoError::Parse {
-                                message: "Multi-constant declaration requires initializers"
+                                message: "Multi-constant declaration requires initialisers"
                                     .to_string(),
                                 span: ty_span,
                             });
@@ -485,7 +485,7 @@ impl Parser {
                         if !self.consume(&Token::Assign) {
                             return Err(SoppoError::Parse {
                                 message: format!(
-                                    "Constant '{}' requires an initializer (use `const {} {} = <value>`)",
+                                    "Constant '{}' requires an initialiser (use `const {} {} = <value>`)",
                                     first_name, first_name, ty.name
                                 ),
                                 span: ty_span,

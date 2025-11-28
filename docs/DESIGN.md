@@ -23,7 +23,7 @@ Go imports are resolved by parsing Go source files with tree-sitter to extract t
 
 ```go
 // Unit variants
-type Color enum {
+type Colour enum {
 	Red
 	Green
 	Blue
@@ -53,13 +53,13 @@ type Option[T any] enum {
 
 ## Pattern Matching
 
-`match` replaces `swtich` in Soppo.
+`match` replaces `switch` in Soppo.
 
 ```go
-match color {
-case Color.Red:
+match colour {
+case Colour.Red:
     action = "stop"
-case Color.Green:
+case Colour.Green:
     action = "go"
 }
 
@@ -81,7 +81,7 @@ case Shape.Rectangle{width: w, ...}:
 
 // Multiple patterns (bindings must match)
 case "a", "b", "c":
-case Color.Red, Color.Blue:
+case Colour.Red, Colour.Blue:
 case Shape.Circle{radius: r}, Shape.Ellipse{radius: r, ...}:
 
 // Expression-less match (like if/else chain)

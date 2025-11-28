@@ -78,7 +78,7 @@ impl Infer {
                         // var x: error (should be caught by parser)
                         return Err(SoppoError::Type {
                             message:
-                                "Variable declaration requires either a type or an initializer"
+                                "Variable declaration requires either a type or an initialiser"
                                     .to_string(),
                             span: stmt.span,
                         });
@@ -463,7 +463,7 @@ impl Infer {
                             .flat_map(|arm| arm.patterns.iter())
                             .filter_map(|pattern| match &pattern.kind {
                                 PatternKind::Variant(v) => {
-                                    // Extract variant name from qualified name like "Color.Red"
+                                    // Extract variant name from qualified name like "Colour.Red"
                                     Some(v.rsplit('.').next().unwrap_or(v).to_string())
                                 }
                                 PatternKind::Destructor { name, .. } => {

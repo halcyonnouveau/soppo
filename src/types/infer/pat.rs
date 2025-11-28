@@ -19,7 +19,7 @@ impl Infer {
                 Ok(())
             }
             PatternKind::Variant(_name) => {
-                // Qualified variant names like Color.Red don't create bindings
+                // Qualified variant names like Colour.Red don't create bindings
                 // They just match against enum variants
                 Ok(())
             }
@@ -131,7 +131,7 @@ impl Infer {
                 // These patterns don't bind anything
             }
             PatternKind::Variant(_name) => {
-                // Qualified variant names like Color.Red don't create bindings
+                // Qualified variant names like Colour.Red don't create bindings
                 // They just match against enum variants
             }
             PatternKind::Destructor { name, binding } => {

@@ -19,7 +19,7 @@ pub enum ExtractError {
     #[error("Failed to parse Go source: {0}")]
     Parse(String),
 
-    #[error("Failed to initialize parser")]
+    #[error("Failed to initialise parser")]
     ParserInit,
 }
 

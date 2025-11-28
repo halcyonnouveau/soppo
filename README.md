@@ -75,10 +75,10 @@ The compiler catches errors early with helpful messages:
   × Non-exhaustive match
     ╭─[main.sop:11:5]
  10 │         var message string
- 11 │ ╭─▶     match color {
- 12 │ │       case Color.Red:
+ 11 │ ╭─▶     match colour {
+ 12 │ │       case Colour.Red:
  13 │ │           message = "Stop"
- 14 │ │       case Color.Yellow:
+ 14 │ │       case Colour.Yellow:
  15 │ │           message = "Wait"
  16 │ ├─▶     }
     · ╰──── missing variants: Green

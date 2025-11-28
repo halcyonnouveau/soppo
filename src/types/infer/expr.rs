@@ -373,7 +373,7 @@ impl Infer {
                     });
                 }
 
-                // Check if this is an enum constructor like Color.Red or Result.Ok
+                // Check if this is an enum constructor like Colour.Red or Result.Ok
                 if let ExprKind::Ident(type_name) = &field_expr.kind {
                     // Check if type_name is a registered type
                     if let Some(type_def) = self.global_state.lookup_type(type_name).cloned() {

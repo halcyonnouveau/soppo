@@ -1,17 +1,17 @@
-type Color enum {
+type Colour enum {
     Red
     Yellow
     Green
 }
 
 func test() {
-    color := Color.Red
+    colour := Colour.Red
 
     var message string
-    match color {
-    case Color.Red:
+    match colour {
+    case Colour.Red:
         message = "Stop"
-    case Color.Yellow:
+    case Colour.Yellow:
         message = "Wait"
     }
 }

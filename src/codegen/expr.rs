@@ -86,11 +86,11 @@ impl Codegen {
             }
 
             ExprKind::Field { expr, field, .. } => {
-                // Check if this is an enum constructor like Color.Red
+                // Check if this is an enum constructor like Colour.Red
                 if let ExprKind::Ident(type_name) = &expr.kind {
                     // Check if it's a registered type (enum)
                     if self.global_state.has_type(type_name) {
-                        // Enum values: Color.Red → ColorRed (var or function)
+                        // Enum values: Colour.Red → ColourRed (var or function)
                         self.emit(&format!("{}{}", type_name, field));
                     } else {
                         // Regular field access (like fmt.Printf)

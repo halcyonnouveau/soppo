@@ -353,7 +353,7 @@ impl Codegen {
     pub(crate) fn gen_pattern(&mut self, pattern: &Pattern) {
         match &pattern.kind {
             PatternKind::Variant(name) => {
-                // Convert qualified name (Color.Red) to namespaced (Color_Red)
+                // Convert qualified name (Colour.Red) to namespaced (Colour_Red)
                 let full_name = name.replace('.', "_");
                 self.emit(&full_name);
             }

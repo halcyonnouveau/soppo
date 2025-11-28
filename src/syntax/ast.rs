@@ -356,7 +356,7 @@ pub struct Pattern {
 pub enum PatternKind {
     /// Catch-all case: default
     Default,
-    /// Unit variant with no data: Color.Red
+    /// Unit variant with no data: Colour.Red
     Variant(String),
     /// Literal value: 42, "hello", true
     Literal(Literal),

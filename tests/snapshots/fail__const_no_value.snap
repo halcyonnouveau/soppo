@@ -4,7 +4,7 @@ expression: result.unwrap_err()
 ---
 Error: soppo::parse
 
-  × Syntax error: Constant 'x' requires an initializer (use `const x int =
+  × Syntax error: Constant 'x' requires an initialiser (use `const x int =
   │ <value>`)
    ╭─[const_no_value.sop:4:13]
  3 │ func main() {
