@@ -6,6 +6,13 @@ package main
 
 import "fmt"
 
+/*soppo:enum
+Color {
+    Red
+    Yellow
+    Green
+}
+*/
 type Color interface {
     isColor()
 }
@@ -28,6 +35,12 @@ var (
     ColorGreen Color = Color_Green{}
 )
 
+/*soppo:enum
+MyResult {
+    Ok int
+    Err string
+}
+*/
 type MyResult interface {
     isMyResult()
 }
@@ -49,6 +62,12 @@ func MyResultErr(value string) MyResult {
     return MyResult_Err{Value: value}
 }
 
+/*soppo:enum
+Material {
+    Wood string
+    Metal string
+}
+*/
 type Material interface {
     isMaterial()
 }
@@ -74,6 +93,18 @@ type TriangleProps struct {
     material Material
 }
 
+/*soppo:enum
+Shape {
+    Circle {
+        radius float64
+    }
+    Rectangle {
+        width float64
+        height float64
+    }
+    Triangle TriangleProps
+}
+*/
 type Shape interface {
     isShape()
 }
@@ -182,6 +213,7 @@ func test() int {
     return 0
 }
 
+// Multiple patterns in match arms
 func isPrimary(c Color) bool {
     var result bool
     switch c.(type) {
@@ -193,6 +225,7 @@ func isPrimary(c Color) bool {
     return result
 }
 
+// Expression-less match (like if/else chain)
 func classify(x int) string {
     var result string
     switch {
@@ -206,6 +239,7 @@ func classify(x int) string {
     return result
 }
 
+// Multiple literal patterns
 func isSmall(x int) bool {
     var result bool
     switch x {

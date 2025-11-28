@@ -4,8 +4,15 @@ use super::source::{FileId, LineColumn, Span};
 
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\f]+")]
-#[logos(skip r"//[^\n]*")]
 pub enum Token {
+    // Single-line comment: // ...
+    #[regex(r"//[^\n]*", callback = |lex| lex.slice().to_string())]
+    LineComment(String),
+
+    // Multi-line comment: /* ... */
+    #[regex(r"/\*([^*]|\*[^/])*\*/", callback = |lex| lex.slice().to_string())]
+    BlockComment(String),
+
     #[regex(r"\n+")]
     Newline,
 
@@ -143,10 +150,19 @@ pub enum Token {
     Semicolon,
 }
 
+/// A comment with its span information
+#[derive(Debug, Clone)]
+pub struct Comment {
+    pub text: String,
+    pub span: Span,
+    pub is_block: bool,
+}
+
 pub struct Lexer<'a> {
     source: &'a str,
     file: FileId,
     lexer: logos::Lexer<'a, Token>,
+    comments: Vec<Comment>,
 }
 
 impl<'a> Lexer<'a> {
@@ -155,7 +171,18 @@ impl<'a> Lexer<'a> {
             source,
             file,
             lexer: Token::lexer(source),
+            comments: Vec::new(),
         }
+    }
+
+    /// Get all collected comments
+    pub fn comments(&self) -> &[Comment] {
+        &self.comments
+    }
+
+    /// Take ownership of collected comments
+    pub fn take_comments(&mut self) -> Vec<Comment> {
+        std::mem::take(&mut self.comments)
     }
 
     fn byte_offset_to_line_col(&self, offset: usize) -> LineColumn {
@@ -178,15 +205,35 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Option<(Token, Span)> {
-        let token = self.lexer.next()?;
-        let byte_span = self.lexer.span();
+        loop {
+            let token = self.lexer.next()?;
+            let byte_span = self.lexer.span();
 
-        let start = self.byte_offset_to_line_col(byte_span.start);
-        let end = self.byte_offset_to_line_col(byte_span.end);
+            let start = self.byte_offset_to_line_col(byte_span.start);
+            let end = self.byte_offset_to_line_col(byte_span.end);
 
-        let span = Span::with_bytes(start, end, self.file, byte_span.start, byte_span.end);
+            let span = Span::with_bytes(start, end, self.file, byte_span.start, byte_span.end);
 
-        token.ok().map(|t| (t, span))
+            match token.ok()? {
+                Token::LineComment(text) => {
+                    self.comments.push(Comment {
+                        text,
+                        span,
+                        is_block: false,
+                    });
+                    // Continue to next token
+                }
+                Token::BlockComment(text) => {
+                    self.comments.push(Comment {
+                        text,
+                        span,
+                        is_block: true,
+                    });
+                    // Continue to next token
+                }
+                token => return Some((token, span)),
+            }
+        }
     }
 
     pub fn collect_all(&mut self) -> Vec<(Token, Span)> {

@@ -174,7 +174,7 @@ fn extract_soppo_markers(source: &str, pkg: &mut GoPackage) {
 }
 
 fn parse_soppo_enum(text: &str) -> Option<SoppoTypeDef> {
-    // Format: Name[T, E] {\n    Variant1 Type\n    Variant2\n}
+    // Format: Name[T, E] {\n    Variant1 Type\n    Variant2\n    Variant3 {\n        field Type\n    }\n}
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() {
         return None;
@@ -203,27 +203,64 @@ fn parse_soppo_enum(text: &str) -> Option<SoppoTypeDef> {
         st.name = header.to_string();
     }
 
-    // Parse variants
-    for line in &lines[1..] {
-        let line = line.trim();
+    // Parse variants (handling multi-line struct variants)
+    let mut i = 1;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        i += 1;
+
         if line.is_empty() || line == "}" {
             continue;
         }
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.is_empty() {
-            continue;
+
+        // Check if this is a struct variant (ends with {)
+        if line.ends_with('{') {
+            let variant_name = line.trim_end_matches('{').trim();
+            let mut v = Variant {
+                name: variant_name.to_string(),
+                fields: Vec::new(),
+            };
+
+            // Parse fields until we hit closing }
+            while i < lines.len() {
+                let field_line = lines[i].trim();
+                i += 1;
+
+                if field_line == "}" {
+                    break;
+                }
+                if field_line.is_empty() {
+                    continue;
+                }
+
+                let parts: Vec<&str> = field_line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    v.fields.push(Field {
+                        name: parts[0].to_string(),
+                        ty: parts[1].to_string(),
+                    });
+                }
+            }
+
+            st.variants.push(v);
+        } else {
+            // Unit or single-value variant
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+            let mut v = Variant {
+                name: parts[0].to_string(),
+                fields: Vec::new(),
+            };
+            if parts.len() > 1 {
+                v.fields.push(Field {
+                    name: "Value".to_string(),
+                    ty: parts[1].to_string(),
+                });
+            }
+            st.variants.push(v);
         }
-        let mut v = Variant {
-            name: parts[0].to_string(),
-            fields: Vec::new(),
-        };
-        if parts.len() > 1 {
-            v.fields.push(Field {
-                name: "Value".to_string(),
-                ty: parts[1].to_string(),
-            });
-        }
-        st.variants.push(v);
     }
 
     Some(st)
@@ -840,6 +877,68 @@ type Handler func(string) error
 
         let handler = &pkg.types["Handler"];
         assert_eq!(handler.kind, "alias");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_soppo_struct_variant() {
+        let dir = std::env::temp_dir().join("soppo-treesitter-struct-variant-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("shape.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+/*soppo:enum
+Shape {{
+    Circle {{
+        radius float64
+    }}
+    Rectangle {{
+        width float64
+        height float64
+    }}
+    Point
+}}
+*/
+type Shape interface {{
+    isShape()
+}}
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+        assert!(pkg.soppo_types.contains_key("Shape"));
+
+        let soppo_type = &pkg.soppo_types["Shape"];
+        assert_eq!(soppo_type.kind, "enum");
+        assert_eq!(soppo_type.name, "Shape");
+        assert_eq!(soppo_type.variants.len(), 3);
+
+        // Circle variant with one field
+        let circle = &soppo_type.variants[0];
+        assert_eq!(circle.name, "Circle");
+        assert_eq!(circle.fields.len(), 1);
+        assert_eq!(circle.fields[0].name, "radius");
+        assert_eq!(circle.fields[0].ty, "float64");
+
+        // Rectangle variant with two fields
+        let rect = &soppo_type.variants[1];
+        assert_eq!(rect.name, "Rectangle");
+        assert_eq!(rect.fields.len(), 2);
+        assert_eq!(rect.fields[0].name, "width");
+        assert_eq!(rect.fields[1].name, "height");
+
+        // Point unit variant
+        let point = &soppo_type.variants[2];
+        assert_eq!(point.name, "Point");
+        assert_eq!(point.fields.len(), 0);
 
         fs::remove_dir_all(&dir).unwrap();
     }

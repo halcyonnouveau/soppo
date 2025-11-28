@@ -1,5 +1,5 @@
 use super::ast::*;
-use super::lexer::{Lexer, Token};
+use super::lexer::{Comment, Lexer, Token};
 use super::source::{FileId, Span};
 use crate::error::{Result, SoppoError};
 
@@ -40,17 +40,20 @@ pub struct Parser {
     tokens: Vec<(Token, Span)>,
     pos: usize,
     file: FileId,
+    comments: Vec<Comment>,
 }
 
 impl Parser {
     pub fn new(source: &str, file: FileId) -> Self {
         let mut lexer = Lexer::new(source, file);
         let tokens = lexer.collect_all();
+        let comments = lexer.take_comments();
 
         Self {
             tokens,
             pos: 0,
             file,
+            comments,
         }
     }
 
@@ -2974,6 +2977,7 @@ impl Parser {
             package,
             imports,
             decls,
+            comments: std::mem::take(&mut self.comments),
         })
     }
 }

@@ -6,6 +6,12 @@ package main
 
 import "fmt"
 
+/*soppo:enum
+Option[T] {
+    Some T
+    None
+}
+*/
 type Option[T any] interface {
     isOption()
 }
@@ -26,6 +32,12 @@ func OptionNone[T any]() Option[T] {
     return Option_None[T]{}
 }
 
+/*soppo:enum
+Result[T, E] {
+    Ok T
+    Err E
+}
+*/
 type Result[T any, E any] interface {
     isResult()
 }

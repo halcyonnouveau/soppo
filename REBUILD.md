@@ -23,6 +23,8 @@
 - Interface definitions
 - `select` statement
 - `close` builtin
+- `soppo:enum` markers in generated code
+- Comment preservation (single-line `//` and block `/* */`)
 
 ## Not Yet Implemented
 
@@ -33,16 +35,12 @@
 - String interpolation
 
 **Syntax:**
-- Comment preservation 
 - Bitwise operators (`&`, `|`, `^`, `<<`, `>>`)
 - Compound assignments (`+=`, `-=`, etc.)
 - Increment/decrement (`++`, `--`)
 - Slice expressions (`arr[1:3]`)
 - Type assertions (`x.(Type)`)
 - Blank identifier (`_ = foo()`)
-
-**Tooling:**
-- add `soppo:enum` markers in generated code
 
 ## Testing
 

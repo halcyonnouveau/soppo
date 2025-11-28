@@ -1,11 +1,13 @@
+use super::lexer::Comment;
 use super::source::Span;
 
 /// A complete source file
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct File {
     pub package: String,
     pub imports: Vec<Import>,
     pub decls: Vec<Decl>,
+    pub comments: Vec<Comment>,
 }
 
 /// Import declaration

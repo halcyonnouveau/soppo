@@ -1,6 +1,6 @@
 use crate::parse::{
-    BinOp, Block, ConstDecl, Decl, EnumVariant, Expr, ExprKind, File, FuncDecl, Generic, Literal,
-    Pattern, PatternKind, SelectCaseKind, Stmt, StmtKind, TypeDecl, TypeKind, UnaryOp,
+    BinOp, Block, Comment, ConstDecl, Decl, EnumVariant, Expr, ExprKind, File, FuncDecl, Generic,
+    Literal, Pattern, PatternKind, SelectCaseKind, Stmt, StmtKind, TypeDecl, TypeKind, UnaryOp,
 };
 use crate::types::GlobalState;
 
@@ -10,6 +10,8 @@ pub struct Codegen {
     indent_level: usize,
     global_state: GlobalState,
     current_func_return_type: Option<String>,
+    comments: Vec<Comment>,
+    comment_idx: usize,
 }
 
 impl Codegen {
@@ -19,6 +21,8 @@ impl Codegen {
             indent_level: 0,
             global_state: GlobalState::new(),
             current_func_return_type: None,
+            comments: Vec::new(),
+            comment_idx: 0,
         }
     }
 
@@ -28,7 +32,62 @@ impl Codegen {
             indent_level: 0,
             global_state,
             current_func_return_type: None,
+            comments: Vec::new(),
+            comment_idx: 0,
         }
+    }
+
+    /// Set comments for the codegen (sorted by byte position)
+    fn set_comments(&mut self, mut comments: Vec<Comment>) {
+        comments.sort_by_key(|c| c.span.byte_start);
+        self.comments = comments;
+        self.comment_idx = 0;
+    }
+
+    /// Emit all comments that appear before the given position
+    /// Only emits comments that are on lines strictly before the given line
+    fn emit_comments_before(&mut self, byte_pos: usize, line: usize) {
+        while self.comment_idx < self.comments.len() {
+            let comment = &self.comments[self.comment_idx];
+            // Only emit if comment is before the byte position AND on an earlier line
+            // (comments on the same line are trailing comments, handled separately)
+            if comment.span.byte_start < byte_pos && comment.span.start.line < line {
+                let text = comment.text.clone();
+                self.emit_indent();
+                self.output.push_str(&text);
+                self.output.push('\n');
+                self.comment_idx += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Emit all remaining comments
+    fn emit_remaining_comments(&mut self) {
+        while self.comment_idx < self.comments.len() {
+            let text = self.comments[self.comment_idx].text.clone();
+            self.emit_indent();
+            self.output.push_str(&text);
+            self.output.push('\n');
+            self.comment_idx += 1;
+        }
+    }
+
+    /// Emit a trailing comment if there's one on the given line, returns true if a comment was emitted
+    fn emit_trailing_comment(&mut self, line: usize) -> bool {
+        if self.comment_idx < self.comments.len() {
+            let comment = &self.comments[self.comment_idx];
+            // Check if comment is on the same line (trailing comment)
+            if comment.span.start.line == line && !comment.is_block {
+                let text = comment.text.clone();
+                self.output.push(' ');
+                self.output.push_str(&text);
+                self.comment_idx += 1;
+                return true;
+            }
+        }
+        false
     }
 
     /// Get the generated output
@@ -103,8 +162,47 @@ impl Codegen {
         }
     }
 
+    /// Emit a soppo:enum marker block comment for an enum type
+    fn emit_soppo_enum_marker(&mut self, type_decl: &TypeDecl, variants: &[EnumVariant]) {
+        // Format: /*soppo:enum\nEnumName[T, E] {\n    Ok T\n    Err E\n}\n*/
+        self.emit_line("/*soppo:enum");
+
+        // Enum name with generics (Soppo-style, just names)
+        let generic_names = self.format_generic_name_brackets(&type_decl.generics);
+        self.emit_line(&format!("{}{} {{", type_decl.name, generic_names));
+
+        // Variants
+        for variant in variants {
+            match variant {
+                EnumVariant::Unit { name, .. } => {
+                    self.emit_line(&format!("    {}", name));
+                }
+                EnumVariant::Single { name, ty, .. } => {
+                    self.emit_line(&format!("    {} {}", name, self.go_type(&ty.name)));
+                }
+                EnumVariant::Struct { name, fields, .. } => {
+                    self.emit_line(&format!("    {} {{", name));
+                    for field in fields {
+                        self.emit_line(&format!(
+                            "        {} {}",
+                            field.name,
+                            self.go_type(&field.ty.name)
+                        ));
+                    }
+                    self.emit_line("    }");
+                }
+            }
+        }
+
+        self.emit_line("}");
+        self.emit_line("*/");
+    }
+
     /// Generate code for an entire file
     pub fn gen_file(&mut self, file: &File) {
+        // Set up comments for emission
+        self.set_comments(file.comments.clone());
+
         // Package declaration
         self.emit_line(&format!("package {}", file.package));
         self.emit_line("");
@@ -112,6 +210,7 @@ impl Codegen {
         // Generate imports
         if !file.imports.is_empty() {
             for import in &file.imports {
+                self.emit_comments_before(import.span.byte_start, import.span.start.line);
                 self.emit_line(&format!("import \"{}\"", import.path));
             }
             self.emit_line("");
@@ -121,19 +220,28 @@ impl Codegen {
         for decl in &file.decls {
             match decl {
                 Decl::Const(const_decl) => {
+                    self.emit_comments_before(
+                        const_decl.span.byte_start,
+                        const_decl.span.start.line,
+                    );
                     self.gen_const_decl(const_decl);
                     self.emit_line("");
                 }
                 Decl::Type(type_decl) => {
+                    self.emit_comments_before(type_decl.span.byte_start, type_decl.span.start.line);
                     self.gen_type_decl(type_decl);
                     self.emit_line("");
                 }
                 Decl::Func(func) => {
+                    self.emit_comments_before(func.span.byte_start, func.span.start.line);
                     self.gen_func_decl(func);
                     self.emit_line("");
                 }
             }
         }
+
+        // Emit any remaining comments at the end
+        self.emit_remaining_comments();
     }
 
     /// Generate a const declaration
@@ -169,6 +277,7 @@ impl Codegen {
                 // Generate the interface with generics if present
                 let generic_params = self.format_generic_brackets(&type_decl.generics);
 
+                self.emit_soppo_enum_marker(type_decl, variants);
                 self.emit_line(&format!(
                     "type {}{} interface {{",
                     type_decl.name, generic_params
@@ -480,14 +589,26 @@ impl Codegen {
         self.emit("}");
     }
 
+    /// Emit a statement ending with optional trailing comment and newline
+    fn emit_stmt_end(&mut self, line: usize) {
+        self.emit_trailing_comment(line);
+        self.emit("\n");
+    }
+
     /// Generate a statement
     fn gen_stmt(&mut self, stmt: &Stmt) {
+        // Emit any comments that appear before this statement
+        self.emit_comments_before(stmt.span.byte_start, stmt.span.start.line);
+
+        // Track the statement's line for trailing comments
+        let stmt_line = stmt.span.start.line;
+
         match &stmt.kind {
             StmtKind::Decl { name, value } => {
                 self.emit_indent();
                 self.emit(&format!("{} := ", name));
                 self.gen_expr(value);
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::MultiDecl { names, values } => {
@@ -500,7 +621,7 @@ impl Codegen {
                     }
                     self.gen_expr(val);
                 }
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::VarDecl { name, ty, value } => {
@@ -525,7 +646,7 @@ impl Codegen {
                         unreachable!("var declaration without type or value")
                     }
                 }
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::ConstDecl { name, ty, value } => {
@@ -538,7 +659,7 @@ impl Codegen {
                     self.emit(&format!("const {} = ", name));
                 }
                 self.gen_expr(value);
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::MultiVarDecl { names, ty, values } => {
@@ -574,7 +695,7 @@ impl Codegen {
                         self.gen_expr(val);
                     }
                 }
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::MultiConstDecl { names, ty, values } => {
@@ -596,7 +717,7 @@ impl Codegen {
                     }
                     self.gen_expr(val);
                 }
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::Assign { target, value } => {
@@ -604,7 +725,7 @@ impl Codegen {
                 self.gen_expr(target);
                 self.emit(" = ");
                 self.gen_expr(value);
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::MultiAssign { targets, values } => {
@@ -622,7 +743,7 @@ impl Codegen {
                     }
                     self.gen_expr(val);
                 }
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::For { condition, body } => {
@@ -675,7 +796,7 @@ impl Codegen {
             StmtKind::Return { values } => {
                 self.emit_indent();
                 if values.is_empty() {
-                    self.emit("return\n");
+                    self.emit("return");
                 } else {
                     self.emit("return ");
                     for (i, expr) in values.iter().enumerate() {
@@ -684,8 +805,8 @@ impl Codegen {
                         }
                         self.gen_expr(expr);
                     }
-                    self.emit("\n");
                 }
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::Match { scrutinee, arms } => {
@@ -801,7 +922,7 @@ impl Codegen {
                 self.gen_expr(channel);
                 self.emit(" <- ");
                 self.gen_expr(value);
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::Select { cases } => {
@@ -858,30 +979,32 @@ impl Codegen {
                 self.emit_indent();
                 self.emit("go ");
                 self.gen_expr(expr);
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::DeferStmt(expr) => {
                 self.emit_indent();
                 self.emit("defer ");
                 self.gen_expr(expr);
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::Break => {
                 self.emit_indent();
-                self.emit("break\n");
+                self.emit("break");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::Continue => {
                 self.emit_indent();
-                self.emit("continue\n");
+                self.emit("continue");
+                self.emit_stmt_end(stmt_line);
             }
 
             StmtKind::Expr(expr) => {
                 self.emit_indent();
                 self.gen_expr(expr);
-                self.emit("\n");
+                self.emit_stmt_end(stmt_line);
             }
         }
     }
@@ -1169,15 +1292,7 @@ impl Codegen {
     /// Convert Soppo type to Go type
     fn go_type<'a>(&self, ty: &'a str) -> &'a str {
         match ty {
-            // Primitive types - pass through as-is
-            "int" | "int8" | "int16" | "int32" | "int64" => ty,
-            "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" => ty,
-            "float32" | "float64" => ty,
-            "complex64" | "complex128" => ty,
-            "byte" | "rune" => ty,
-            "string" | "bool" | "error" => ty,
-            // Unit type
-            "()" => "",
+            "()" => "", // Unit type
             _ => ty,
         }
     }
