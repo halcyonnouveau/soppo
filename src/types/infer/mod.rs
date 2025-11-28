@@ -569,7 +569,7 @@ impl Infer {
             name: Symbol {
                 module: ModuleId::empty(),
                 name: ast_ty.name.clone(),
-                span: ast_ty.span.clone(),
+                span: ast_ty.span,
             },
             args,
         }

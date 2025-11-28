@@ -22,7 +22,7 @@ impl Infer {
                 if occurs(*a, ty) {
                     return Err(SoppoError::Type {
                         message: format!("Infinite type: ?{} = {}", a, ty),
-                        span: span.clone(),
+                        span: *span,
                     });
                 }
                 self.substitutions.insert(*a, ty.clone());
@@ -46,7 +46,7 @@ impl Infer {
                             "Type constructor {} has wrong number of arguments",
                             n1.name
                         ),
-                        span: span.clone(),
+                        span: *span,
                     });
                 }
                 for (arg1, arg2) in a1.iter().zip(a2.iter()) {
@@ -82,7 +82,7 @@ impl Infer {
                                 a2.len(),
                                 fixed_params.len()
                             ),
-                            span: span.clone(),
+                            span: *span,
                         });
                     }
 
@@ -107,7 +107,7 @@ impl Infer {
                                 a2.len(),
                                 a1.len()
                             ),
-                            span: span.clone(),
+                            span: *span,
                         });
                     }
                     for (arg1, arg2) in a1.iter().zip(a2.iter()) {
@@ -122,7 +122,7 @@ impl Infer {
             _ => Err(SoppoError::TypeMismatch {
                 expected: Box::new(t1.clone()),
                 found: Box::new(t2.clone()),
-                span: span.clone(),
+                span: *span,
             }),
         }
     }

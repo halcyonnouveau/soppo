@@ -45,7 +45,7 @@ impl Infer {
                             names.len(),
                             value_ty
                         ),
-                        span: value.span.clone(),
+                        span: value.span,
                     })
                 } else {
                     // a, b := expr1, expr2 (one value per name)
@@ -80,7 +80,7 @@ impl Infer {
                             message:
                                 "Variable declaration requires either a type or an initializer"
                                     .to_string(),
-                            span: stmt.span.clone(),
+                            span: stmt.span,
                         });
                     }
                 };
@@ -98,7 +98,7 @@ impl Infer {
                                 message:
                                     "Multi-variable declaration without values requires a type"
                                         .to_string(),
-                                span: stmt.span.clone(),
+                                span: stmt.span,
                             })?;
                     for name in names {
                         self.insert_var(name.clone(), declared_ty.clone());
@@ -136,7 +136,7 @@ impl Infer {
                             names.len(),
                             value_ty
                         ),
-                        span: value.span.clone(),
+                        span: value.span,
                     });
                 } else {
                     // var a, b = expr1, expr2 or var a, b type = expr1, expr2
@@ -226,7 +226,7 @@ impl Infer {
                             targets.len(),
                             value_ty
                         ),
-                        span: value.span.clone(),
+                        span: value.span,
                     })
                 } else {
                     // a, b = expr1, expr2 (one value per target)
@@ -348,7 +348,7 @@ impl Infer {
                                 expected_types.len(),
                                 values.len()
                             ),
-                            span: stmt.span.clone(),
+                            span: stmt.span,
                         });
                     }
                     for (expr, expected) in values.iter().zip(expected_types.iter()) {
@@ -399,7 +399,7 @@ impl Infer {
                                             "Pattern bindings must match: expected {:?}, found {:?}",
                                             first_keys, other_keys
                                         ),
-                                        span: pattern.span.clone(),
+                                        span: pattern.span,
                                     });
                                 }
 
@@ -430,7 +430,7 @@ impl Infer {
                                     message:
                                         "Expression-less match requires boolean guard expressions"
                                             .to_string(),
-                                    span: pattern.span.clone(),
+                                    span: pattern.span,
                                 });
                             }
                         }
@@ -496,7 +496,7 @@ impl Infer {
                         if !missing.is_empty() {
                             return Err(SoppoError::NonExhaustive {
                                 missing,
-                                span: stmt.span.clone(),
+                                span: stmt.span,
                             });
                         }
                     }

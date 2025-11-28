@@ -10,7 +10,7 @@ pub struct LineColumn {
 pub struct FileId(pub usize);
 
 /// Span in source code - tracks location for error messages
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start: LineColumn,
     pub end: LineColumn,

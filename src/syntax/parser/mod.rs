@@ -76,7 +76,7 @@ impl Parser {
     fn peek_span(&self) -> Span {
         self.tokens
             .get(self.pos)
-            .map(|(_, span)| span.clone())
+            .map(|(_, span)| *span)
             .unwrap_or_else(Span::dummy)
     }
 
@@ -141,7 +141,7 @@ impl Parser {
                     "`{}` is a reserved keyword and cannot be used as an identifier",
                     name
                 ),
-                span: span.clone(),
+                span: *span,
             })
         } else {
             Ok(())

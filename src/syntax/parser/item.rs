@@ -276,7 +276,7 @@ impl Parser {
         } else {
             // Type alias: type Foo = Bar or type Foo int
             let target = self.parse_type()?;
-            let end_span = target.span.clone();
+            let end_span = target.span;
             (TypeKind::Alias { target }, end_span)
         };
 
@@ -458,7 +458,7 @@ impl Parser {
         } else {
             // Single return type
             let ty = self.parse_type()?;
-            let ty_span = ty.span.clone();
+            let ty_span = ty.span;
             (vec![ty], ty_span)
         };
 

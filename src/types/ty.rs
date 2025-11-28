@@ -94,7 +94,7 @@ impl Type {
             name: Symbol {
                 module: ModuleId::empty(),
                 name: ast_ty.name.clone(),
-                span: ast_ty.span.clone(),
+                span: ast_ty.span,
             },
             args: ast_ty.args.iter().map(Type::from_ast).collect(),
         }

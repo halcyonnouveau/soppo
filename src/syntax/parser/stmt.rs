@@ -57,10 +57,10 @@ impl Parser {
                                     names.len(),
                                     values.len()
                                 ),
-                                span: first_target.span.clone(),
+                                span: first_target.span,
                             });
                         }
-                        let end_span = values.last().unwrap().span.clone();
+                        let end_span = values.last().unwrap().span;
                         return Ok(Stmt {
                             span: Span::with_bytes(
                                 first_target.span.start,
@@ -85,10 +85,10 @@ impl Parser {
                                     targets.len(),
                                     values.len()
                                 ),
-                                span: first_target.span.clone(),
+                                span: first_target.span,
                             });
                         }
-                        let end_span = values.last().unwrap().span.clone();
+                        let end_span = values.last().unwrap().span;
                         return Ok(Stmt {
                             span: Span::with_bytes(
                                 first_target.span.start,
@@ -165,7 +165,7 @@ impl Parser {
                 } else {
                     // Just an expression statement
                     Ok(Stmt {
-                        span: first_target.span.clone(),
+                        span: first_target.span,
                         kind: StmtKind::Expr(first_target),
                     })
                 }
@@ -243,10 +243,10 @@ impl Parser {
                                     names.len(),
                                     vals.len()
                                 ),
-                                span: start_span.clone(),
+                                span: start_span,
                             });
                         }
-                        let end = vals.last().unwrap().span.clone();
+                        let end = vals.last().unwrap().span;
                         (None, vals, end)
                     } else if matches!(
                         self.peek(),
@@ -254,7 +254,7 @@ impl Parser {
                     ) {
                         // var a, b, c type or var a, b type = 1, 2
                         let ty = self.parse_type()?;
-                        let ty_span = ty.span.clone();
+                        let ty_span = ty.span;
 
                         if self.consume(&Token::Assign) {
                             // var a, b type = expr1, expr2 or var a, b type = f()
@@ -270,10 +270,10 @@ impl Parser {
                                         names.len(),
                                         vals.len()
                                     ),
-                                    span: start_span.clone(),
+                                    span: start_span,
                                 });
                             }
-                            let end = vals.last().unwrap().span.clone();
+                            let end = vals.last().unwrap().span;
                             (Some(ty), vals, end)
                         } else {
                             // var a, b, c type (zero values)
@@ -283,7 +283,7 @@ impl Parser {
                         return Err(SoppoError::Parse {
                             message: "Multi-variable declaration requires a type or initializers"
                                 .to_string(),
-                            span: start_span.clone(),
+                            span: start_span,
                         });
                     };
 
@@ -302,7 +302,7 @@ impl Parser {
                     let (ty, value, end_span) = if self.consume(&Token::Assign) {
                         // var name = value (type inference)
                         let expr = self.parse_expr()?;
-                        let span = expr.span.clone();
+                        let span = expr.span;
                         (None, Some(expr), span)
                     } else if matches!(
                         self.peek(),
@@ -310,12 +310,12 @@ impl Parser {
                     ) {
                         // var name type ... (explicit type)
                         let ty = self.parse_type()?;
-                        let ty_span = ty.span.clone();
+                        let ty_span = ty.span;
 
                         if self.consume(&Token::Assign) {
                             // var name type = value
                             let expr = self.parse_expr()?;
-                            let span = expr.span.clone();
+                            let span = expr.span;
                             (Some(ty), Some(expr), span)
                         } else {
                             // var name type (zero value)
@@ -416,10 +416,10 @@ impl Parser {
                                     names.len(),
                                     vals.len()
                                 ),
-                                span: start_span.clone(),
+                                span: start_span,
                             });
                         }
-                        let end = vals.last().unwrap().span.clone();
+                        let end = vals.last().unwrap().span;
                         (None, vals, end)
                     } else if matches!(
                         self.peek(),
@@ -427,7 +427,7 @@ impl Parser {
                     ) {
                         // const a, b type = 1, 2
                         let ty = self.parse_type()?;
-                        let ty_span = ty.span.clone();
+                        let ty_span = ty.span;
 
                         if !self.consume(&Token::Assign) {
                             return Err(SoppoError::Parse {
@@ -448,15 +448,15 @@ impl Parser {
                                     names.len(),
                                     vals.len()
                                 ),
-                                span: start_span.clone(),
+                                span: start_span,
                             });
                         }
-                        let end = vals.last().unwrap().span.clone();
+                        let end = vals.last().unwrap().span;
                         (Some(ty), vals, end)
                     } else {
                         return Err(SoppoError::Parse {
                             message: "Expected type or '=' in multi-const declaration".to_string(),
-                            span: start_span.clone(),
+                            span: start_span,
                         });
                     };
 
@@ -481,7 +481,7 @@ impl Parser {
                     ) {
                         // const name type = value (explicit type)
                         let ty = self.parse_type()?;
-                        let ty_span = ty.span.clone();
+                        let ty_span = ty.span;
                         if !self.consume(&Token::Assign) {
                             return Err(SoppoError::Parse {
                                 message: format!(
@@ -500,7 +500,7 @@ impl Parser {
                     };
 
                     let value = self.parse_expr()?;
-                    let end_span = value.span.clone();
+                    let end_span = value.span;
 
                     Ok(Stmt {
                         span: Span::with_bytes(
@@ -524,10 +524,10 @@ impl Parser {
                 let block = self.parse_block()?;
                 // A block statement evaluates to its last expression
                 Ok(Stmt {
-                    span: block.span.clone(),
+                    span: block.span,
                     kind: StmtKind::Expr(Expr {
                         kind: ExprKind::Block(block.clone()),
-                        span: block.span.clone(),
+                        span: block.span,
                     }),
                 })
             }
@@ -614,7 +614,7 @@ impl Parser {
                     if matches!(self.peek(), Some(Token::If)) {
                         // else if is treated as else { if ... }
                         let if_stmt = self.parse_stmt()?;
-                        let span = if_stmt.span.clone();
+                        let span = if_stmt.span;
                         Some(Block {
                             stmts: vec![if_stmt],
                             span,
@@ -628,8 +628,8 @@ impl Parser {
 
                 let end_span = else_block
                     .as_ref()
-                    .map(|b| b.span.clone())
-                    .unwrap_or(then_block.span.clone());
+                    .map(|b| b.span)
+                    .unwrap_or(then_block.span);
 
                 Ok(Stmt {
                     span: Span::with_bytes(
@@ -664,10 +664,7 @@ impl Parser {
                     values
                 };
 
-                let end_span = values
-                    .last()
-                    .map(|v| v.span.clone())
-                    .unwrap_or(start_span.clone());
+                let end_span = values.last().map(|v| v.span).unwrap_or(start_span);
 
                 Ok(Stmt {
                     span: Span::with_bytes(
@@ -694,7 +691,7 @@ impl Parser {
             Some(Token::Go) => {
                 self.advance();
                 let expr = self.parse_expr()?;
-                let end_span = expr.span.clone();
+                let end_span = expr.span;
                 Ok(Stmt {
                     span: Span::with_bytes(
                         start_span.start,
@@ -710,7 +707,7 @@ impl Parser {
             Some(Token::Defer) => {
                 self.advance();
                 let expr = self.parse_expr()?;
-                let end_span = expr.span.clone();
+                let end_span = expr.span;
                 Ok(Stmt {
                     span: Span::with_bytes(
                         start_span.start,
@@ -778,7 +775,7 @@ impl Parser {
                 } else {
                     // Just an expression statement
                     Ok(Stmt {
-                        span: expr.span.clone(),
+                        span: expr.span,
                         kind: StmtKind::Expr(expr),
                     })
                 }
@@ -1016,10 +1013,7 @@ impl Parser {
             self.skip_terminators();
         }
 
-        let body_end = stmts
-            .last()
-            .map(|s| s.span.clone())
-            .unwrap_or(body_start.clone());
+        let body_end = stmts.last().map(|s| s.span).unwrap_or(body_start);
 
         Ok(Block {
             stmts,

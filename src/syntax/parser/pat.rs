@@ -83,14 +83,11 @@ impl Parser {
             self.skip_terminators();
         }
 
-        let body_end = stmts
-            .last()
-            .map(|s| s.span.clone())
-            .unwrap_or(body_start.clone());
+        let body_end = stmts.last().map(|s| s.span).unwrap_or(body_start);
 
         let body = Block {
             stmts,
-            span: body_end.clone(),
+            span: body_end,
         };
 
         let first_span = &patterns[0].span;
@@ -127,7 +124,7 @@ impl Parser {
         if is_expression_less {
             // For expression-less match, parse an expression as the guard
             let expr = self.parse_expr()?;
-            let span = expr.span.clone();
+            let span = expr.span;
             Ok(Pattern {
                 kind: PatternKind::Guard(Box::new(expr)),
                 span,

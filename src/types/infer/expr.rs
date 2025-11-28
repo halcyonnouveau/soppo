@@ -22,7 +22,7 @@ impl Infer {
                 self.lookup_var(name)
                     .ok_or_else(|| SoppoError::UndefinedVariable {
                         name: name.clone(),
-                        span: expr.span.clone(),
+                        span: expr.span,
                     })
             }
 
@@ -91,7 +91,7 @@ impl Infer {
                                     "close requires a channel argument, got {}",
                                     channel_ty
                                 ),
-                                span: args[0].span.clone(),
+                                span: args[0].span,
                             });
                         }
                         return Ok(Type::unit());
@@ -132,7 +132,7 @@ impl Infer {
                                 "Type conversion requires exactly 1 argument, but got {}",
                                 args.len()
                             ),
-                            span: expr.span.clone(),
+                            span: expr.span,
                         });
                     }
 
@@ -158,7 +158,7 @@ impl Infer {
                             // Found the function - infer args and check against signature
                             let mut arg_tys = Vec::new();
                             for arg in args {
-                                arg_tys.push((self.infer_expr(arg)?, arg.span.clone()));
+                                arg_tys.push((self.infer_expr(arg)?, arg.span));
                             }
 
                             // Extract param types and return type from func_ty
@@ -176,7 +176,7 @@ impl Infer {
                                             arg_tys.len(),
                                             param_tys.len()
                                         ),
-                                        span: func.span.clone(),
+                                        span: func.span,
                                     });
                                 }
 
@@ -199,7 +199,7 @@ impl Infer {
                                         "Type conversion requires exactly 1 argument, but got {}",
                                         args.len()
                                     ),
-                                    span: expr.span.clone(),
+                                    span: expr.span,
                                 });
                             }
                             self.infer_expr(&args[0])?;
@@ -209,7 +209,7 @@ impl Infer {
                         // Not found in Soppo module
                         return Err(SoppoError::Type {
                             message: format!("`{}` not found in Soppo module `{}`", name, pkg_name),
-                            span: func.span.clone(),
+                            span: func.span,
                         });
                     }
 
@@ -222,7 +222,7 @@ impl Infer {
                                     "Type conversion requires exactly 1 argument, but got {}",
                                     args.len()
                                 ),
-                                span: expr.span.clone(),
+                                span: expr.span,
                             });
                         }
 
@@ -241,7 +241,7 @@ impl Infer {
                 // Infer argument types with their spans
                 let mut arg_tys = Vec::new();
                 for arg in args {
-                    arg_tys.push((self.infer_expr(arg)?, arg.span.clone()));
+                    arg_tys.push((self.infer_expr(arg)?, arg.span));
                 }
 
                 // Check function call with detailed error spans
@@ -272,7 +272,7 @@ impl Infer {
                                         arg_tys.len(),
                                         fixed_params.len()
                                     ),
-                                    span: func.span.clone(),
+                                    span: func.span,
                                 });
                             }
 
@@ -298,7 +298,7 @@ impl Infer {
                                         arg_tys.len(),
                                         param_tys.len()
                                     ),
-                                    span: func.span.clone(),
+                                    span: func.span,
                                 });
                             }
 
@@ -322,7 +322,7 @@ impl Infer {
                     }
                     _ => Err(SoppoError::Type {
                         message: format!("Cannot call non-function type `{}`", func_ty),
-                        span: func.span.clone(),
+                        span: func.span,
                     }),
                 }
             }
@@ -354,7 +354,7 @@ impl Infer {
                         // Not found
                         return Err(SoppoError::Type {
                             message: format!("`{}` not found in Soppo module `{}`", field, name),
-                            span: field_span.clone(),
+                            span: *field_span,
                         });
                     }
 
@@ -369,7 +369,7 @@ impl Infer {
                     // Couldn't find it - error
                     return Err(SoppoError::Type {
                         message: format!("`{}` not found in package `{}`", field, name),
-                        span: field_span.clone(),
+                        span: *field_span,
                     });
                 }
 
@@ -468,7 +468,7 @@ impl Infer {
                                 "Struct `{}` has no field named `{}`",
                                 name.name, field
                             ),
-                            span: field_expr.span.clone(),
+                            span: field_expr.span,
                         });
                     }
                 }

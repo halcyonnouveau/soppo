@@ -360,7 +360,7 @@ impl Parser {
                                 ty: Type {
                                     name: type_name,
                                     args: Vec::new(),
-                                    span: expr.span.clone(),
+                                    span: expr.span,
                                 },
                                 fields,
                             },
@@ -389,7 +389,7 @@ impl Parser {
             Token::Ampersand => {
                 // &x - address of
                 let operand = self.parse_primary()?;
-                let end_span = operand.span.clone();
+                let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
                         op: UnaryOp::Ref,
@@ -408,7 +408,7 @@ impl Parser {
             Token::Star => {
                 // *p - dereference (when used as unary prefix)
                 let operand = self.parse_primary()?;
-                let end_span = operand.span.clone();
+                let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
                         op: UnaryOp::Deref,
@@ -427,7 +427,7 @@ impl Parser {
             Token::Minus => {
                 // -x - negation
                 let operand = self.parse_primary()?;
-                let end_span = operand.span.clone();
+                let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
                         op: UnaryOp::Neg,
@@ -446,7 +446,7 @@ impl Parser {
             Token::Not => {
                 // !x - logical not
                 let operand = self.parse_primary()?;
-                let end_span = operand.span.clone();
+                let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
                         op: UnaryOp::Not,
@@ -465,7 +465,7 @@ impl Parser {
             Token::Arrow => {
                 // <-ch - channel receive
                 let operand = self.parse_primary()?;
-                let end_span = operand.span.clone();
+                let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
                         op: UnaryOp::Recv,
@@ -516,7 +516,7 @@ impl Parser {
                 let map_ty = Type {
                     name: format!("map[{}]{}", key_ty.name, val_ty.name),
                     args: vec![key_ty, val_ty],
-                    span: span.clone(),
+                    span,
                 };
 
                 self.expect(Token::LBrace)?;
@@ -577,7 +577,7 @@ impl Parser {
                     kind: ExprKind::Call {
                         func: Box::new(Expr {
                             kind: ExprKind::Ident("make".to_string()),
-                            span: span.clone(),
+                            span,
                         }),
                         type_args: vec![ty],
                         args,
@@ -602,7 +602,7 @@ impl Parser {
                     kind: ExprKind::Call {
                         func: Box::new(Expr {
                             kind: ExprKind::Ident("new".to_string()),
-                            span: span.clone(),
+                            span,
                         }),
                         type_args: vec![ty],
                         args: vec![],
@@ -638,7 +638,7 @@ impl Parser {
                     let slice_ty = Type {
                         name: format!("[]{}", elem_ty.name),
                         args: elem_ty.args.clone(),
-                        span: elem_ty.span.clone(),
+                        span: elem_ty.span,
                     };
                     self.expect(Token::LBrace)?;
 
