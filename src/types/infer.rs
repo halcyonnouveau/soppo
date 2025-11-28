@@ -4,7 +4,7 @@ use super::module::GlobalState;
 use super::ty::Type;
 use crate::error::{Result, SoppoError};
 use crate::go::{GoCache, Project, parse_go_type};
-use crate::parse::{
+use crate::syntax::{
     BinOp, Block, ConstDecl, EnumVariant, Expr, ExprKind, FuncDecl, Import, ModuleId, Pattern,
     PatternKind, Span, Stmt, StmtKind, Symbol, Type as AstType, TypeDecl, TypeKind,
 };
@@ -1350,7 +1350,7 @@ impl Infer {
             }
 
             ExprKind::Unary { op, operand } => {
-                use crate::parse::UnaryOp;
+                use crate::syntax::UnaryOp;
                 let operand_ty = self.infer_expr(operand)?;
 
                 match op {
@@ -1980,7 +1980,7 @@ impl Infer {
             }
 
             StmtKind::Select { cases } => {
-                use crate::parse::SelectCaseKind;
+                use crate::syntax::SelectCaseKind;
 
                 for case in cases {
                     self.push_scope();
@@ -2312,7 +2312,7 @@ impl Infer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{Decl, FileId, Parser};
+    use crate::syntax::{Decl, FileId, Parser};
 
     fn infer_expr_helper(source: &str) -> Result<Type> {
         let mut parser = Parser::new(source, FileId(0));

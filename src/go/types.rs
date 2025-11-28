@@ -3,7 +3,7 @@
 //! This module parses Go type syntax (as extracted by tree-sitter) and converts
 //! it to Soppo's internal Type representation.
 
-use crate::parse::{ModuleId, Span, Symbol};
+use crate::syntax::{ModuleId, Span, Symbol};
 use crate::types::Type;
 
 /// Parse a Go type string into a Soppo Type.

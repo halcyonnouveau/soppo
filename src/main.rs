@@ -5,7 +5,7 @@ use clap::{Parser as ClapParser, Subcommand};
 use miette::{IntoDiagnostic, NamedSource, Result};
 use soppo::codegen::Codegen;
 use soppo::go::Project;
-use soppo::parse::{Decl, FileId, Parser};
+use soppo::syntax::{Decl, FileId, Parser};
 use soppo::types::Infer;
 
 #[derive(ClapParser)]

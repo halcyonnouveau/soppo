@@ -1,4 +1,4 @@
-use crate::parse::{
+use crate::syntax::{
     BinOp, Block, Comment, ConstDecl, Decl, EnumVariant, Expr, ExprKind, File, FuncDecl, Generic,
     Literal, Pattern, PatternKind, SelectCaseKind, Stmt, StmtKind, TypeDecl, TypeKind, UnaryOp,
 };
@@ -1326,7 +1326,7 @@ impl Default for Codegen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{FileId, Parser};
+    use crate::syntax::{FileId, Parser};
 
     #[test]
     fn test_gen_simple_function() {

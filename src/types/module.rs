@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::ty::Type;
-use crate::parse::{ConstDecl, EnumVariant, FuncDecl, ModuleId, TypeDecl, TypeKind};
+use crate::syntax::{ConstDecl, EnumVariant, FuncDecl, ModuleId, TypeDecl, TypeKind};
 
 /// Global state tracking all modules and types
 pub struct GlobalState {
@@ -236,7 +236,7 @@ impl Default for GlobalState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{Generic, Span};
+    use crate::syntax::{Generic, Span};
 
     #[test]
     fn test_global_state_creation() {

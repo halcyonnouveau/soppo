@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::parse::{ModuleId, Span, Symbol, Type as AstType};
+use crate::syntax::{ModuleId, Span, Symbol, Type as AstType};
 
 /// Type representation after type checking
 #[derive(Debug, Clone, PartialEq)]

@@ -1,7 +1,7 @@
 use miette::Diagnostic;
 use thiserror::Error;
 
-use crate::parse::Span;
+use crate::syntax::Span;
 use crate::types::Type;
 
 #[derive(Error, Debug, Diagnostic)]
