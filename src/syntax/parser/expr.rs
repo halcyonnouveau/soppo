@@ -1,6 +1,6 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
-use crate::syntax::ast::{BinOp, Expr, ExprKind, Param, Type, UnaryOp};
+use crate::syntax::ast::{AssignOp, BinOp, Expr, ExprKind, Param, Type, UnaryOp};
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
@@ -11,10 +11,18 @@ enum Assoc {
 impl BinOp {
     /// Returns (precedence, associativity)
     /// Higher precedence = tighter binding
+    /// Go operator precedence (high to low):
+    /// 5: *  /  %  <<  >>  &  &^
+    /// 4: +  -  |  ^
+    /// 3: ==  !=  <  <=  >  >=
+    /// 2: &&
+    /// 1: ||
     fn precedence(&self) -> (u8, Assoc) {
         match self {
-            BinOp::Mul | BinOp::Div | BinOp::Mod => (6, Assoc::Left),
-            BinOp::Add | BinOp::Sub => (5, Assoc::Left),
+            BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Shl | BinOp::Shr | BinOp::BitAnd => {
+                (6, Assoc::Left)
+            }
+            BinOp::Add | BinOp::Sub | BinOp::BitOr | BinOp::BitXor => (5, Assoc::Left),
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 (4, Assoc::Left)
             }
@@ -80,6 +88,29 @@ impl Parser {
             Token::Ge => Some(BinOp::Ge),
             Token::And => Some(BinOp::And),
             Token::Or => Some(BinOp::Or),
+            // Bitwise operators
+            Token::Ampersand => Some(BinOp::BitAnd),
+            Token::Pipe => Some(BinOp::BitOr),
+            Token::Caret => Some(BinOp::BitXor),
+            Token::Shl => Some(BinOp::Shl),
+            Token::Shr => Some(BinOp::Shr),
+            _ => None,
+        }
+    }
+
+    /// Peek at current token and convert to compound assignment operator if applicable
+    pub fn peek_assign_op(&self) -> Option<AssignOp> {
+        match self.peek()? {
+            Token::PlusAssign => Some(AssignOp::Add),
+            Token::MinusAssign => Some(AssignOp::Sub),
+            Token::StarAssign => Some(AssignOp::Mul),
+            Token::SlashAssign => Some(AssignOp::Div),
+            Token::PercentAssign => Some(AssignOp::Mod),
+            Token::AmpersandAssign => Some(AssignOp::BitAnd),
+            Token::PipeAssign => Some(AssignOp::BitOr),
+            Token::CaretAssign => Some(AssignOp::BitXor),
+            Token::ShlAssign => Some(AssignOp::Shl),
+            Token::ShrAssign => Some(AssignOp::Shr),
             _ => None,
         }
     }
@@ -165,25 +196,69 @@ impl Parser {
                         }
                     }
 
-                    // Not type args - backtrack and parse as array index
+                    // Not type args - backtrack and parse as array index or slice
                     self.pos = saved_pos;
                     self.advance(); // consume the [ we backtracked past
-                    let index = self.parse_expr()?;
-                    let end_span = self.expect(Token::RBracket)?;
 
-                    expr = Expr {
-                        span: Span::with_bytes(
-                            expr.span.start,
-                            end_span.end,
-                            self.file,
-                            expr.span.byte_start,
-                            end_span.byte_end,
-                        ),
-                        kind: ExprKind::Index {
-                            expr: Box::new(expr),
-                            index: Box::new(index),
-                        },
+                    // Check for slice expression: arr[low:high] or arr[low:high:cap]
+                    // Cases: arr[:], arr[low:], arr[:high], arr[low:high], arr[low:high:cap]
+                    let low = if matches!(self.peek(), Some(Token::Colon)) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expr()?))
                     };
+
+                    if self.consume(&Token::Colon) {
+                        // This is a slice expression
+                        let high =
+                            if matches!(self.peek(), Some(Token::RBracket) | Some(Token::Colon)) {
+                                None
+                            } else {
+                                Some(Box::new(self.parse_expr()?))
+                            };
+
+                        let cap = if self.consume(&Token::Colon) {
+                            // 3-index slice: arr[low:high:cap]
+                            Some(Box::new(self.parse_expr()?))
+                        } else {
+                            None
+                        };
+
+                        let end_span = self.expect(Token::RBracket)?;
+
+                        expr = Expr {
+                            span: Span::with_bytes(
+                                expr.span.start,
+                                end_span.end,
+                                self.file,
+                                expr.span.byte_start,
+                                end_span.byte_end,
+                            ),
+                            kind: ExprKind::Slice {
+                                expr: Box::new(expr),
+                                low,
+                                high,
+                                cap,
+                            },
+                        };
+                    } else {
+                        // Regular index expression
+                        let end_span = self.expect(Token::RBracket)?;
+
+                        expr = Expr {
+                            span: Span::with_bytes(
+                                expr.span.start,
+                                end_span.end,
+                                self.file,
+                                expr.span.byte_start,
+                                end_span.byte_end,
+                            ),
+                            kind: ExprKind::Index {
+                                expr: Box::new(expr),
+                                index: low.expect("index expression must have a value"),
+                            },
+                        };
+                    }
                 }
 
                 // Function call without type args: expr(args)
@@ -219,9 +294,31 @@ impl Parser {
                     };
                 }
 
-                // Field access: expr.field
+                // Field access: expr.field or type assertion: expr.(Type)
                 Some(Token::Dot) => {
                     self.advance();
+
+                    // Check for type assertion: expr.(Type)
+                    if self.consume(&Token::LParen) {
+                        let ty = self.parse_type()?;
+                        let end_span = self.expect(Token::RParen)?;
+
+                        expr = Expr {
+                            span: Span::with_bytes(
+                                expr.span.start,
+                                end_span.end,
+                                self.file,
+                                expr.span.byte_start,
+                                end_span.byte_end,
+                            ),
+                            kind: ExprKind::TypeAssert {
+                                expr: Box::new(expr),
+                                ty,
+                            },
+                        };
+                        continue;
+                    }
+
                     let (field, field_span) = match self.advance() {
                         Some((Token::Ident(name), span)) => (name, span),
                         Some((tok, span)) => {
@@ -619,6 +716,11 @@ impl Parser {
 
             Token::Ident(name) => Ok(Expr {
                 kind: ExprKind::Ident(name),
+                span,
+            }),
+
+            Token::Underscore => Ok(Expr {
+                kind: ExprKind::Ident("_".to_string()),
                 span,
             }),
 

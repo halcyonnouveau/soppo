@@ -114,6 +114,40 @@ pub enum Token {
     Not,
     #[token("&")]
     Ampersand,
+    #[token("^")]
+    Caret,
+    #[token("<<")]
+    Shl,
+    #[token(">>")]
+    Shr,
+
+    // Compound assignment operators
+    #[token("+=")]
+    PlusAssign,
+    #[token("-=")]
+    MinusAssign,
+    #[token("*=")]
+    StarAssign,
+    #[token("/=")]
+    SlashAssign,
+    #[token("%=")]
+    PercentAssign,
+    #[token("&=")]
+    AmpersandAssign,
+    #[token("|=")]
+    PipeAssign,
+    #[token("^=")]
+    CaretAssign,
+    #[token("<<=")]
+    ShlAssign,
+    #[token(">>=")]
+    ShrAssign,
+
+    // Increment/decrement
+    #[token("++")]
+    PlusPlus,
+    #[token("--")]
+    MinusMinus,
 
     // Delimiters
     #[token("(")]

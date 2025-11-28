@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use super::Infer;
 use crate::error::{Result, SoppoError};
-use crate::syntax::{EnumVariant, PatternKind, SelectCaseKind, Stmt, StmtKind};
+use crate::syntax::{EnumVariant, ExprKind, PatternKind, SelectCaseKind, Stmt, StmtKind};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
 
@@ -191,6 +191,13 @@ impl Infer {
             }
 
             StmtKind::Assign { target, value } => {
+                // Special case: blank identifier accepts any type
+                if let ExprKind::Ident(name) = &target.kind
+                    && name == "_" {
+                        // Just infer the value type, don't unify
+                        self.infer_expr(value)?;
+                        return Ok(Type::unit());
+                    }
                 let target_ty = self.infer_expr(target)?;
                 let value_ty = self.infer_expr(value)?;
                 self.unify(&target_ty, &value_ty, &stmt.span)?;
@@ -629,6 +636,26 @@ impl Infer {
             }
 
             StmtKind::Expr(expr) => self.infer_expr(expr),
+
+            StmtKind::CompoundAssign {
+                target,
+                op: _,
+                value,
+            } => {
+                // Compound assignment: x += value
+                // Check that target and value types are compatible
+                let target_ty = self.infer_expr(target)?;
+                let value_ty = self.infer_expr(value)?;
+                self.unify(&target_ty, &value_ty, &value.span)?;
+                Ok(Type::unit())
+            }
+
+            StmtKind::IncDec { target, is_inc: _ } => {
+                // Increment/decrement: x++ or x--
+                // Just infer the target type (should be numeric)
+                self.infer_expr(target)?;
+                Ok(Type::unit())
+            }
         }
     }
 }

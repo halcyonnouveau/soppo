@@ -327,6 +327,55 @@ func main() {
     fmt.Println((-unaryNum))
     boolVal := true
     fmt.Println((!boolVal))
+    // === Bitwise operators ===
+    bitwiseA := 10 // 0b1010
+    bitwiseB := 12 // 0b1100
+    andResult := (bitwiseA & bitwiseB) // 8 (0b1000)
+    orResult := (bitwiseA | bitwiseB) // 14 (0b1110)
+    xorResult := (bitwiseA ^ bitwiseB) // 6 (0b0110)
+    shlResult := (bitwiseA << 2) // 40 (10 << 2)
+    shrResult := (bitwiseB >> 1) // 6 (12 >> 1)
+    fmt.Printf("Bitwise: AND=%d OR=%d XOR=%d SHL=%d SHR=%d\n", andResult, orResult, xorResult, shlResult, shrResult)
+    // === Compound assignments ===
+    compoundVal := 10
+    compoundVal += 5 // 15
+    compoundVal -= 3 // 12
+    compoundVal *= 2 // 24
+    compoundVal /= 4 // 6
+    compoundVal %= 4 // 2
+    fmt.Printf("Compound assignments: %d\n", compoundVal)
+    // Bitwise compound assignments
+    bitwiseVal := 15 // 0b1111
+    bitwiseVal &= 10 // 10 (0b1010)
+    bitwiseVal |= 5 // 15 (0b0101)
+    bitwiseVal ^= 3 // 12 (0b0011)
+    bitwiseVal <<= 1 // 24
+    bitwiseVal >>= 2 // 6
+    fmt.Printf("Bitwise compound: %d\n", bitwiseVal)
+    // === Increment/decrement ===
+    incVal := 5
+    incVal++
+    fmt.Printf("After ++: %d\n", incVal) // 6
+    incVal--
+    fmt.Printf("After --: %d\n", incVal) // 5
+    // === Slice expressions ===
+    sliceArr := []int{1, 2, 3, 4, 5}
+    slice1 := sliceArr[1:3] // [2, 3]
+    slice2 := sliceArr[:2] // [1, 2]
+    slice3 := sliceArr[3:] // [4, 5]
+    slice4 := sliceArr[:] // [1, 2, 3, 4, 5]
+    fmt.Printf("Slices: %v, %v, %v, %v\n", slice1, slice2, slice3, slice4)
+    // 3-index slice (with capacity)
+    slice5 := sliceArr[1:3:4] // [2, 3] with cap 3
+    fmt.Printf("3-index slice: %v\n", slice5)
+    // === Type assertions ===
+    // Note: Type assertions are parsed and code-generated correctly.
+    // Full type inference for interfaces requires additional work.
+    // Syntactically demonstrating: someValue.(SomeType)
+    // === Blank identifier ===
+    _ = "ignored value"
+    _, remainder := divide(10, 3)
+    fmt.Printf("Remainder only: %d\n", remainder)
     // === Duration arithmetic (tests const type inheritance + underlying type compatibility) ===
     // time.Millisecond is a const with inherited type Duration (underlying int64)
     // These test that Duration * int works via underlying type resolution

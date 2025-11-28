@@ -5,7 +5,7 @@ mod stmt;
 use std::path::PathBuf;
 
 use crate::error::Result;
-use crate::syntax::{BinOp, Comment, Decl, EnumVariant, File, Generic, TypeDecl};
+use crate::syntax::{AssignOp, BinOp, Comment, Decl, EnumVariant, File, Generic, TypeDecl};
 use crate::types::GlobalCtxt;
 
 /// Code generator for emitting Go code
@@ -345,6 +345,27 @@ impl Codegen {
             BinOp::Ge => ">=",
             BinOp::And => "&&",
             BinOp::Or => "||",
+            BinOp::BitAnd => "&",
+            BinOp::BitOr => "|",
+            BinOp::BitXor => "^",
+            BinOp::Shl => "<<",
+            BinOp::Shr => ">>",
+        }
+    }
+
+    /// Convert compound assignment operator to Go operator
+    pub(crate) fn go_assign_op(&self, op: &AssignOp) -> &str {
+        match op {
+            AssignOp::Add => "+=",
+            AssignOp::Sub => "-=",
+            AssignOp::Mul => "*=",
+            AssignOp::Div => "/=",
+            AssignOp::Mod => "%=",
+            AssignOp::BitAnd => "&=",
+            AssignOp::BitOr => "|=",
+            AssignOp::BitXor => "^=",
+            AssignOp::Shl => "<<=",
+            AssignOp::Shr => ">>=",
         }
     }
 }

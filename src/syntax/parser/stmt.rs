@@ -10,7 +10,7 @@ impl Parser {
         let start_span = self.peek_span();
 
         match self.peek() {
-            Some(Token::Ident(_)) => {
+            Some(Token::Ident(_)) | Some(Token::Underscore) => {
                 // Parse as expression first, then check for assignment operators
                 let first_target = self.parse_expr()?;
 
@@ -144,6 +144,42 @@ impl Parser {
                         kind: StmtKind::Assign {
                             target: first_target,
                             value,
+                        },
+                    })
+                } else if let Some(op) = self.peek_assign_op() {
+                    // Compound assignment: x += value, x -= value, etc.
+                    self.advance(); // consume the compound assignment operator
+                    let value = self.parse_expr()?;
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            first_target.span.start,
+                            value.span.end,
+                            self.file,
+                            first_target.span.byte_start,
+                            value.span.byte_end,
+                        ),
+                        kind: StmtKind::CompoundAssign {
+                            target: first_target,
+                            op,
+                            value,
+                        },
+                    })
+                } else if self.consume(&Token::PlusPlus) {
+                    // Increment: x++
+                    Ok(Stmt {
+                        span: first_target.span,
+                        kind: StmtKind::IncDec {
+                            target: first_target,
+                            is_inc: true,
+                        },
+                    })
+                } else if self.consume(&Token::MinusMinus) {
+                    // Decrement: x--
+                    Ok(Stmt {
+                        span: first_target.span,
+                        kind: StmtKind::IncDec {
+                            target: first_target,
+                            is_inc: false,
                         },
                     })
                 } else if self.consume(&Token::Arrow) {
@@ -754,6 +790,42 @@ impl Parser {
                         kind: StmtKind::Assign {
                             target: expr,
                             value,
+                        },
+                    })
+                } else if let Some(op) = self.peek_assign_op() {
+                    // Compound assignment: *p += value, etc.
+                    self.advance();
+                    let value = self.parse_expr()?;
+                    Ok(Stmt {
+                        span: Span::with_bytes(
+                            expr.span.start,
+                            value.span.end,
+                            self.file,
+                            expr.span.byte_start,
+                            value.span.byte_end,
+                        ),
+                        kind: StmtKind::CompoundAssign {
+                            target: expr,
+                            op,
+                            value,
+                        },
+                    })
+                } else if self.consume(&Token::PlusPlus) {
+                    // Increment: (*p)++
+                    Ok(Stmt {
+                        span: expr.span,
+                        kind: StmtKind::IncDec {
+                            target: expr,
+                            is_inc: true,
+                        },
+                    })
+                } else if self.consume(&Token::MinusMinus) {
+                    // Decrement: (*p)--
+                    Ok(Stmt {
+                        span: expr.span,
+                        kind: StmtKind::IncDec {
+                            target: expr,
+                            is_inc: false,
                         },
                     })
                 } else if self.consume(&Token::Arrow) {

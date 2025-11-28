@@ -159,6 +159,25 @@ impl Codegen {
                 self.emit_stmt_end(stmt_line);
             }
 
+            StmtKind::CompoundAssign { target, op, value } => {
+                self.emit_indent();
+                self.gen_expr(target);
+                self.emit(&format!(" {} ", self.go_assign_op(op)));
+                self.gen_expr(value);
+                self.emit_stmt_end(stmt_line);
+            }
+
+            StmtKind::IncDec { target, is_inc } => {
+                self.emit_indent();
+                self.gen_expr(target);
+                if *is_inc {
+                    self.emit("++");
+                } else {
+                    self.emit("--");
+                }
+                self.emit_stmt_end(stmt_line);
+            }
+
             StmtKind::For { condition, body } => {
                 self.emit_indent();
                 self.emit("for ");

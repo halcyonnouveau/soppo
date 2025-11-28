@@ -294,3 +294,9 @@ unqualified_imports_test.go
 ```
 
 Like seriously... have some respect.
+
+## Epilogue
+
+Since you got this far in my little rant, I guess I can explain the reasoning behind Soppo as a treat for you :3
+
+Go isn't very good. And I don't think just adding new features it will ever make it good. It has a very clear design goals.

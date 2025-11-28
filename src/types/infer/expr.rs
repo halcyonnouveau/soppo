@@ -19,6 +19,10 @@ impl Infer {
             ExprKind::Bool(_) => Ok(Type::simple("bool")),
 
             ExprKind::Ident(name) => {
+                // Handle blank identifier specially - it accepts any type on assignment
+                if name == "_" {
+                    return Ok(Type::unit());
+                }
                 self.lookup_var(name)
                     .ok_or_else(|| SoppoError::UndefinedVariable {
                         name: name.clone(),
@@ -67,6 +71,19 @@ impl Infer {
                         self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
                         self.unify(&right_ty, &Type::simple("bool"), &right.span)?;
                         Ok(Type::simple("bool"))
+                    }
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                        // Bitwise: both must be integer types, result is same type
+                        // For shifts, right side must be integer but can differ from left
+                        if matches!(op, BinOp::Shl | BinOp::Shr) {
+                            // Shift: left type is preserved, right must be integer
+                            // We don't strictly check right is integer here since Go allows it
+                            Ok(self.substitute(left_ty))
+                        } else {
+                            // Bitwise AND/OR/XOR: operands must be same type
+                            self.unify(&left_ty, &right_ty, &right.span)?;
+                            Ok(self.substitute(left_ty))
+                        }
                     }
                 }
             }
@@ -705,6 +722,38 @@ impl Infer {
             }
 
             ExprKind::Block(block) => self.infer_block(block),
+
+            ExprKind::Slice {
+                expr,
+                low,
+                high,
+                cap,
+            } => {
+                // Slicing returns the same type as the sliced expression
+                let expr_ty = self.infer_expr(expr)?;
+
+                // Check that indices are integers
+                if let Some(l) = low {
+                    let l_ty = self.infer_expr(l)?;
+                    self.unify(&l_ty, &Type::simple("int"), &l.span)?;
+                }
+                if let Some(h) = high {
+                    let h_ty = self.infer_expr(h)?;
+                    self.unify(&h_ty, &Type::simple("int"), &h.span)?;
+                }
+                if let Some(c) = cap {
+                    let c_ty = self.infer_expr(c)?;
+                    self.unify(&c_ty, &Type::simple("int"), &c.span)?;
+                }
+
+                Ok(expr_ty)
+            }
+
+            ExprKind::TypeAssert { expr, ty } => {
+                // Type assertion: x.(Type) - infer expression and return the asserted type
+                self.infer_expr(expr)?;
+                Ok(Type::simple(&ty.name))
+            }
         }
     }
 }

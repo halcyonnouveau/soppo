@@ -181,6 +181,17 @@ pub enum StmtKind {
         targets: Vec<Expr>,
         values: Vec<Expr>, // 1 value (multi-return) or N values (one per target)
     },
+    // x += value, x -= value, etc. (compound assignment)
+    CompoundAssign {
+        target: Expr,
+        op: AssignOp,
+        value: Expr,
+    },
+    // x++ or x-- (increment/decrement)
+    IncDec {
+        target: Expr,
+        is_inc: bool, // true for ++, false for --
+    },
     For {
         condition: Expr,
         body: Block,
@@ -257,6 +268,18 @@ pub enum ExprKind {
         expr: Box<Expr>,
         index: Box<Expr>,
     },
+    // Slice expression: arr[low:high] or arr[low:high:cap]
+    Slice {
+        expr: Box<Expr>,
+        low: Option<Box<Expr>>,
+        high: Option<Box<Expr>>,
+        cap: Option<Box<Expr>>, // For 3-index slice arr[low:high:cap]
+    },
+    // Type assertion: x.(Type)
+    TypeAssert {
+        expr: Box<Expr>,
+        ty: Type,
+    },
     ArrayLit {
         ty: Option<Type>, // For [5]int{...} syntax
         elements: Vec<Expr>,
@@ -308,6 +331,27 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+    // Bitwise operators
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+}
+
+/// Compound assignment operator
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssignOp {
+    Add,    // +=
+    Sub,    // -=
+    Mul,    // *=
+    Div,    // /=
+    Mod,    // %=
+    BitAnd, // &=
+    BitOr,  // |=
+    BitXor, // ^=
+    Shl,    // <<=
+    Shr,    // >>=
 }
 
 /// Match arm

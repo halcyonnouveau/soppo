@@ -25,6 +25,12 @@
 - `close` builtin
 - `soppo:enum` markers in generated code
 - Comment preservation (single-line `//` and block `/* */`)
+- Bitwise operators (`&`, `|`, `^`, `<<`, `>>`)
+- Compound assignments (`+=`, `-=`, etc.)
+- Increment/decrement (`++`, `--`)
+- Slice expressions (`arr[1:3]`)
+- Type assertions (`x.(Type)`)
+- Blank identifier (`_ = foo()`)
 
 ## Not Yet Implemented
 
@@ -33,14 +39,6 @@
 - Nil safety (flow-sensitive tracking)
 - Named arguments
 - String interpolation
-
-**Syntax:**
-- Bitwise operators (`&`, `|`, `^`, `<<`, `>>`)
-- Compound assignments (`+=`, `-=`, etc.)
-- Increment/decrement (`++`, `--`)
-- Slice expressions (`arr[1:3]`)
-- Type assertions (`x.(Type)`)
-- Blank identifier (`_ = foo()`)
 
 ## Testing
 

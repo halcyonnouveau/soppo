@@ -113,6 +113,35 @@ impl Codegen {
                 self.emit("]");
             }
 
+            ExprKind::Slice {
+                expr,
+                low,
+                high,
+                cap,
+            } => {
+                self.gen_expr(expr);
+                self.emit("[");
+                if let Some(l) = low {
+                    self.gen_expr(l);
+                }
+                self.emit(":");
+                if let Some(h) = high {
+                    self.gen_expr(h);
+                }
+                if let Some(c) = cap {
+                    self.emit(":");
+                    self.gen_expr(c);
+                }
+                self.emit("]");
+            }
+
+            ExprKind::TypeAssert { expr, ty } => {
+                self.gen_expr(expr);
+                self.emit(".(");
+                self.emit(&ty.name);
+                self.emit(")");
+            }
+
             ExprKind::ArrayLit { ty, elements } => {
                 // Generate []type{elements} for slices or [size]type{elements} for arrays
                 if let Some(ty) = ty {
