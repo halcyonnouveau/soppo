@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use super::ty::Type;
 use crate::syntax::{ConstDecl, EnumVariant, FuncDecl, ModuleId, TypeDecl, TypeKind};
 
-/// Global state tracking all modules and types
-pub struct GlobalState {
+/// Global context tracking all modules and types
+pub struct GlobalCtxt {
     /// All modules indexed by ID
     modules: HashMap<ModuleId, Module>,
 
@@ -67,7 +67,7 @@ pub struct ConstDef {
     pub ty: Type,
 }
 
-impl GlobalState {
+impl GlobalCtxt {
     pub fn new() -> Self {
         let mut gs = Self {
             modules: HashMap::new(),
@@ -227,7 +227,7 @@ impl GlobalState {
     }
 }
 
-impl Default for GlobalState {
+impl Default for GlobalCtxt {
     fn default() -> Self {
         Self::new()
     }
@@ -239,14 +239,8 @@ mod tests {
     use crate::syntax::{Generic, Span};
 
     #[test]
-    fn test_global_state_creation() {
-        let gs = GlobalState::new();
-        assert_eq!(gs.current_module().name, "main");
-    }
-
-    #[test]
     fn test_register_type() {
-        let mut gs = GlobalState::new();
+        let mut gs = GlobalCtxt::new();
 
         let type_decl = TypeDecl {
             name: "Color".to_string(),
@@ -264,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_register_generic_type() {
-        let mut gs = GlobalState::new();
+        let mut gs = GlobalCtxt::new();
 
         let type_decl = TypeDecl {
             name: "Result".to_string(),

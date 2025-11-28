@@ -1,7 +1,7 @@
+mod ctx;
 mod infer;
-mod module;
 mod ty;
 
+pub use ctx::GlobalCtxt;
 pub use infer::Infer;
-pub use module::GlobalState;
 pub use ty::Type;

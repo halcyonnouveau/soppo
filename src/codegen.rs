@@ -2,13 +2,13 @@ use crate::syntax::{
     BinOp, Block, Comment, ConstDecl, Decl, EnumVariant, Expr, ExprKind, File, FuncDecl, Generic,
     Literal, Pattern, PatternKind, SelectCaseKind, Stmt, StmtKind, TypeDecl, TypeKind, UnaryOp,
 };
-use crate::types::GlobalState;
+use crate::types::GlobalCtxt;
 
 /// Code generator for emitting Go code
 pub struct Codegen {
     output: String,
     indent_level: usize,
-    global_state: GlobalState,
+    global_state: GlobalCtxt,
     current_func_return_type: Option<String>,
     comments: Vec<Comment>,
     comment_idx: usize,
@@ -19,14 +19,14 @@ impl Codegen {
         Self {
             output: String::new(),
             indent_level: 0,
-            global_state: GlobalState::new(),
+            global_state: GlobalCtxt::new(),
             current_func_return_type: None,
             comments: Vec::new(),
             comment_idx: 0,
         }
     }
 
-    pub fn with_global_state(global_state: GlobalState) -> Self {
+    pub fn with_global_state(global_state: GlobalCtxt) -> Self {
         Self {
             output: String::new(),
             indent_level: 0,
