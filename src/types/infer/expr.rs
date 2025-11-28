@@ -143,17 +143,78 @@ impl Infer {
                     return Ok(Type::simple(type_name));
                 }
 
-                // Check if this is a type conversion from an imported package: pkg.TypeName(value)
+                // Check if this is a call on an imported package: pkg.Func(args) or pkg.Type(value)
                 if let ExprKind::Field {
                     expr: pkg_expr,
-                    field: type_name,
+                    field: name,
                     ..
                 } = &func.kind
                     && let ExprKind::Ident(pkg_name) = &pkg_expr.kind
                     && self.is_imported_package(pkg_name)
                 {
-                    // Look up the type from the package
-                    if let Some(ty) = self.lookup_go_type(pkg_name, type_name) {
+                    // For Soppo imports, look up the function from GlobalCtxt
+                    if self.is_soppo_import(pkg_name) {
+                        if let Some(func_ty) = self.lookup_soppo_function(pkg_name, name) {
+                            // Found the function - infer args and check against signature
+                            let mut arg_tys = Vec::new();
+                            for arg in args {
+                                arg_tys.push((self.infer_expr(arg)?, arg.span.clone()));
+                            }
+
+                            // Extract param types and return type from func_ty
+                            if let Type::Fun {
+                                args: param_tys,
+                                ret,
+                            } = &func_ty
+                            {
+                                // Check argument count
+                                if arg_tys.len() != param_tys.len() {
+                                    return Err(SoppoError::Type {
+                                        message: format!(
+                                            "Function `{}` has {} arguments, but expected {}",
+                                            name,
+                                            arg_tys.len(),
+                                            param_tys.len()
+                                        ),
+                                        span: func.span.clone(),
+                                    });
+                                }
+
+                                // Check each argument type
+                                for (param_ty, (arg_ty, arg_span)) in
+                                    param_tys.iter().zip(arg_tys.iter())
+                                {
+                                    self.unify(param_ty, arg_ty, arg_span)?;
+                                }
+
+                                return Ok(self.substitute(ret.as_ref().clone()));
+                            }
+                        }
+
+                        // Try type conversion: pkg.Type(value)
+                        if let Some(ty) = self.lookup_soppo_type(pkg_name, name) {
+                            if args.len() != 1 {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "Type conversion requires exactly 1 argument, but got {}",
+                                        args.len()
+                                    ),
+                                    span: expr.span.clone(),
+                                });
+                            }
+                            self.infer_expr(&args[0])?;
+                            return Ok(ty);
+                        }
+
+                        // Not found in Soppo module
+                        return Err(SoppoError::Type {
+                            message: format!("`{}` not found in Soppo module `{}`", name, pkg_name),
+                            span: func.span.clone(),
+                        });
+                    }
+
+                    // Look up the type from a Go package
+                    if let Some(ty) = self.lookup_go_type(pkg_name, name) {
                         // This is a type conversion
                         if args.len() != 1 {
                             return Err(SoppoError::Type {
@@ -271,12 +332,33 @@ impl Infer {
                 field,
                 field_span,
             } => {
-                // Check if this is accessing something from an imported Go package
-                // e.g., fmt.Println, strings.HasPrefix
+                // Check if this is accessing something from an imported package
+                // e.g., fmt.Println, strings.HasPrefix, or helpers.Add (sop: import)
                 if let ExprKind::Ident(name) = &field_expr.kind
                     && self.is_imported_package(name)
                 {
-                    // Try to look up as a function first
+                    // For Soppo imports, look up from GlobalCtxt
+                    if self.is_soppo_import(name) {
+                        // Try to look up as a function first
+                        if let Some(func_ty) = self.lookup_soppo_function(name, field) {
+                            return Ok(func_ty);
+                        }
+                        // Try to look up as a type
+                        if let Some(ty) = self.lookup_soppo_type(name, field) {
+                            return Ok(ty);
+                        }
+                        // Try to look up as a constant
+                        if let Some(ty) = self.lookup_soppo_constant(name, field) {
+                            return Ok(ty);
+                        }
+                        // Not found
+                        return Err(SoppoError::Type {
+                            message: format!("`{}` not found in Soppo module `{}`", field, name),
+                            span: field_span.clone(),
+                        });
+                    }
+
+                    // Go packages: try to look up as a function first
                     if let Some(func_ty) = self.lookup_go_function(name, field) {
                         return Ok(func_ty);
                     }

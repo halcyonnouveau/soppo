@@ -89,6 +89,10 @@ pub struct Infer {
     /// Imported Go packages: short name -> import path
     /// e.g., "fmt" -> "fmt", "strings" -> "strings"
     pub(super) imported_packages: HashMap<String, String>,
+
+    /// Imported Soppo modules: short name -> ModuleId
+    /// e.g., "helpers" -> ModuleId("util/helpers")
+    pub(super) soppo_imports: HashMap<String, ModuleId>,
 }
 
 impl Infer {
@@ -107,6 +111,7 @@ impl Infer {
             go_cache: GoCache::new()?,
             project: None,
             imported_packages: HashMap::new(),
+            soppo_imports: HashMap::new(),
         })
     }
 
@@ -122,6 +127,42 @@ impl Infer {
             go_cache: GoCache::new()?,
             project: Some(project),
             imported_packages: HashMap::new(),
+            soppo_imports: HashMap::new(),
+        })
+    }
+
+    /// Create an Infer with existing GlobalCtxt for multi-file compilation
+    pub fn with_global_state(global_state: GlobalCtxt) -> miette::Result<Self> {
+        Ok(Self {
+            global_state,
+            scopes: vec![HashMap::new()],
+            substitutions: HashMap::new(),
+            next_var: 0,
+            expected_return_types: None,
+            generic_params: HashMap::new(),
+            go_cache: GoCache::new()?,
+            project: None,
+            imported_packages: HashMap::new(),
+            soppo_imports: HashMap::new(),
+        })
+    }
+
+    /// Create an Infer with existing GlobalCtxt and project context
+    pub fn with_global_state_and_project(
+        global_state: GlobalCtxt,
+        project: Project,
+    ) -> miette::Result<Self> {
+        Ok(Self {
+            global_state,
+            scopes: vec![HashMap::new()],
+            substitutions: HashMap::new(),
+            next_var: 0,
+            expected_return_types: None,
+            generic_params: HashMap::new(),
+            go_cache: GoCache::new()?,
+            project: Some(project),
+            imported_packages: HashMap::new(),
+            soppo_imports: HashMap::new(),
         })
     }
 
@@ -132,19 +173,113 @@ impl Infer {
     /// Process imports and add package names to scope
     pub fn process_imports(&mut self, imports: &[Import]) {
         for import in imports {
-            // Extract package name from import path
-            // e.g., "fmt" from "fmt" or "http" from "net/http"
             let import_path = import.path.trim_matches('"');
-            let package_name = import_path.rsplit('/').next().unwrap_or(import_path);
 
-            // Track the import for later lookup
-            self.imported_packages
-                .insert(package_name.to_string(), import_path.to_string());
+            if let Some(sop_path) = import_path.strip_prefix("sop:") {
+                // Soppo module import
+                // Strip "sop:"
 
-            // Add package name to scope with a special "package" type
-            // This allows field access like fmt.Printf to work
-            self.insert_var(package_name.to_string(), Type::simple("_package"));
+                // Use alias if provided, otherwise derive from path
+                let package_name = import
+                    .alias
+                    .as_deref()
+                    .unwrap_or_else(|| sop_path.rsplit('/').next().unwrap_or(sop_path));
+
+                // Track the Soppo import with its ModuleId for cross-package lookups
+                // The sop_path is the module ID (e.g., "util/helpers")
+                self.soppo_imports
+                    .insert(package_name.to_string(), ModuleId::new(sop_path));
+
+                // Also track in imported_packages for `is_imported_package` checks
+                self.imported_packages
+                    .insert(package_name.to_string(), import_path.to_string());
+
+                // Add package name to scope with a special "soppo_package" type
+                self.insert_var(package_name.to_string(), Type::simple("_soppo_package"));
+            } else {
+                // Go package import
+                // Use alias if provided, otherwise derive from path
+                let package_name = import
+                    .alias
+                    .as_deref()
+                    .unwrap_or_else(|| import_path.rsplit('/').next().unwrap_or(import_path));
+
+                // Track the import for later lookup
+                self.imported_packages
+                    .insert(package_name.to_string(), import_path.to_string());
+
+                // Add package name to scope with a special "package" type
+                // This allows field access like fmt.Printf to work
+                self.insert_var(package_name.to_string(), Type::simple("_package"));
+            }
         }
+    }
+
+    /// Check if a package name refers to a Soppo module import
+    pub fn is_soppo_import(&self, package_name: &str) -> bool {
+        self.soppo_imports.contains_key(package_name)
+    }
+
+    /// Get the ModuleId for a Soppo import
+    pub fn get_soppo_module(&self, package_name: &str) -> Option<&ModuleId> {
+        self.soppo_imports.get(package_name)
+    }
+
+    /// Look up a function in an imported Soppo module
+    pub(super) fn lookup_soppo_function(
+        &self,
+        package_name: &str,
+        func_name: &str,
+    ) -> Option<Type> {
+        // Get the ModuleId for this package
+        let module_id = self.soppo_imports.get(package_name)?;
+
+        // Look up the function in GlobalCtxt
+        let func_def = self.global_state.lookup_function_in(module_id, func_name)?;
+
+        // Convert FuncDef to Type::Fun
+        let param_types: Vec<Type> = func_def.params.iter().map(|(_, ty)| ty.clone()).collect();
+
+        let return_type = if func_def.return_types.is_empty() {
+            Type::unit()
+        } else if func_def.return_types.len() == 1 {
+            func_def.return_types[0].clone()
+        } else {
+            // Multiple return types - create a tuple-like type
+            // For now, just use the first one (Go-style multi-return handling is TODO)
+            func_def.return_types[0].clone()
+        };
+
+        Some(Type::fun(param_types, return_type))
+    }
+
+    /// Look up a type in an imported Soppo module
+    pub(super) fn lookup_soppo_type(&self, package_name: &str, type_name: &str) -> Option<Type> {
+        // Get the ModuleId for this package
+        let module_id = self.soppo_imports.get(package_name)?;
+
+        // Look up the type in GlobalCtxt
+        let type_def = self.global_state.lookup_type_in(module_id, type_name)?;
+
+        // Return the type as a simple type constructor
+        Some(Type::simple(&type_def.name))
+    }
+
+    /// Look up a constant in an imported Soppo module
+    pub(super) fn lookup_soppo_constant(
+        &self,
+        package_name: &str,
+        const_name: &str,
+    ) -> Option<Type> {
+        // Get the ModuleId for this package
+        let module_id = self.soppo_imports.get(package_name)?;
+
+        // Look up the constant in GlobalCtxt
+        let const_def = self
+            .global_state
+            .lookup_constant_in(module_id, const_name)?;
+
+        Some(const_def.ty.clone())
     }
 
     /// Look up a function in an imported Go package

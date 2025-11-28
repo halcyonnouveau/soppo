@@ -13,6 +13,7 @@ pub struct File {
 /// Import declaration
 #[derive(Debug, Clone, PartialEq)]
 pub struct Import {
+    pub alias: Option<String>, // Optional alias: myPkg "path/to/pkg"
     pub path: String,
     pub span: Span,
 }

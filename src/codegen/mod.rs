@@ -2,6 +2,7 @@ mod decl;
 mod expr;
 mod stmt;
 
+use crate::error::{Result, SoppoError};
 use crate::syntax::{BinOp, Comment, Decl, EnumVariant, File, Generic, TypeDecl};
 use crate::types::GlobalCtxt;
 
@@ -13,6 +14,10 @@ pub struct Codegen {
     pub(crate) current_func_return_type: Option<String>,
     comments: Vec<Comment>,
     comment_idx: usize,
+    /// Go module path for resolving sop: imports (e.g., "github.com/user/project")
+    module_path: Option<String>,
+    /// Output directory relative to project root (e.g., "gen")
+    output_dir: Option<String>,
 }
 
 impl Codegen {
@@ -24,6 +29,8 @@ impl Codegen {
             current_func_return_type: None,
             comments: Vec::new(),
             comment_idx: 0,
+            module_path: None,
+            output_dir: None,
         }
     }
 
@@ -35,6 +42,26 @@ impl Codegen {
             current_func_return_type: None,
             comments: Vec::new(),
             comment_idx: 0,
+            module_path: None,
+            output_dir: None,
+        }
+    }
+
+    /// Create codegen with module info for resolving sop: imports
+    pub fn with_module_info(
+        global_state: GlobalCtxt,
+        module_path: String,
+        output_dir: Option<String>,
+    ) -> Self {
+        Self {
+            output: String::new(),
+            indent_level: 0,
+            global_state,
+            current_func_return_type: None,
+            comments: Vec::new(),
+            comment_idx: 0,
+            module_path: Some(module_path),
+            output_dir,
         }
     }
 
@@ -204,7 +231,7 @@ impl Codegen {
     }
 
     /// Generate code for an entire file
-    pub fn gen_file(&mut self, file: &File) {
+    pub fn gen_file(&mut self, file: &File) -> Result<()> {
         // Set up comments for emission
         self.set_comments(file.comments.clone());
 
@@ -216,7 +243,39 @@ impl Codegen {
         if !file.imports.is_empty() {
             for import in &file.imports {
                 self.emit_comments_before(import.span.byte_start, import.span.start.line);
-                self.emit_line(&format!("import \"{}\"", import.path));
+
+                // Transform sop: imports to full Go import paths
+                // Like Go, sop: imports are package-based (directory-based):
+                // sop:mathutil -> module/gen/mathutil
+                // sop:util/helpers -> module/gen/util/helpers
+                let go_path = if import.path.starts_with("sop:") {
+                    let sop_path = &import.path[4..]; // Strip "sop:"
+
+                    // Build full Go import path: {module_path}/{output_dir}/{sop_path}
+                    match (&self.module_path, &self.output_dir) {
+                        (Some(module), Some(out_dir)) => {
+                            format!("{}/{}/{}", module, out_dir, sop_path)
+                        }
+                        (Some(module), None) => {
+                            format!("{}/{}", module, sop_path)
+                        }
+                        (None, _) => {
+                            return Err(SoppoError::MissingModuleContext {
+                                import_path: import.path.clone(),
+                                span: import.span.clone(),
+                            });
+                        }
+                    }
+                } else {
+                    import.path.clone()
+                };
+
+                // Generate with alias if present
+                if let Some(alias) = &import.alias {
+                    self.emit_line(&format!("import {} \"{}\"", alias, go_path));
+                } else {
+                    self.emit_line(&format!("import \"{}\"", go_path));
+                }
             }
             self.emit_line("");
         }
@@ -247,6 +306,7 @@ impl Codegen {
 
         // Emit any remaining comments at the end
         self.emit_remaining_comments();
+        Ok(())
     }
 
     /// Convert Soppo type to Go type

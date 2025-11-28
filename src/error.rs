@@ -55,6 +55,17 @@ pub enum SoppoError {
         #[label("missing variants: {}", missing.join(", "))]
         span: Span,
     },
+
+    #[error("Cannot resolve sop: import without module context")]
+    #[diagnostic(
+        code(soppo::codegen),
+        help("Run `sop build` from a directory containing go.mod, or specify files explicitly")
+    )]
+    MissingModuleContext {
+        import_path: String,
+        #[label("sop: imports require a go.mod project")]
+        span: Span,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, SoppoError>;

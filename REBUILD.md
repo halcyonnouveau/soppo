@@ -42,11 +42,6 @@
 - Type assertions (`x.(Type)`)
 - Blank identifier (`_ = foo()`)
 
-**Optimisations:**
-- Type check runs one file at time - when moving on to a new file, all information on previous files is lost. this seems inefficient to me
-  - https://okmij.org/ftp/ML/generalization.html
-  - https://mukulrathi.com/create-your-own-programming-language/intro-to-type-checking/
-
 ## Testing
 
 ```bash

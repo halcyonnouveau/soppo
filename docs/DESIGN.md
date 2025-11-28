@@ -23,31 +23,31 @@ Go imports are resolved by parsing Go source files with tree-sitter to extract t
 
 ```go
 // Unit variants
-type Color enum { 
-	Red 
+type Color enum {
+	Red
 	Green
-	Blue 
+	Blue
 }
 
 // Data variants
-type Result enum { 
-	Ok int 
-	Err string 
+type Result enum {
+	Ok int
+	Err string
 }
 
 // Struct variants
 type Shape enum {
     Circle struct { radius float64 }
-    Rectangle struct { 
+    Rectangle struct {
     	width float64
-    	height float64 
+    	height float64
     }
 }
 
 // Generic enums
-type Option[T any] enum { 
+type Option[T any] enum {
 	Some T
-	None 
+	None
 }
 ```
 
@@ -164,13 +164,28 @@ if user != nil {
 }
 ```
 
-## Go Interop
-
-Standard Go imports work directly:
+## Imports
 
 ```go
+// Single imports
 import "fmt"
-import "strings"
+import "sop:util/helpers"
+
+// Grouped imports
+import (
+    "fmt"
+    "net/http"
+    "sop:util/helpers"
+    myHelpers "sop:util/helpers"  // aliased
+)
 ```
 
-Types are extracted from Go source via tree-sitter.
+- Go packages: `"fmt"`, `"net/http"` - standard Go import paths
+- Soppo modules: `"sop:path"` - imports from other `.sop` files in your project
+- Aliasing: `alias "path"` - works for both Go and Soppo imports
+
+Soppo module paths follow Go conventions (relative to module root). `sop:util/helpers` imports from `util/helpers.sop`.
+
+**Note**: `sop:` imports only work for local project files. To use external Soppo libraries, import their generated Go code as a regular Go import.
+
+Types from Go packages are extracted via tree-sitter parsing.

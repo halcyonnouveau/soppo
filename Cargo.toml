@@ -19,3 +19,4 @@ tree-sitter-go = "0.25"
 
 [dev-dependencies]
 insta = "1.44"
+tempfile = "3.23"

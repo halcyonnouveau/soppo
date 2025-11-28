@@ -544,6 +544,49 @@ impl Parser {
         })
     }
 
+    /// Parse a single import: "path" or alias "path"
+    fn parse_single_import(&mut self) -> Result<Import> {
+        match self.advance() {
+            Some((Token::String(path), span)) => {
+                // Simple import: "path"
+                Ok(Import {
+                    alias: None,
+                    path,
+                    span,
+                })
+            }
+            Some((Token::Ident(alias), start_span)) => {
+                // Aliased import: alias "path"
+                match self.advance() {
+                    Some((Token::String(path), _end_span)) => Ok(Import {
+                        alias: Some(alias),
+                        path,
+                        span: start_span,
+                    }),
+                    Some((tok, span)) => Err(SoppoError::Parse {
+                        message: format!(
+                            "Expected import path string after alias, found {:?}",
+                            tok
+                        ),
+                        span,
+                    }),
+                    None => Err(SoppoError::Parse {
+                        message: "Expected import path string after alias".to_string(),
+                        span: start_span,
+                    }),
+                }
+            }
+            Some((tok, span)) => Err(SoppoError::Parse {
+                message: format!("Expected import path or alias, found {:?}", tok),
+                span,
+            }),
+            None => Err(SoppoError::Parse {
+                message: "Expected import path".to_string(),
+                span: Span::dummy(),
+            }),
+        }
+    }
+
     /// Parse a complete file
     pub fn parse_file(&mut self) -> Result<File> {
         // Skip leading whitespace/newlines
@@ -576,24 +619,19 @@ impl Parser {
         // Parse imports
         let mut imports = Vec::new();
         while self.consume(&Token::Import) {
-            match self.advance() {
-                Some((Token::String(path), span)) => {
-                    imports.push(Import { path, span });
-                    // Skip terminators after import
+            if self.consume(&Token::LParen) {
+                // Grouped imports: import ( ... )
+                self.skip_terminators();
+                while self.peek() != Some(&Token::RParen) {
+                    imports.push(self.parse_single_import()?);
                     self.skip_terminators();
                 }
-                Some((tok, span)) => {
-                    return Err(SoppoError::Parse {
-                        message: format!("Expected import path string, found {:?}", tok),
-                        span,
-                    });
-                }
-                None => {
-                    return Err(SoppoError::Parse {
-                        message: "Expected import path".to_string(),
-                        span: Span::dummy(),
-                    });
-                }
+                self.expect(Token::RParen)?;
+                self.skip_terminators();
+            } else {
+                // Single import: import "path" or import alias "path"
+                imports.push(self.parse_single_import()?);
+                self.skip_terminators();
             }
         }
 
@@ -723,5 +761,67 @@ mod tests {
 
         assert_eq!(func.name, "add");
         assert_eq!(func.body.stmts.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_grouped_imports() {
+        let source = r#"
+            import (
+                "fmt"
+                "net/http"
+            )
+            func main() {}
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        assert_eq!(file.imports.len(), 2);
+        assert_eq!(file.imports[0].path, "fmt");
+        assert_eq!(file.imports[0].alias, None);
+        assert_eq!(file.imports[1].path, "net/http");
+        assert_eq!(file.imports[1].alias, None);
+    }
+
+    #[test]
+    fn test_parse_aliased_imports() {
+        let source = r#"
+            import (
+                "fmt"
+                myHttp "net/http"
+                "sop:util/helpers"
+                h "sop:util/helpers"
+            )
+            func main() {}
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        assert_eq!(file.imports.len(), 4);
+
+        assert_eq!(file.imports[0].path, "fmt");
+        assert_eq!(file.imports[0].alias, None);
+
+        assert_eq!(file.imports[1].path, "net/http");
+        assert_eq!(file.imports[1].alias, Some("myHttp".to_string()));
+
+        assert_eq!(file.imports[2].path, "sop:util/helpers");
+        assert_eq!(file.imports[2].alias, None);
+
+        assert_eq!(file.imports[3].path, "sop:util/helpers");
+        assert_eq!(file.imports[3].alias, Some("h".to_string()));
+    }
+
+    #[test]
+    fn test_parse_single_aliased_import() {
+        let source = r#"
+            import myFmt "fmt"
+            func main() {}
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        assert_eq!(file.imports.len(), 1);
+        assert_eq!(file.imports[0].path, "fmt");
+        assert_eq!(file.imports[0].alias, Some("myFmt".to_string()));
     }
 }

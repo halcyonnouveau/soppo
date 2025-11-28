@@ -4,6 +4,7 @@ use super::ty::Type;
 use crate::syntax::{ConstDecl, EnumVariant, FuncDecl, ModuleId, TypeDecl, TypeKind};
 
 /// Global context tracking all modules and types
+#[derive(Debug, Clone)]
 pub struct GlobalCtxt {
     /// All modules indexed by ID
     modules: HashMap<ModuleId, Module>,
@@ -13,6 +14,7 @@ pub struct GlobalCtxt {
 }
 
 /// A module containing type, function, and constant definitions
+#[derive(Debug, Clone)]
 pub struct Module {
     pub id: ModuleId,
     pub name: String,

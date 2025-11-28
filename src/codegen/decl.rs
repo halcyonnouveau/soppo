@@ -418,7 +418,7 @@ mod tests {
         let file = parser.parse_file().unwrap();
 
         let mut codegen = Codegen::new();
-        codegen.gen_file(&file);
+        codegen.gen_file(&file).unwrap();
 
         let output = codegen.output();
         assert!(output.contains("package main"));
