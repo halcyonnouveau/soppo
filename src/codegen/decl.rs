@@ -1,0 +1,428 @@
+use super::Codegen;
+use crate::syntax::{
+    Block, ConstDecl, EnumVariant, FuncDecl, Literal, Pattern, PatternKind, TypeDecl, TypeKind,
+};
+
+impl Codegen {
+    /// Generate a const declaration
+    pub(crate) fn gen_const_decl(&mut self, const_decl: &ConstDecl) {
+        if let Some(ty) = &const_decl.ty {
+            // const X type = value
+            self.emit(&format!(
+                "const {} {} = ",
+                const_decl.name,
+                self.go_type(&ty.name)
+            ));
+        } else {
+            // const X = value (type inference)
+            self.emit(&format!("const {} = ", const_decl.name));
+        }
+        self.gen_expr(&const_decl.value);
+        self.emit("\n");
+    }
+
+    /// Generate a type declaration (enum or struct)
+    pub(crate) fn gen_type_decl(&mut self, type_decl: &TypeDecl) {
+        match &type_decl.kind {
+            TypeKind::Alias { target } => {
+                // Type alias: type Foo = Bar or type Foo int
+                self.emit_line(&format!(
+                    "type {} {}",
+                    type_decl.name,
+                    self.go_type(&target.name)
+                ));
+            }
+
+            TypeKind::Enum { variants } => {
+                // Generate the interface with generics if present
+                let generic_params = self.format_generic_brackets(&type_decl.generics);
+
+                self.emit_soppo_enum_marker(type_decl, variants);
+                self.emit_line(&format!(
+                    "type {}{} interface {{",
+                    type_decl.name, generic_params
+                ));
+                self.indent();
+                self.emit_line(&format!("is{}()", type_decl.name));
+                self.dedent();
+                self.emit_line("}");
+                self.emit_line("");
+
+                // Generate each variant as a type with namespaced name (EnumName_VariantName)
+                for variant in variants {
+                    match variant {
+                        EnumVariant::Unit { name, .. } => {
+                            // Unit variant: empty struct with generics if present
+                            let full_name = format!("{}_{}", type_decl.name, name);
+                            let generic_params = self.format_generic_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
+
+                            self.emit_line(&format!(
+                                "type {}{} struct {{}}",
+                                full_name, generic_params
+                            ));
+                            self.emit_line(&format!(
+                                "func ({}{}) is{}() {{}}",
+                                full_name, generic_names, type_decl.name
+                            ));
+                            self.emit_line(&format!(
+                                "func ({}{}) String() string {{ return \"{}\" }}",
+                                full_name, generic_names, name
+                            ));
+                            self.emit_line("");
+                        }
+                        EnumVariant::Single { name, ty, .. } => {
+                            // Single value variant: struct with Value field and generics if present
+                            let full_name = format!("{}_{}", type_decl.name, name);
+                            let generic_params = self.format_generic_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
+
+                            self.emit_line(&format!(
+                                "type {}{} struct {{",
+                                full_name, generic_params
+                            ));
+                            self.indent();
+                            self.emit_line(&format!("Value {}", self.go_type(&ty.name)));
+                            self.dedent();
+                            self.emit_line("}");
+                            self.emit_line(&format!(
+                                "func ({}{}) is{}() {{}}",
+                                full_name, generic_names, type_decl.name
+                            ));
+                            self.emit_line("");
+                        }
+                        EnumVariant::Struct { name, fields, .. } => {
+                            // Struct variant: struct with all fields and generics if present
+                            let full_name = format!("{}_{}", type_decl.name, name);
+                            let generic_params = self.format_generic_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
+
+                            self.emit_line(&format!(
+                                "type {}{} struct {{",
+                                full_name, generic_params
+                            ));
+                            self.indent();
+                            for field in fields {
+                                self.emit_line(&format!(
+                                    "{} {}",
+                                    field.name,
+                                    self.go_type(&field.ty.name)
+                                ));
+                            }
+                            self.dedent();
+                            self.emit_line("}");
+                            self.emit_line(&format!(
+                                "func ({}{}) is{}() {{}}",
+                                full_name, generic_names, type_decl.name
+                            ));
+                            self.emit_line("");
+                        }
+                    }
+                }
+
+                // Generate constructors for unit variants and functions for variants with data
+                let unit_variants: Vec<_> = variants
+                    .iter()
+                    .filter(|v| matches!(v, EnumVariant::Unit { .. }))
+                    .collect();
+
+                if !unit_variants.is_empty() && type_decl.generics.is_empty() {
+                    // Only generate var block for non-generic unit variants
+                    // Var names don't use underscore (to avoid collision with type names)
+                    self.emit_line("var (");
+                    self.indent();
+                    for variant in unit_variants {
+                        if let EnumVariant::Unit { name, .. } = variant {
+                            let type_name = format!("{}_{}", type_decl.name, name);
+                            let var_name = format!("{}{}", type_decl.name, name);
+                            self.emit_line(&format!(
+                                "{} {} = {}{{}}",
+                                var_name, type_decl.name, type_name
+                            ));
+                        }
+                    }
+                    self.dedent();
+                    self.emit_line(")");
+                }
+
+                // Generate constructor functions for variants with data
+                for variant in variants {
+                    match variant {
+                        EnumVariant::Single { name, ty, .. } => {
+                            // Generate: func MyResultOk[T any, E any](value T) MyResult[T, E] { return MyResult_Ok[T, E]{Value: value} }
+                            // Function name without underscore, type name with underscore
+                            let func_name = format!("{}{}", type_decl.name, name);
+                            let type_name = format!("{}_{}", type_decl.name, name);
+                            let generic_params = self.format_generic_brackets(&type_decl.generics);
+                            let generic_names =
+                                self.format_generic_name_brackets(&type_decl.generics);
+
+                            self.emit_line(&format!(
+                                "func {}{}(value {}) {}{} {{",
+                                func_name,
+                                generic_params,
+                                self.go_type(&ty.name),
+                                type_decl.name,
+                                generic_names
+                            ));
+                            self.indent();
+                            self.emit_line(&format!(
+                                "return {}{}{{Value: value}}",
+                                type_name, generic_names
+                            ));
+                            self.dedent();
+                            self.emit_line("}");
+                        }
+                        EnumVariant::Struct { .. } => {
+                            // No constructor for struct variants - use struct literal syntax directly
+                        }
+                        EnumVariant::Unit { name, .. } => {
+                            // For generic unit variants, generate a constructor function
+                            // Function name without underscore, type name with underscore
+                            if !type_decl.generics.is_empty() {
+                                let func_name = format!("{}{}", type_decl.name, name);
+                                let type_name = format!("{}_{}", type_decl.name, name);
+                                let generic_params =
+                                    self.format_generic_brackets(&type_decl.generics);
+                                let generic_names =
+                                    self.format_generic_name_brackets(&type_decl.generics);
+
+                                self.emit_line(&format!(
+                                    "func {}{}() {}{} {{",
+                                    func_name, generic_params, type_decl.name, generic_names
+                                ));
+                                self.indent();
+                                self.emit_line(&format!(
+                                    "return {}{}{{}}",
+                                    type_name, generic_names
+                                ));
+                                self.dedent();
+                                self.emit_line("}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            TypeKind::Struct { fields } => {
+                // Generate struct type with generics if present
+                let generic_params = self.format_generic_brackets(&type_decl.generics);
+
+                self.emit_line(&format!(
+                    "type {}{} struct {{",
+                    type_decl.name, generic_params
+                ));
+                self.indent();
+                for field in fields {
+                    self.emit_line(&format!("{} {}", field.name, self.go_type(&field.ty.name)));
+                }
+                self.dedent();
+                self.emit_line("}");
+            }
+
+            TypeKind::Interface { methods } => {
+                // Generate Go interface directly
+                let generic_params = self.format_generic_brackets(&type_decl.generics);
+
+                self.emit_line(&format!(
+                    "type {}{} interface {{",
+                    type_decl.name, generic_params
+                ));
+                self.indent();
+                for method in methods {
+                    self.emit_indent();
+                    self.emit(&format!("{}(", method.name));
+
+                    // Parameters
+                    for (i, param) in method.params.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(&format!("{} {}", param.name, self.go_type(&param.ty.name)));
+                    }
+
+                    self.emit(")");
+
+                    // Return types
+                    if !method.returns.is_empty() {
+                        if method.returns.len() == 1 {
+                            self.emit(&format!(" {}", self.go_type(&method.returns[0].name)));
+                        } else {
+                            self.emit(" (");
+                            for (i, ty) in method.returns.iter().enumerate() {
+                                if i > 0 {
+                                    self.emit(", ");
+                                }
+                                self.emit(self.go_type(&ty.name));
+                            }
+                            self.emit(")");
+                        }
+                    }
+
+                    self.emit("\n");
+                }
+                self.dedent();
+                self.emit_line("}");
+            }
+        }
+    }
+
+    /// Generate a function declaration
+    pub(crate) fn gen_func_decl(&mut self, func: &FuncDecl) {
+        // Function signature with optional receiver
+        self.emit("func ");
+
+        if let Some(receiver) = &func.receiver {
+            self.emit(&format!(
+                "({} {}) ",
+                receiver.name,
+                self.go_type(&receiver.ty.name)
+            ));
+        }
+
+        self.emit(&func.name);
+
+        // Generic parameters
+        let generic_params = self.format_generic_brackets(&func.generics);
+        if !generic_params.is_empty() {
+            self.emit(&generic_params);
+        }
+
+        self.emit("(");
+
+        // Parameters
+        for (i, param) in func.params.iter().enumerate() {
+            if i > 0 {
+                self.emit(", ");
+            }
+            self.emit(&format!("{} {}", param.name, self.go_type(&param.ty.name)));
+        }
+
+        self.emit(")");
+
+        // Return type(s)
+        if !func.return_types.is_empty() {
+            if func.return_types.len() == 1 {
+                // Single return type
+                let go_type = self.go_type(&func.return_types[0].name).to_string();
+                self.emit(&format!(" {}", go_type));
+                self.current_func_return_type = Some(go_type);
+            } else {
+                // Multi-value return: (type1, type2, ...)
+                let types: Vec<String> = func
+                    .return_types
+                    .iter()
+                    .map(|t| self.go_type(&t.name).to_string())
+                    .collect();
+                self.emit(&format!(" ({})", types.join(", ")));
+                self.current_func_return_type = Some(types.join(", "));
+            }
+        } else {
+            self.current_func_return_type = None;
+        }
+
+        self.emit(" ");
+
+        // Body
+        self.gen_block(&func.body);
+
+        // Clear return type after function is done
+        self.current_func_return_type = None;
+
+        self.output.push('\n');
+    }
+
+    /// Generate a block
+    pub(crate) fn gen_block(&mut self, block: &Block) {
+        self.emit("{\n");
+        self.indent();
+
+        for stmt in &block.stmts {
+            self.gen_stmt(stmt);
+        }
+
+        self.dedent();
+        self.emit_indent();
+        self.emit("}");
+    }
+
+    /// Generate a pattern for match arms
+    pub(crate) fn gen_pattern(&mut self, pattern: &Pattern) {
+        match &pattern.kind {
+            PatternKind::Variant(name) => {
+                // Convert qualified name (Color.Red) to namespaced (Color_Red)
+                let full_name = name.replace('.', "_");
+                self.emit(&full_name);
+            }
+            PatternKind::Literal(lit) => match lit {
+                Literal::Integer(n) => self.emit(&n.to_string()),
+                Literal::String(s) => self.emit(&format!("\"{}\"", s)),
+                Literal::Bool(b) => self.emit(&b.to_string()),
+            },
+            PatternKind::Destructor { name, .. } => {
+                // Convert qualified name (MyResult.Ok) to namespaced (MyResult_Ok)
+                let full_name = name.replace('.', "_");
+                self.emit(&full_name);
+            }
+            PatternKind::StructDestructor { name, .. } => {
+                // Convert qualified name (Shape.Circle) to namespaced (Shape_Circle)
+                let full_name = name.replace('.', "_");
+                self.emit(&full_name);
+            }
+            PatternKind::Guard(expr) => {
+                // For expression-less match, emit the boolean expression
+                self.gen_expr(expr.as_ref());
+            }
+            PatternKind::Default => {
+                // Default is handled separately, shouldn't reach here
+                self.emit("default");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::{FileId, Parser};
+
+    #[test]
+    fn test_gen_simple_function() {
+        let source = "func add(x int, y int) int { return x + y }";
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser.parse_func_decl().unwrap();
+
+        let mut codegen = Codegen::new();
+        codegen.gen_func_decl(&func);
+
+        let output = codegen.output();
+        assert!(output.contains("func add(x int, y int) int"));
+        assert!(output.contains("return (x + y)"));
+    }
+
+    #[test]
+    fn test_gen_complete_file() {
+        let source = r#"
+            func add(x int, y int) int {
+                return x + y
+            }
+
+            func main() int {
+                return add(1, 2)
+            }
+        "#;
+        let mut parser = Parser::new(source, FileId(0));
+        let file = parser.parse_file().unwrap();
+
+        let mut codegen = Codegen::new();
+        codegen.gen_file(&file);
+
+        let output = codegen.output();
+        assert!(output.contains("package main"));
+        assert!(output.contains("func add(x int, y int) int"));
+        assert!(output.contains("func main() int"));
+    }
+}
