@@ -221,7 +221,6 @@ impl<'a> Lexer<'a> {
                         span,
                         is_block: false,
                     });
-                    // Continue to next token
                 }
                 Token::BlockComment(text) => {
                     self.comments.push(Comment {
@@ -229,7 +228,6 @@ impl<'a> Lexer<'a> {
                         span,
                         is_block: true,
                     });
-                    // Continue to next token
                 }
                 token => return Some((token, span)),
             }
