@@ -171,24 +171,35 @@ impl Infer {
     }
 
     /// Process imports and add package names to scope
+    ///
+    /// Imports are classified as Soppo or Go based on whether the import path:
+    /// 1. Starts with the project's module path
+    /// 2. Corresponds to a local directory with .sop files
     pub fn process_imports(&mut self, imports: &[Import]) {
         for import in imports {
             let import_path = import.path.trim_matches('"');
 
-            if let Some(sop_path) = import_path.strip_prefix("sop:") {
-                // Soppo module import
-                // Strip "sop:"
+            // Check if this is a local Soppo package
+            let is_soppo = self.project.as_ref().is_some_and(|project| {
+                crate::deps::is_soppo_import(import_path, &project.module_path, &project.root)
+            });
+
+            if is_soppo {
+                let project = self.project.as_ref().unwrap();
+                // Get the local path portion (e.g., "helpers" from "github.com/user/project/helpers")
+                let local_path =
+                    crate::deps::get_local_package_path(import_path, &project.module_path).unwrap();
 
                 // Use alias if provided, otherwise derive from path
                 let package_name = import
                     .alias
                     .as_deref()
-                    .unwrap_or_else(|| sop_path.rsplit('/').next().unwrap_or(sop_path));
+                    .unwrap_or_else(|| local_path.rsplit('/').next().unwrap_or(local_path));
 
                 // Track the Soppo import with its ModuleId for cross-package lookups
-                // The sop_path is the module ID (e.g., "util/helpers")
+                // The local_path is the module ID (e.g., "helpers" or "util/helpers")
                 self.soppo_imports
-                    .insert(package_name.to_string(), ModuleId::new(sop_path));
+                    .insert(package_name.to_string(), ModuleId::new(local_path));
 
                 // Also track in imported_packages for `is_imported_package` checks
                 self.imported_packages

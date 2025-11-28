@@ -34,7 +34,7 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
     }
 
     // Build dependency graph and topologically sort
-    let dep_graph = DepGraph::build(&sources, &project.root)?;
+    let dep_graph = DepGraph::build(&sources, &project.root, &project.module_path)?;
     let ordered_sources = dep_graph.topological_sort()?;
 
     // Compile files in dependency order
@@ -69,6 +69,7 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
             &project.module_path,
             output_dir_relative.as_deref(),
             module_id,
+            &project.root,
         )?;
 
         // Compute relative output path for the result
@@ -144,6 +145,7 @@ pub fn compile_with_context(
     module_path: &str,
     output_dir: Option<&str>,
     module_id: &str,
+    project_root: &Path,
 ) -> Result<(String, GlobalCtxt)> {
     let mut parser = Parser::new(source, FileId(0));
     let file = parser.parse_file().map_err(|e| {
@@ -152,7 +154,13 @@ pub fn compile_with_context(
 
     global_ctxt.set_current_module(ModuleId::new(module_id));
 
-    let mut infer = Infer::with_global_state(global_ctxt)?;
+    // Create project context for import resolution
+    let project = Project {
+        root: project_root.to_path_buf(),
+        module_path: module_path.to_string(),
+    };
+
+    let mut infer = Infer::with_global_state_and_project(global_ctxt, project)?;
     infer.process_imports(&file.imports);
 
     for decl in &file.decls {
@@ -164,6 +172,7 @@ pub fn compile_with_context(
         global_state.clone(),
         module_path.to_string(),
         output_dir.map(String::from),
+        project_root.to_path_buf(),
     );
     codegen.gen_file(&file).map_err(|e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))

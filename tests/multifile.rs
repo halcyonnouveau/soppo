@@ -79,7 +79,7 @@ fn build_test_project(
 fn test_simple_sop_import() {
     // Each package must be in its own directory for Go to find it
     // helpers/lib.sop with package helpers → gen/helpers/lib.go
-    // Import: sop:helpers → Go import: module/gen/helpers (directory)
+    // Import: module/helpers → Go import: module/gen/helpers (directory)
     let files = &[
         (
             "helpers/lib.sop",
@@ -96,7 +96,7 @@ func Add(a int, b int) int {
 
 import (
     "fmt"
-    "sop:helpers"
+    "github.com/test/myproject/helpers"
 )
 
 func main() {
@@ -140,7 +140,7 @@ func Multiply(a int, b int) int {
 
 import (
     "fmt"
-    u "sop:mathutil"
+    u "github.com/test/aliased/mathutil"
 )
 
 func main() {
@@ -180,7 +180,7 @@ func GetA() int {
             "pkgb/lib.sop",
             r#"package pkgb
 
-import "sop:pkga"
+import "github.com/test/chain/pkga"
 
 func GetB() int {
     return pkga.GetA() + 1
@@ -193,7 +193,7 @@ func GetB() int {
 
 import (
     "fmt"
-    "sop:pkgb"
+    "github.com/test/chain/pkgb"
 )
 
 func main() {
@@ -225,7 +225,7 @@ fn test_circular_dependency_fails() {
             "pkga/lib.sop",
             r#"package pkga
 
-import "sop:pkgb"
+import "github.com/test/circular/pkgb"
 
 func GetA() int {
     return pkgb.GetB()
@@ -236,7 +236,7 @@ func GetA() int {
             "pkgb/lib.sop",
             r#"package pkgb
 
-import "sop:pkga"
+import "github.com/test/circular/pkga"
 
 func GetB() int {
     return pkga.GetA()
@@ -254,21 +254,32 @@ func GetB() int {
 }
 
 #[test]
-fn test_missing_sop_import_fails() {
+fn test_missing_local_import_treated_as_go() {
+    // When importing a local path that doesn't have .sop files,
+    // it's treated as a Go import and will fail during Go build
     let files = &[(
         "cmd/main.sop",
         r#"package main
 
-import "sop:nonexistent"
+import "github.com/test/missing/nonexistent"
 
 func main() {}
 "#,
     )];
 
     let result = build_test_project("github.com/test/missing", files);
-    assert!(result.is_err(), "Missing import should fail");
+    // Should fail during Go build (treated as a Go import)
     assert!(
-        result.unwrap_err().contains("not found"),
-        "Error should mention import not found"
+        result.is_err(),
+        "Missing Go import should fail during go build"
+    );
+    let err = result.unwrap_err();
+    // Go will report it can't find the package
+    assert!(
+        err.contains("go build")
+            || err.contains("cannot find")
+            || err.contains("no required module"),
+        "Error should be from Go build.\nGot:\n{}",
+        err
     );
 }

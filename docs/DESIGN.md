@@ -169,23 +169,31 @@ if user != nil {
 ```go
 // Single imports
 import "fmt"
-import "sop:util/helpers"
+import "github.com/user/project/helpers"
 
 // Grouped imports
 import (
     "fmt"
     "net/http"
-    "sop:util/helpers"
-    myHelpers "sop:util/helpers"  // aliased
+    "github.com/user/project/util/helpers"
+    myHelpers "github.com/user/project/util/helpers"  // aliased
 )
 ```
 
-- Go packages: `"fmt"`, `"net/http"` - standard Go import paths
-- Soppo modules: `"sop:path"` - imports from other `.sop` files in your project
-- Aliasing: `alias "path"` - works for both Go and Soppo imports
+Soppo uses Go-style module-qualified import paths for all imports. Local Soppo packages are detected automatically:
 
-Soppo module paths follow Go conventions (relative to module root). `sop:util/helpers` imports from `util/helpers.sop`.
+- If an import path starts with your module path (from `go.mod`) AND
+- The corresponding local directory contains `.sop` files
 
-**Note**: `sop:` imports only work for local project files. To use external Soppo libraries, import their generated Go code as a regular Go import.
+Then it's treated as a Soppo import and the generated Go import path is adjusted to point to the `gen/` output directory.
+
+For example, with module `github.com/user/project`:
+- `import "github.com/user/project/helpers"` → Soppo import if `helpers/` has `.sop` files
+- `import "github.com/user/project/helpers"` → Go import if `helpers/` only has `.go` files
+- `import "fmt"` → Go import (external package)
+
+Like Go, Soppo imports are package-based (directory-based). Each directory with `.sop` files forms a package.
+
+**Note**: You cannot import external Soppo projects directly. To use an external Soppo library, import its generated Go code as a regular Go import.
 
 Types from Go packages are extracted via tree-sitter parsing.

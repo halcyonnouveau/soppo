@@ -2,7 +2,9 @@ mod decl;
 mod expr;
 mod stmt;
 
-use crate::error::{Result, SoppoError};
+use std::path::PathBuf;
+
+use crate::error::Result;
 use crate::syntax::{BinOp, Comment, Decl, EnumVariant, File, Generic, TypeDecl};
 use crate::types::GlobalCtxt;
 
@@ -14,10 +16,12 @@ pub struct Codegen {
     pub(crate) current_func_return_type: Option<String>,
     comments: Vec<Comment>,
     comment_idx: usize,
-    /// Go module path for resolving sop: imports (e.g., "github.com/user/project")
+    /// Go module path for resolving local imports (e.g., "github.com/user/project")
     module_path: Option<String>,
     /// Output directory relative to project root (e.g., "gen")
     output_dir: Option<String>,
+    /// Project root for checking if imports are Soppo packages
+    project_root: Option<PathBuf>,
 }
 
 impl Codegen {
@@ -31,6 +35,7 @@ impl Codegen {
             comment_idx: 0,
             module_path: None,
             output_dir: None,
+            project_root: None,
         }
     }
 
@@ -44,14 +49,16 @@ impl Codegen {
             comment_idx: 0,
             module_path: None,
             output_dir: None,
+            project_root: None,
         }
     }
 
-    /// Create codegen with module info for resolving sop: imports
+    /// Create codegen with module info for resolving local Soppo imports
     pub fn with_module_info(
         global_state: GlobalCtxt,
         module_path: String,
         output_dir: Option<String>,
+        project_root: PathBuf,
     ) -> Self {
         Self {
             output: String::new(),
@@ -62,6 +69,7 @@ impl Codegen {
             comment_idx: 0,
             module_path: Some(module_path),
             output_dir,
+            project_root: Some(project_root),
         }
     }
 
@@ -244,29 +252,33 @@ impl Codegen {
             for import in &file.imports {
                 self.emit_comments_before(import.span.byte_start, import.span.start.line);
 
-                // Transform sop: imports to full Go import paths
-                // Like Go, sop: imports are package-based (directory-based):
-                // sop:mathutil -> module/gen/mathutil
-                // sop:util/helpers -> module/gen/util/helpers
-                let go_path = if import.path.starts_with("sop:") {
-                    let sop_path = &import.path[4..]; // Strip "sop:"
+                // Check if this is a local Soppo import that needs transformation
+                // Local Soppo imports: github.com/user/project/helpers -> github.com/user/project/gen/helpers
+                let is_soppo = match (&self.module_path, &self.project_root) {
+                    (Some(module_path), Some(project_root)) => {
+                        crate::deps::is_soppo_import(&import.path, module_path, project_root)
+                    }
+                    _ => false,
+                };
 
-                    // Build full Go import path: {module_path}/{output_dir}/{sop_path}
-                    match (&self.module_path, &self.output_dir) {
-                        (Some(module), Some(out_dir)) => {
-                            format!("{}/{}/{}", module, out_dir, sop_path)
+                let go_path = if is_soppo {
+                    let module_path = self.module_path.as_ref().unwrap();
+                    // Get the local path portion (e.g., "helpers" from "github.com/user/project/helpers")
+                    let local_path =
+                        crate::deps::get_local_package_path(&import.path, module_path).unwrap();
+
+                    // Build Go import path: {module_path}/{output_dir}/{local_path}
+                    match &self.output_dir {
+                        Some(out_dir) => {
+                            format!("{}/{}/{}", module_path, out_dir, local_path)
                         }
-                        (Some(module), None) => {
-                            format!("{}/{}", module, sop_path)
-                        }
-                        (None, _) => {
-                            return Err(SoppoError::MissingModuleContext {
-                                import_path: import.path.clone(),
-                                span: import.span.clone(),
-                            });
+                        None => {
+                            // No output_dir, keep original path
+                            import.path.clone()
                         }
                     }
                 } else {
+                    // Go import - keep as-is
                     import.path.clone()
                 };
 

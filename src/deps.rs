@@ -5,10 +5,10 @@ use miette::{Result, miette};
 
 use crate::syntax::{FileId, Parser};
 
-/// Dependency graph for Soppo files based on sop: imports
+/// Dependency graph for Soppo files based on local imports
 #[derive(Debug)]
 pub struct DepGraph {
-    /// Map from file path to its sop: dependencies (resolved to file paths)
+    /// Map from file path to its local Soppo dependencies (resolved to file paths)
     edges: HashMap<PathBuf, Vec<PathBuf>>,
     /// All files in the graph
     files: HashSet<PathBuf>,
@@ -17,8 +17,10 @@ pub struct DepGraph {
 impl DepGraph {
     /// Build a dependency graph from a list of source files
     ///
-    /// Parses each file to extract sop: imports and builds the graph.
-    pub fn build(sources: &[PathBuf], project_root: &Path) -> Result<Self> {
+    /// Parses each file to extract local Soppo imports and builds the graph.
+    /// Local imports are identified by checking if the import path starts with
+    /// the module path and corresponds to a local directory with .sop files.
+    pub fn build(sources: &[PathBuf], project_root: &Path, module_path: &str) -> Result<Self> {
         let mut edges: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         let mut files: HashSet<PathBuf> = HashSet::new();
 
@@ -34,13 +36,15 @@ impl DepGraph {
                 .parse_file()
                 .map_err(|e| miette!("Failed to parse {}: {:?}", source_path.display(), e))?;
 
-            // Extract sop: imports and resolve to package files
+            // Extract local Soppo imports and resolve to package files
             let mut deps = Vec::new();
             for import in &file.imports {
-                if import.path.starts_with("sop:") {
-                    let sop_path = &import.path[4..]; // Strip "sop:"
-                    let package_files = resolve_sop_package(sop_path, project_root)?;
-                    deps.extend(package_files);
+                if let Some(local_path) = get_local_package_path(&import.path, module_path) {
+                    // Check if this is actually a Soppo package (has .sop files)
+                    if let Some(package_files) = resolve_local_package(local_path, project_root) {
+                        deps.extend(package_files);
+                    }
+                    // If no .sop files, it's a local Go package - not a dependency for us
                 }
             }
 
@@ -125,41 +129,54 @@ impl DepGraph {
     }
 }
 
-/// Resolve a sop: import path to source files
+/// Check if an import path is a local package (starts with module path)
+/// Returns the local path portion if it is, None otherwise.
 ///
-/// Like Go, imports are package-based (directory-based):
-/// `sop:mathutil` -> all `.sop` files in `<project_root>/mathutil/`
-fn resolve_sop_package(sop_path: &str, project_root: &Path) -> Result<Vec<PathBuf>> {
-    let package_dir = project_root.join(sop_path);
+/// Example: "github.com/user/project/helpers" with module "github.com/user/project"
+/// returns Some("helpers")
+pub fn get_local_package_path<'a>(import_path: &'a str, module_path: &str) -> Option<&'a str> {
+    if let Some(remainder) = import_path.strip_prefix(module_path) {
+        // Strip leading slash if present
+        let local_path = remainder.strip_prefix('/').unwrap_or(remainder);
+        if local_path.is_empty() {
+            None
+        } else {
+            Some(local_path)
+        }
+    } else {
+        None
+    }
+}
+
+/// Check if a local path corresponds to a Soppo package (directory with .sop files)
+/// Returns the list of .sop files if it is, None otherwise.
+pub fn resolve_local_package(local_path: &str, project_root: &Path) -> Option<Vec<PathBuf>> {
+    let package_dir = project_root.join(local_path);
 
     if !package_dir.is_dir() {
-        return Err(miette!(
-            "Soppo package not found: sop:{} (expected directory at {})",
-            sop_path,
-            package_dir.display()
-        ));
+        return None;
     }
 
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(&package_dir).map_err(|e| {
-        miette!(
-            "Failed to read package directory {}: {}",
-            package_dir.display(),
-            e
-        )
-    })? {
-        let entry = entry.map_err(|e| miette!("Failed to read entry: {}", e))?;
+    let entries = std::fs::read_dir(&package_dir).ok()?;
+
+    for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "sop") {
             files.push(path);
         }
     }
 
-    if files.is_empty() {
-        return Err(miette!("Soppo package {} contains no .sop files", sop_path));
-    }
+    if files.is_empty() { None } else { Some(files) }
+}
 
-    Ok(files)
+/// Check if an import is a local Soppo package
+pub fn is_soppo_import(import_path: &str, module_path: &str, project_root: &Path) -> bool {
+    if let Some(local_path) = get_local_package_path(import_path, module_path) {
+        resolve_local_package(local_path, project_root).is_some()
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -169,6 +186,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    const TEST_MODULE: &str = "github.com/test/myproject";
 
     fn create_test_file(dir: &Path, name: &str, content: &str) -> PathBuf {
         let path = dir.join(name);
@@ -180,6 +199,32 @@ mod tests {
     }
 
     #[test]
+    fn test_get_local_package_path() {
+        assert_eq!(
+            get_local_package_path(
+                "github.com/test/myproject/helpers",
+                "github.com/test/myproject"
+            ),
+            Some("helpers")
+        );
+        assert_eq!(
+            get_local_package_path(
+                "github.com/test/myproject/util/helpers",
+                "github.com/test/myproject"
+            ),
+            Some("util/helpers")
+        );
+        assert_eq!(
+            get_local_package_path("fmt", "github.com/test/myproject"),
+            None
+        );
+        assert_eq!(
+            get_local_package_path("github.com/other/lib", "github.com/test/myproject"),
+            None
+        );
+    }
+
+    #[test]
     fn test_no_deps() {
         let temp = TempDir::new().unwrap();
         let root = temp.path();
@@ -187,11 +232,10 @@ mod tests {
         let a = create_test_file(root, "a.sop", "func main() {}");
         let b = create_test_file(root, "b.sop", "func foo() {}");
 
-        let graph = DepGraph::build(&[a.clone(), b.clone()], root).unwrap();
+        let graph = DepGraph::build(&[a.clone(), b.clone()], root, TEST_MODULE).unwrap();
         let sorted = graph.topological_sort().unwrap();
 
         assert_eq!(sorted.len(), 2);
-        // Both files have no deps, order doesn't matter
     }
 
     #[test]
@@ -204,15 +248,17 @@ mod tests {
         let main = create_test_file(
             root,
             "main/main.sop",
-            r#"package main
-import "sop:a"
-func main() {}"#,
+            &format!(
+                r#"package main
+import "{}/a"
+func main() {{}}"#,
+                TEST_MODULE
+            ),
         );
 
-        let graph = DepGraph::build(&[a.clone(), main.clone()], root).unwrap();
+        let graph = DepGraph::build(&[a.clone(), main.clone()], root, TEST_MODULE).unwrap();
         let sorted = graph.topological_sort().unwrap();
 
-        // a must come before main
         let a_idx = sorted.iter().position(|p| p == &a).unwrap();
         let main_idx = sorted.iter().position(|p| p == &main).unwrap();
         assert!(a_idx < main_idx);
@@ -228,19 +274,25 @@ func main() {}"#,
         let b = create_test_file(
             root,
             "b/lib.sop",
-            r#"package b
-import "sop:a"
-func B() {}"#,
+            &format!(
+                r#"package b
+import "{}/a"
+func B() {{}}"#,
+                TEST_MODULE
+            ),
         );
         let c = create_test_file(
             root,
             "c/lib.sop",
-            r#"package c
-import "sop:b"
-func C() {}"#,
+            &format!(
+                r#"package c
+import "{}/b"
+func C() {{}}"#,
+                TEST_MODULE
+            ),
         );
 
-        let graph = DepGraph::build(&[a.clone(), b.clone(), c.clone()], root).unwrap();
+        let graph = DepGraph::build(&[a.clone(), b.clone(), c.clone()], root, TEST_MODULE).unwrap();
         let sorted = graph.topological_sort().unwrap();
 
         let a_idx = sorted.iter().position(|p| p == &a).unwrap();
@@ -256,23 +308,29 @@ func C() {}"#,
         let temp = TempDir::new().unwrap();
         let root = temp.path();
 
-        // a -> b -> a (circular, each in its own package directory)
+        // a -> b -> a (circular)
         let a = create_test_file(
             root,
             "a/lib.sop",
-            r#"package a
-import "sop:b"
-func A() {}"#,
+            &format!(
+                r#"package a
+import "{}/b"
+func A() {{}}"#,
+                TEST_MODULE
+            ),
         );
         let b = create_test_file(
             root,
             "b/lib.sop",
-            r#"package b
-import "sop:a"
-func B() {}"#,
+            &format!(
+                r#"package b
+import "{}/a"
+func B() {{}}"#,
+                TEST_MODULE
+            ),
         );
 
-        let graph = DepGraph::build(&[a, b], root).unwrap();
+        let graph = DepGraph::build(&[a, b], root, TEST_MODULE).unwrap();
         let result = graph.topological_sort();
 
         assert!(result.is_err());
@@ -281,23 +339,25 @@ func B() {}"#,
     }
 
     #[test]
-    fn test_missing_dep() {
+    fn test_missing_local_import_is_ignored() {
+        // If a local import path doesn't have .sop files, it's treated as Go
         let temp = TempDir::new().unwrap();
         let root = temp.path();
 
-        // a depends on nonexistent package
         let a = create_test_file(
             root,
             "a/lib.sop",
-            r#"package a
-import "sop:nonexistent"
-func A() {}"#,
+            &format!(
+                r#"package a
+import "{}/nonexistent"
+func A() {{}}"#,
+                TEST_MODULE
+            ),
         );
 
-        let result = DepGraph::build(&[a], root);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        // This should succeed - nonexistent is treated as a Go package
+        let result = DepGraph::build(&[a], root, TEST_MODULE);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -305,7 +365,6 @@ func A() {}"#,
         let temp = TempDir::new().unwrap();
         let root = temp.path();
 
-        // Nested package: util/helpers is a package at util/helpers/
         let helper = create_test_file(
             root,
             "util/helpers/lib.sop",
@@ -314,16 +373,38 @@ func A() {}"#,
         let main = create_test_file(
             root,
             "main/main.sop",
-            r#"package main
-import "sop:util/helpers"
-func main() {}"#,
+            &format!(
+                r#"package main
+import "{}/util/helpers"
+func main() {{}}"#,
+                TEST_MODULE
+            ),
         );
 
-        let graph = DepGraph::build(&[helper.clone(), main.clone()], root).unwrap();
+        let graph = DepGraph::build(&[helper.clone(), main.clone()], root, TEST_MODULE).unwrap();
         let sorted = graph.topological_sort().unwrap();
 
         let helper_idx = sorted.iter().position(|p| p == &helper).unwrap();
         let main_idx = sorted.iter().position(|p| p == &main).unwrap();
         assert!(helper_idx < main_idx);
+    }
+
+    #[test]
+    fn test_go_imports_ignored() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        let main = create_test_file(
+            root,
+            "main/main.sop",
+            r#"package main
+import "fmt"
+import "github.com/other/lib"
+func main() {}"#,
+        );
+
+        let graph = DepGraph::build(&[main.clone()], root, TEST_MODULE).unwrap();
+        // Should have no dependencies (Go imports are ignored)
+        assert!(!graph.has_sop_deps(&main));
     }
 }
