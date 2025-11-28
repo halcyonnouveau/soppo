@@ -66,6 +66,17 @@ pub enum SoppoError {
         #[label("sop: imports require a go.mod project")]
         span: Span,
     },
+
+    #[error("Potential nil pointer dereference")]
+    #[diagnostic(
+        code(soppo::nil_pointer),
+        help("check for nil first, or use `.(!nil)` to assert non-nil")
+    )]
+    NilPointer {
+        name: String,
+        #[label("this pointer may be nil")]
+        span: Span,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, SoppoError>;

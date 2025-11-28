@@ -1,0 +1,16 @@
+package main
+
+type User struct {
+    name string
+    age int
+}
+
+func findUser(id int) *User {
+    return nil
+}
+
+func main() {
+    user := findUser(1)
+    // ERROR: user may be nil - need to check before accessing
+    name := user.name
+}

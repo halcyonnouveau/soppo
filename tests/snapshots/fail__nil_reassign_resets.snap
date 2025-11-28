@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_pointer
+
+  × Potential nil pointer dereference
+    ╭─[nil_reassign_resets.sop:25:17]
+ 24 │     // ERROR: user may be nil again after reassignment
+ 25 │     fmt.Println(user.name)
+    ·                 ──┬─
+    ·                   ╰── this pointer may be nil
+ 26 │ }
+    ╰────
+  help: check for nil first, or use .(!nil) to assert non-nil

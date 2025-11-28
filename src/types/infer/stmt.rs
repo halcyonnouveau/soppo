@@ -2,9 +2,74 @@ use std::collections::HashSet;
 
 use super::Infer;
 use crate::error::{Result, SoppoError};
-use crate::syntax::{EnumVariant, ExprKind, PatternKind, SelectCaseKind, Stmt, StmtKind};
+use crate::syntax::{
+    BinOp, EnumVariant, Expr, ExprKind, PatternKind, SelectCaseKind, Stmt, StmtKind,
+};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
+use crate::types::ty::Nullability;
+
+/// Result of analyzing a nil check condition
+#[derive(Debug)]
+struct NilCheck {
+    /// The expression key being checked (e.g., "user" or "user.profile")
+    expr_key: String,
+    /// True if the check is `expr != nil`, false if `expr == nil`
+    is_not_nil: bool,
+}
+
+/// Convert an expression to a trackable key string
+/// Returns Some(key) for identifiers and field access chains (e.g., "user.profile.address")
+/// Returns None for complex expressions that can't be tracked
+pub(super) fn expr_to_key(expr: &Expr) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Ident(name) => Some(name.clone()),
+        ExprKind::Field {
+            expr: base, field, ..
+        } => {
+            let base_key = expr_to_key(base)?;
+            Some(format!("{}.{}", base_key, field))
+        }
+        _ => None,
+    }
+}
+
+/// Extract nil check from a binary comparison expression
+/// Returns Some(NilCheck) if the expression is of the form:
+/// Works with simple identifiers and field access chains (e.g., user.profile != nil)
+/// - x != nil or nil != x (is_not_nil = true)
+/// - x == nil or nil == x (is_not_nil = false)
+fn extract_nil_check(expr: &Expr) -> Option<NilCheck> {
+    if let ExprKind::Binary { op, left, right } = &expr.kind {
+        let is_not_nil = match op {
+            BinOp::Ne => true,
+            BinOp::Eq => false,
+            _ => return None,
+        };
+
+        // Check for: expr != nil or expr == nil
+        if matches!(right.kind, ExprKind::Nil)
+            && let Some(key) = expr_to_key(left)
+        {
+            return Some(NilCheck {
+                expr_key: key,
+                is_not_nil,
+            });
+        }
+
+        // Check for: nil != expr or nil == expr
+        if matches!(left.kind, ExprKind::Nil)
+            && let Some(key) = expr_to_key(right)
+        {
+            return Some(NilCheck {
+                expr_key: key,
+                is_not_nil,
+            });
+        }
+    }
+
+    None
+}
 
 impl Infer {
     /// Infer the type of a statement
@@ -13,7 +78,10 @@ impl Infer {
         match &stmt.kind {
             StmtKind::Decl { name, value } => {
                 let value_ty = self.infer_expr(value)?;
+                let value_ty_sub = self.substitute(value_ty.clone());
                 self.insert_var(name.clone(), value_ty.clone());
+                // Track nil state for pointer types
+                self.update_nil_state_for_assignment(name, value, &value_ty_sub);
                 Ok(Type::unit())
             }
 
@@ -58,21 +126,23 @@ impl Infer {
             }
 
             StmtKind::VarDecl { name, ty, value } => {
-                let var_ty = match (ty, value) {
+                let (var_ty, init_expr) = match (ty, value) {
                     (Some(t), Some(expr)) => {
                         // var x type = value: unify declared with inferred
                         let declared_ty = Type::from_ast(t);
                         let value_ty = self.infer_expr(expr)?;
                         self.unify(&declared_ty, &value_ty, &expr.span)?;
-                        declared_ty
+                        (declared_ty, Some(expr))
                     }
                     (Some(t), None) => {
                         // var x type: use declared type (zero value)
-                        Type::from_ast(t)
+                        // Zero value for pointer is nil, so it's nullable
+                        (Type::from_ast(t), None)
                     }
                     (None, Some(expr)) => {
                         // var x = value: infer from value
-                        self.infer_expr(expr)?
+                        let ty = self.infer_expr(expr)?;
+                        (ty, Some(expr))
                     }
                     (None, None) => {
                         // var x: error (should be caught by parser)
@@ -84,7 +154,15 @@ impl Infer {
                         });
                     }
                 };
+                let var_ty_sub = self.substitute(var_ty.clone());
                 self.insert_var(name.clone(), var_ty);
+                // Track nil state for pointer types
+                if let Some(expr) = init_expr {
+                    self.update_nil_state_for_assignment(name, expr, &var_ty_sub);
+                } else if Self::is_pointer_type(&var_ty_sub) {
+                    // Zero-initialized pointers are nil
+                    self.set_nil_state(name.clone(), crate::types::ty::Nullability::Nullable);
+                }
                 Ok(Type::unit())
             }
 
@@ -193,14 +271,20 @@ impl Infer {
             StmtKind::Assign { target, value } => {
                 // Special case: blank identifier accepts any type
                 if let ExprKind::Ident(name) = &target.kind
-                    && name == "_" {
-                        // Just infer the value type, don't unify
-                        self.infer_expr(value)?;
-                        return Ok(Type::unit());
-                    }
+                    && name == "_"
+                {
+                    // Just infer the value type, don't unify
+                    self.infer_expr(value)?;
+                    return Ok(Type::unit());
+                }
                 let target_ty = self.infer_expr(target)?;
                 let value_ty = self.infer_expr(value)?;
+                let value_ty_sub = self.substitute(value_ty.clone());
                 self.unify(&target_ty, &value_ty, &stmt.span)?;
+                // Update nil state for reassignment
+                if let ExprKind::Ident(name) = &target.kind {
+                    self.update_nil_state_for_assignment(name, value, &value_ty_sub);
+                }
                 Ok(Type::unit())
             }
 
@@ -327,15 +411,56 @@ impl Infer {
                 let cond_ty = self.infer_expr(condition)?;
                 self.unify(&Type::simple("bool"), &cond_ty, &condition.span)?;
 
-                // Type check then block
-                let then_ty = self.infer_block(then_block)?;
+                // Extract nil check from condition for flow-sensitive narrowing
+                let nil_check = extract_nil_check(condition);
 
-                // Type check else block if present
+                // Type check then block with narrowed nil state
+                self.push_nil_scope();
+                if let Some(ref check) = nil_check {
+                    if check.is_not_nil {
+                        // `if x != nil { ... }` - x is non-nil in then block
+                        self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
+                    } else {
+                        // `if x == nil { ... }` - x is nil in then block (not useful for access)
+                        self.set_nil_state(check.expr_key.clone(), Nullability::Nullable);
+                    }
+                }
+                let then_ty = self.infer_block(then_block)?;
+                self.pop_nil_scope();
+
+                // Type check else block with opposite narrowing
                 let else_ty = if let Some(else_block) = else_block {
-                    self.infer_block(else_block)?
+                    self.push_nil_scope();
+                    if let Some(ref check) = nil_check {
+                        if check.is_not_nil {
+                            // `if x != nil { ... } else { ... }` - x is nil in else block
+                            self.set_nil_state(check.expr_key.clone(), Nullability::Nullable);
+                        } else {
+                            // `if x == nil { ... } else { ... }` - x is non-nil in else block
+                            self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
+                        }
+                    }
+                    let ty = self.infer_block(else_block)?;
+                    self.pop_nil_scope();
+                    ty
                 } else {
                     Type::unit()
                 };
+
+                // Handle early return narrowing:
+                // If then block diverges (returns/breaks) and condition was `x == nil`,
+                // then after the if statement, x is known to be non-nil
+                if let Some(ref check) = nil_check {
+                    if matches!(then_ty, Type::Never) && !check.is_not_nil {
+                        // `if x == nil { return }` - x is non-nil after this point
+                        self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
+                    }
+                    // Similarly, if else block diverges and condition was `x != nil`
+                    if matches!(else_ty, Type::Never) && check.is_not_nil && else_block.is_some() {
+                        // `if x != nil { ... } else { return }` - x is non-nil after
+                        self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
+                    }
+                }
 
                 // If both branches diverge (return never), the if statement also diverges
                 if matches!(then_ty, Type::Never) && matches!(else_ty, Type::Never) {

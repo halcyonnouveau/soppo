@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_pointer
+
+  × Potential nil pointer dereference
+    ╭─[nil_deref_no_check.sop:15:13]
+ 14 │     // ERROR: user may be nil - need to check before accessing
+ 15 │     name := user.name
+    ·             ──┬─
+    ·               ╰── this pointer may be nil
+ 16 │ }
+    ╰────
+  help: check for nil first, or use .(!nil) to assert non-nil

@@ -7,9 +7,9 @@ mod unify;
 use std::collections::HashMap;
 
 use super::ctx::GlobalCtxt;
-use super::ty::Type;
+use super::ty::{Nullability, Type};
 use crate::go::{GoCache, Project, parse_go_type};
-use crate::syntax::{Import, ModuleId, Span, Symbol, Type as AstType};
+use crate::syntax::{Expr, ExprKind, Import, ModuleId, Span, Symbol, Type as AstType, UnaryOp};
 
 /// Check if a type name is a Go primitive/built-in type
 pub(crate) fn is_primitive_type(ty: &str) -> bool {
@@ -93,6 +93,10 @@ pub struct Infer {
     /// Imported Soppo modules: short name -> ModuleId
     /// e.g., "helpers" -> ModuleId("util/helpers")
     pub(super) soppo_imports: HashMap<String, ModuleId>,
+
+    /// Nil state tracking for pointer variables (scoped like variable bindings)
+    /// Each scope maps variable names to their current nullability state
+    pub(super) nil_state: Vec<HashMap<String, Nullability>>,
 }
 
 impl Infer {
@@ -112,6 +116,7 @@ impl Infer {
             project: None,
             imported_packages: HashMap::new(),
             soppo_imports: HashMap::new(),
+            nil_state: vec![HashMap::new()],
         })
     }
 
@@ -128,6 +133,7 @@ impl Infer {
             project: Some(project),
             imported_packages: HashMap::new(),
             soppo_imports: HashMap::new(),
+            nil_state: vec![HashMap::new()],
         })
     }
 
@@ -144,6 +150,7 @@ impl Infer {
             project: None,
             imported_packages: HashMap::new(),
             soppo_imports: HashMap::new(),
+            nil_state: vec![HashMap::new()],
         })
     }
 
@@ -163,6 +170,7 @@ impl Infer {
             project: Some(project),
             imported_packages: HashMap::new(),
             soppo_imports: HashMap::new(),
+            nil_state: vec![HashMap::new()],
         })
     }
 
@@ -586,14 +594,26 @@ impl Infer {
         }
     }
 
-    /// Push a new scope
+    /// Push a new scope (for both variables and nil state)
     pub(super) fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.nil_state.push(HashMap::new());
     }
 
-    /// Pop the current scope
+    /// Pop the current scope (for both variables and nil state)
     pub(super) fn pop_scope(&mut self) {
         self.scopes.pop();
+        self.nil_state.pop();
+    }
+
+    /// Push only a nil state scope (for narrowing in if branches without new variable scope)
+    pub(super) fn push_nil_scope(&mut self) {
+        self.nil_state.push(HashMap::new());
+    }
+
+    /// Pop only a nil state scope
+    pub(super) fn pop_nil_scope(&mut self) {
+        self.nil_state.pop();
     }
 
     /// Insert a variable into the current scope
@@ -611,6 +631,94 @@ impl Infer {
             }
         }
         None
+    }
+
+    /// Get the nil state for a variable (from innermost to outermost scope)
+    /// Returns Nullable if not explicitly tracked (conservative default)
+    pub(super) fn get_nil_state(&self, name: &str) -> Nullability {
+        for scope in self.nil_state.iter().rev() {
+            if let Some(state) = scope.get(name) {
+                return *state;
+            }
+        }
+        // Default: assume nullable if not tracked
+        Nullability::Nullable
+    }
+
+    /// Set the nil state for a variable in the current scope
+    pub(super) fn set_nil_state(&mut self, name: String, state: Nullability) {
+        if let Some(scope) = self.nil_state.last_mut() {
+            scope.insert(name, state);
+        }
+    }
+
+    /// Check if a type is a pointer type
+    pub(super) fn is_pointer_type(ty: &Type) -> bool {
+        match ty {
+            Type::Con { name, args } => {
+                // Check for ptr[T] or *T patterns
+                let ty_name = &name.name;
+                (ty_name == "ptr" || ty_name.starts_with('*')) && args.len() == 1
+            }
+            _ => false,
+        }
+    }
+
+    /// Determine the nullability of an expression's result
+    /// Returns NonNull for expressions that are guaranteed non-nil:
+    /// - &expr (address-of)
+    /// - new(T)
+    /// - Struct literals (when taken by address)
+    ///
+    /// Returns Nullable for everything else that could be nil
+    pub(super) fn get_expr_nullability(&self, expr: &Expr, ty: &Type) -> Nullability {
+        // Only pointer types can be nullable
+        if !Self::is_pointer_type(ty) {
+            return Nullability::NonNull;
+        }
+
+        match &expr.kind {
+            // &expr is always non-nil
+            ExprKind::Unary {
+                op: UnaryOp::Ref, ..
+            } => Nullability::NonNull,
+
+            // new(T) is always non-nil
+            ExprKind::Call {
+                func, type_args, ..
+            } => {
+                if let ExprKind::Ident(name) = &func.kind
+                    && name == "new"
+                    && !type_args.is_empty()
+                {
+                    return Nullability::NonNull;
+                }
+                // Other function calls returning pointers are nullable
+                Nullability::Nullable
+            }
+
+            // .(!nil) assertion explicitly marks as non-nil
+            ExprKind::NilAssert { .. } => Nullability::NonNull,
+
+            // Variable reference: look up its tracked nil state
+            ExprKind::Ident(name) => self.get_nil_state(name),
+
+            // All other expressions producing pointers are conservatively nullable
+            _ => Nullability::Nullable,
+        }
+    }
+
+    /// Update nil state for a variable after assignment
+    pub(super) fn update_nil_state_for_assignment(
+        &mut self,
+        name: &str,
+        value: &Expr,
+        value_ty: &Type,
+    ) {
+        if Self::is_pointer_type(value_ty) {
+            let nullability = self.get_expr_nullability(value, value_ty);
+            self.set_nil_state(name.to_string(), nullability);
+        }
     }
 }
 

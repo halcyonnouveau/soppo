@@ -294,12 +294,51 @@ impl Parser {
                     };
                 }
 
-                // Field access: expr.field or type assertion: expr.(Type)
+                // Field access: expr.field or type assertion: expr.(Type) or nil assertion: expr.(!nil)
                 Some(Token::Dot) => {
                     self.advance();
 
-                    // Check for type assertion: expr.(Type)
+                    // Check for type assertion: expr.(Type) or nil assertion: expr.(!nil)
                     if self.consume(&Token::LParen) {
+                        // Check for nil assertion: .(!nil)
+                        if self.consume(&Token::Not) {
+                            // Expect "nil" keyword
+                            match self.advance() {
+                                Some((Token::Nil, _)) => {}
+                                Some((tok, span)) => {
+                                    return Err(SoppoError::Parse {
+                                        message: format!(
+                                            "Expected 'nil' in nil assertion, found {:?}",
+                                            tok
+                                        ),
+                                        span,
+                                    });
+                                }
+                                None => {
+                                    return Err(SoppoError::Parse {
+                                        message: "Expected 'nil' in nil assertion".to_string(),
+                                        span: Span::dummy(),
+                                    });
+                                }
+                            }
+                            let end_span = self.expect(Token::RParen)?;
+
+                            expr = Expr {
+                                span: Span::with_bytes(
+                                    expr.span.start,
+                                    end_span.end,
+                                    self.file,
+                                    expr.span.byte_start,
+                                    end_span.byte_end,
+                                ),
+                                kind: ExprKind::NilAssert {
+                                    expr: Box::new(expr),
+                                },
+                            };
+                            continue;
+                        }
+
+                        // Regular type assertion: expr.(Type)
                         let ty = self.parse_type()?;
                         let end_span = self.expect(Token::RParen)?;
 
@@ -600,6 +639,11 @@ impl Parser {
 
             Token::False => Ok(Expr {
                 kind: ExprKind::Bool(false),
+                span,
+            }),
+
+            Token::Nil => Ok(Expr {
+                kind: ExprKind::Nil,
                 span,
             }),
 

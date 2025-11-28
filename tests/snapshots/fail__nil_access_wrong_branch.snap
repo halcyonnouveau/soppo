@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_pointer
+
+  × Potential nil pointer dereference
+    ╭─[nil_access_wrong_branch.sop:18:21]
+ 17 │     if user == nil {
+ 18 │         fmt.Println(user.name)  // Error: user is nil here!
+    ·                     ──┬─
+    ·                       ╰── this pointer may be nil
+ 19 │     }
+    ╰────
+  help: check for nil first, or use .(!nil) to assert non-nil

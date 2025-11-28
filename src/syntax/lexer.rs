@@ -43,6 +43,8 @@ pub enum Token {
     True,
     #[token("false")]
     False,
+    #[token("nil")]
+    Nil,
     #[token("enum")]
     Enum,
     #[token("struct")]

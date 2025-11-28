@@ -136,11 +136,33 @@ user := findUser(1)         // *User, may be nil
 fmt.Println(user.Name)      // ERROR: user may be nil
 
 if user != nil {
-    fmt.Println(user.Name)  // OK
+    fmt.Println(user.Name)  // OK: user is proven non-nil here
 }
+
+// Early return also works
+if user == nil {
+    return
+}
+fmt.Println(user.Name)      // OK: user is non-nil after the guard
 ```
 
-**Note**: Flow-sensitive nil tracking is complex and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees.
+Some expressions are automatically non-nil:
+- `&expr` (address-of) - always points to a valid value
+- `new(T)` - allocates and returns a valid pointer
+
+### Escape Hatch: `.(!nil)`
+
+When you know a pointer is non-nil from external context (e.g., API guarantees), use `.(!nil)` to assert it:
+
+```go
+// External API guarantees non-nil return in production
+user := getUser().(!nil)
+fmt.Println(user.Name)  // OK
+```
+
+This generates no runtime code - it's purely a compile-time assertion.
+
+**Note**: Flow-sensitive nil tracking is complex, and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees. Interface nil is a known limitation.
 
 ## Named Arguments
 
@@ -152,15 +174,13 @@ func createUser(name string, age int, active bool) User
 createUser("alice", 30, true)                       // positional
 createUser(name: "alice", age: 30, active: true)    // named
 createUser("alice", age: 30, active: true)          // mixed
-
-createUser(name: "alice", 30)  // ERROR - positional must come before named
 ```
 
-Variadic params are always positional at the end:
+Variadic parameters are always positional at the end:
 
 ```go
 func log(level string, msgs ...string)
-log(level: "info", "msg1", "msg2")  // ok
+log(level: "info", "msg1", "msg2") 
 ```
 
 ## String Interpolation

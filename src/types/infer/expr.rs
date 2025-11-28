@@ -5,6 +5,7 @@ use crate::error::{Result, SoppoError};
 use crate::syntax::{BinOp, EnumVariant, Expr, ExprKind, UnaryOp};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
+use crate::types::ty::Nullability;
 
 impl Infer {
     /// Infer the type of an expression
@@ -17,6 +18,10 @@ impl Infer {
             ExprKind::String(_) => Ok(Type::simple("string")),
 
             ExprKind::Bool(_) => Ok(Type::simple("bool")),
+
+            // nil is a special value that can be any pointer, interface, slice, map, channel, or function type
+            // We use a fresh type variable so it unifies with the expected type
+            ExprKind::Nil => Ok(self.fresh_ty_var()),
 
             ExprKind::Ident(name) => {
                 // Handle blank identifier specially - it accepts any type on assignment
@@ -455,6 +460,27 @@ impl Infer {
                 let expr_ty = self.infer_expr(field_expr)?;
                 let expr_ty = self.substitute(expr_ty);
 
+                // Check for nil pointer dereference on field access
+                // If the expression is a pointer type, verify it's not nullable
+                if Self::is_pointer_type(&expr_ty) {
+                    // Convert expression to a trackable key (supports identifiers and field chains)
+                    let expr_key = super::stmt::expr_to_key(field_expr);
+
+                    // Check nil state for the expression, or assume nullable for complex expressions
+                    let is_nullable = match &expr_key {
+                        Some(key) => self.get_nil_state(key) == Nullability::Nullable,
+                        None => true, // Complex expressions are conservatively nullable
+                    };
+
+                    if is_nullable {
+                        let name_for_error = expr_key.unwrap_or_else(|| "expression".to_string());
+                        return Err(SoppoError::NilPointer {
+                            name: name_for_error,
+                            span: field_expr.span,
+                        });
+                    }
+                }
+
                 // Handle built-in error type's Error() method
                 if let Type::Con { name, .. } = &expr_ty
                     && name.name == "error"
@@ -465,8 +491,24 @@ impl Infer {
                 }
 
                 // Look up the struct type to validate field access
-                if let Type::Con { name, .. } = &expr_ty
-                    && let Some(type_def) = self.global_state.lookup_type(&name.name)
+                // For pointer types like *User, extract the inner type name (User)
+                let struct_name = if let Type::Con { name, args } = &expr_ty {
+                    if name.name.starts_with('*') && args.len() == 1 {
+                        // Pointer type: extract inner type name from args or strip prefix
+                        if let Type::Con { name: inner, .. } = &args[0] {
+                            Some(inner.name.clone())
+                        } else {
+                            Some(name.name[1..].to_string())
+                        }
+                    } else {
+                        Some(name.name.clone())
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(struct_name) = struct_name
+                    && let Some(type_def) = self.global_state.lookup_type(&struct_name)
                     && let TypeDefKind::Struct { fields } = &type_def.kind
                 {
                     // Check if the field exists
@@ -483,7 +525,7 @@ impl Infer {
                         return Err(SoppoError::Type {
                             message: format!(
                                 "Struct `{}` has no field named `{}`",
-                                name.name, field
+                                struct_name, field
                             ),
                             span: field_expr.span,
                         });
@@ -637,6 +679,32 @@ impl Infer {
                     UnaryOp::Deref => {
                         // *p: operand must be *T, result is T
                         let operand_ty = self.substitute(operand_ty);
+
+                        // Check for nil pointer dereference
+                        if Self::is_pointer_type(&operand_ty) {
+                            // Get the variable name if this is a simple identifier
+                            let var_name = if let ExprKind::Ident(name) = &operand.kind {
+                                Some(name.clone())
+                            } else {
+                                None
+                            };
+
+                            // Check nil state for the variable, or assume nullable for complex expressions
+                            let is_nullable = match &var_name {
+                                Some(name) => self.get_nil_state(name) == Nullability::Nullable,
+                                None => true, // Complex expressions are conservatively nullable
+                            };
+
+                            if is_nullable {
+                                let name_for_error =
+                                    var_name.unwrap_or_else(|| "expression".to_string());
+                                return Err(SoppoError::NilPointer {
+                                    name: name_for_error,
+                                    span: operand.span,
+                                });
+                            }
+                        }
+
                         // Extract the pointee type from *T
                         if let Type::Con { name, args } = &operand_ty {
                             if name.name.starts_with('*') && args.len() == 1 {
@@ -753,6 +821,22 @@ impl Infer {
                 // Type assertion: x.(Type) - infer expression and return the asserted type
                 self.infer_expr(expr)?;
                 Ok(Type::simple(&ty.name))
+            }
+
+            ExprKind::NilAssert { expr } => {
+                // Nil assertion: x.(!nil) - assert the expression is non-nil
+                let ty = self.infer_expr(expr)?;
+                let ty = self.substitute(ty);
+
+                // If this is a pointer type with an identifier, mark it as non-nil
+                if Self::is_pointer_type(&ty)
+                    && let ExprKind::Ident(name) = &expr.kind {
+                        self.set_nil_state(name.clone(), Nullability::NonNull);
+                    }
+
+                // Return the same type - the assertion doesn't change the type,
+                // only the nullability state
+                Ok(ty)
             }
         }
     }

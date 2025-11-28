@@ -1,0 +1,25 @@
+package main
+
+import "fmt"
+
+type Profile struct {
+    bio string
+}
+
+type User struct {
+    name    string
+    profile *Profile
+}
+
+func getUser() *User {
+    return nil
+}
+
+func main() {
+    user := getUser()
+
+    // Checked user, but not profile - should error
+    if user != nil {
+        fmt.Println(user.profile.bio)  // ERROR: profile may be nil
+    }
+}

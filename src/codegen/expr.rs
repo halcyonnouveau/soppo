@@ -27,6 +27,10 @@ impl Codegen {
                 self.emit(if *b { "true" } else { "false" });
             }
 
+            ExprKind::Nil => {
+                self.emit("nil");
+            }
+
             ExprKind::Ident(name) => {
                 self.emit(name);
             }
@@ -140,6 +144,11 @@ impl Codegen {
                 self.emit(".(");
                 self.emit(&ty.name);
                 self.emit(")");
+            }
+
+            ExprKind::NilAssert { expr } => {
+                // Nil assertion is compile-time only - just emit the inner expression
+                self.gen_expr(expr);
             }
 
             ExprKind::ArrayLit { ty, elements } => {

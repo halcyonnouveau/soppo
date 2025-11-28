@@ -248,6 +248,7 @@ pub enum ExprKind {
     Float(f64),
     String(String),
     Bool(bool),
+    Nil,
     Ident(String),
     Binary {
         op: BinOp,
@@ -279,6 +280,10 @@ pub enum ExprKind {
     TypeAssert {
         expr: Box<Expr>,
         ty: Type,
+    },
+    // Nil assertion: x.(!nil) - asserts pointer is non-nil
+    NilAssert {
+        expr: Box<Expr>,
     },
     ArrayLit {
         ty: Option<Type>, // For [5]int{...} syntax

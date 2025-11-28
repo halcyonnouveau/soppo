@@ -299,4 +299,22 @@ Like seriously... have some respect.
 
 Since you got this far in my little rant, I guess I can explain the reasoning behind Soppo as a treat for you :3
 
-Go isn't very good. And I don't think just adding new features it will ever make it good. It has a very clear design goals.
+Go isn't very good. And I don't think just adding new features it will ever make it good. It has a very clear design goals, ones I don't agree with.
+
+So no, I don't think giving Go features from Rust will make me like the language, because if you're doing that, why shouldn't I just keep using Rust? All you're doing is confirming to me that Rust is the better language.
+
+Just taking features from other languages also isn't a good way of designing a language. You need a clear vision.
+
+I want Soppo to follow Go's vision, even if I think it's stupid and leads to a shit language. Okay shit is a bit harsh, I don't think Go is shit. I think it's a war crime against everything I love about programming.
+
+(THAT WAS A JOKE)
+
+Now obviously if what Soppo adds is actually in Go's vision, Go would have... you know, added it. So what I'm actually doing is pretending "type safety and developer ergonomics" are part of Go's vision and imagining what the Go devs would add in this unfortunately imaginary scenario.
+
+And I settled on "type safety and developer ergonomics" because that is what I think is missing from Go for me to actually want to use it.
+
+That being said, I'm not confident Soppo will make me want to use Go even if it achieves all its goals. As you know, it's a project built from pure hater energy, and once all the spite started to run out as I was in fact able to confirm "yeah I could do this better", what reasons do I have for doing this?
+
+Because at the end of the day, why not just use Rust?
+
+Well, I guess just for the fun of it.

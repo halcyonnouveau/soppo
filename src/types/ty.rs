@@ -2,6 +2,15 @@ use std::fmt;
 
 use crate::syntax::{ModuleId, Span, Symbol, Type as AstType};
 
+/// Nullability state for pointer types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nullability {
+    /// May be nil - must be checked before use
+    Nullable,
+    /// Proven non-nil - safe to dereference
+    NonNull,
+}
+
 /// Type representation after type checking
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {

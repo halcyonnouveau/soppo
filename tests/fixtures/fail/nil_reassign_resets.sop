@@ -1,0 +1,26 @@
+package main
+
+import "fmt"
+
+type User struct {
+    name string
+}
+
+func getUser(id int) *User {
+    return nil
+}
+
+func main() {
+    user := getUser(1)
+
+    if user != nil {
+        // user is non-nil here
+        fmt.Println(user.name)
+    }
+
+    // Reassigning should reset nil state
+    user = getUser(2)
+
+    // ERROR: user may be nil again after reassignment
+    fmt.Println(user.name)
+}

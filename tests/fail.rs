@@ -80,3 +80,43 @@ fn test_duration_string_mul() {
     );
     insta::assert_snapshot!(result.unwrap_err());
 }
+
+#[test]
+fn test_nil_deref_no_check() {
+    let result = compile_soppo_file("tests/fixtures/fail/nil_deref_no_check.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for nil pointer dereference without check"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_nil_access_wrong_branch() {
+    let result = compile_soppo_file("tests/fixtures/fail/nil_access_wrong_branch.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for accessing nil pointer in wrong branch"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_nil_nested_no_check() {
+    let result = compile_soppo_file("tests/fixtures/fail/nil_nested_no_check.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for accessing nested pointer without check"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_nil_reassign_resets() {
+    let result = compile_soppo_file("tests/fixtures/fail/nil_reassign_resets.sop");
+    assert!(
+        result.is_err(),
+        "Expected error after reassignment resets nil state"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
