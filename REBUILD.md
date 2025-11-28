@@ -21,6 +21,8 @@
 - Multiple patterns in match arms (`case 1, 2, 3:`)
 - Expression-less match (`match { case x > 0: ... }`)
 - Interface definitions
+- `select` statement
+- `close` builtin
 
 ## Not Yet Implemented
 
@@ -29,7 +31,6 @@
 - Nil safety (flow-sensitive tracking)
 - Named arguments
 - String interpolation
-- `select` statement
 
 **Syntax:**
 - Comment preservation 

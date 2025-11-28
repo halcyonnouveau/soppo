@@ -911,8 +911,27 @@ impl Infer {
                 type_args,
                 args,
             } => {
-                // Handle built-in make(type, ...) and new(type)
+                // Handle built-in make(type, ...), new(type), close(ch)
                 if let ExprKind::Ident(name) = &func.kind {
+                    // close(channel) - closes a channel, returns unit
+                    if name == "close" && args.len() == 1 {
+                        let channel_ty = self.infer_expr(&args[0])?;
+                        let channel_ty = self.substitute(channel_ty);
+                        // Verify it's a channel type
+                        if let Type::Con { name, .. } = &channel_ty
+                            && !name.name.starts_with("chan ")
+                        {
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "close requires a channel argument, got {}",
+                                    channel_ty
+                                ),
+                                span: args[0].span.clone(),
+                            });
+                        }
+                        return Ok(Type::unit());
+                    }
+
                     if name == "make" && !type_args.is_empty() {
                         // make(type, ...) - returns the type
                         // Validate additional arguments are integers (size, capacity)
@@ -1955,6 +1974,94 @@ impl Infer {
                         let elem_ty = Type::simple(elem_name);
                         self.unify(&elem_ty, &value_ty, &value.span)?;
                     }
+                }
+
+                Ok(Type::unit())
+            }
+
+            StmtKind::Select { cases } => {
+                use crate::parse::SelectCaseKind;
+
+                for case in cases {
+                    self.push_scope();
+
+                    match &case.kind {
+                        SelectCaseKind::Recv { channel } => {
+                            // <-ch: just infer the channel type
+                            self.infer_expr(channel)?;
+                        }
+                        SelectCaseKind::RecvDecl { name, channel } => {
+                            // v := <-ch: infer channel type, declare v with element type
+                            let channel_ty = self.infer_expr(channel)?;
+                            let channel_ty = self.substitute(channel_ty);
+
+                            // Extract element type from channel
+                            let elem_ty = if let Type::Con { name, args } = &channel_ty {
+                                if name.name.starts_with("chan ") && args.len() == 1 {
+                                    args[0].clone()
+                                } else if name.name.starts_with("chan ") {
+                                    let elem_name = &name.name[5..];
+                                    Type::simple(elem_name)
+                                } else {
+                                    self.fresh_ty_var()
+                                }
+                            } else {
+                                self.fresh_ty_var()
+                            };
+
+                            self.insert_var(name.clone(), elem_ty);
+                        }
+                        SelectCaseKind::RecvDeclOk {
+                            name,
+                            ok_name,
+                            channel,
+                        } => {
+                            // v, ok := <-ch: infer channel type, declare v and ok
+                            let channel_ty = self.infer_expr(channel)?;
+                            let channel_ty = self.substitute(channel_ty);
+
+                            // Extract element type from channel
+                            let elem_ty = if let Type::Con { name, args } = &channel_ty {
+                                if name.name.starts_with("chan ") && args.len() == 1 {
+                                    args[0].clone()
+                                } else if name.name.starts_with("chan ") {
+                                    let elem_name = &name.name[5..];
+                                    Type::simple(elem_name)
+                                } else {
+                                    self.fresh_ty_var()
+                                }
+                            } else {
+                                self.fresh_ty_var()
+                            };
+
+                            self.insert_var(name.clone(), elem_ty);
+                            self.insert_var(ok_name.clone(), Type::simple("bool"));
+                        }
+                        SelectCaseKind::Send { channel, value } => {
+                            // ch <- value: same as Send statement
+                            let channel_ty = self.infer_expr(channel)?;
+                            let channel_ty = self.substitute(channel_ty);
+                            let value_ty = self.infer_expr(value)?;
+
+                            if let Type::Con { name, args } = &channel_ty {
+                                if name.name.starts_with("chan ") && args.len() == 1 {
+                                    self.unify(&args[0], &value_ty, &value.span)?;
+                                } else if name.name.starts_with("chan ") {
+                                    let elem_name = &name.name[5..];
+                                    let elem_ty = Type::simple(elem_name);
+                                    self.unify(&elem_ty, &value_ty, &value.span)?;
+                                }
+                            }
+                        }
+                        SelectCaseKind::Default => {
+                            // default: nothing to infer
+                        }
+                    }
+
+                    // Infer body
+                    self.infer_block(&case.body)?;
+
+                    self.pop_scope();
                 }
 
                 Ok(Type::unit())

@@ -206,6 +206,10 @@ pub enum StmtKind {
         channel: Expr,
         value: Expr,
     },
+    // select { case ... }
+    Select {
+        cases: Vec<SelectCase>,
+    },
     // go expr (goroutine)
     Go(Expr),
     // defer expr (deferred call)
@@ -309,6 +313,33 @@ pub struct Arm {
     pub patterns: Vec<Pattern>, // Multiple patterns: case a, b, c:
     pub body: Block,
     pub span: Span,
+}
+
+/// Select case for select statement
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectCase {
+    pub kind: SelectCaseKind,
+    pub body: Block,
+    pub span: Span,
+}
+
+/// Kind of select case
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectCaseKind {
+    /// <-ch (receive and discard)
+    Recv { channel: Expr },
+    /// v := <-ch (receive with declaration)
+    RecvDecl { name: String, channel: Expr },
+    /// v, ok := <-ch (receive with ok check)
+    RecvDeclOk {
+        name: String,
+        ok_name: String,
+        channel: Expr,
+    },
+    /// ch <- value (send)
+    Send { channel: Expr, value: Expr },
+    /// default:
+    Default,
 }
 
 /// Pattern

@@ -890,6 +890,219 @@ impl Parser {
         }
     }
 
+    /// Parse select statement
+    fn parse_select_stmt(&mut self, start_span: Span) -> Result<Stmt> {
+        self.expect(Token::LBrace)?;
+        self.skip_terminators();
+
+        let mut cases = Vec::new();
+
+        while !matches!(self.peek(), Some(Token::RBrace) | None) {
+            let case = self.parse_select_case()?;
+            cases.push(case);
+            self.skip_terminators();
+        }
+
+        let end_span = self.expect(Token::RBrace)?;
+
+        Ok(Stmt {
+            kind: StmtKind::Select { cases },
+            span: Span::with_bytes(
+                start_span.start,
+                end_span.end,
+                self.file,
+                start_span.byte_start,
+                end_span.byte_end,
+            ),
+        })
+    }
+
+    /// Parse a select case: case <-ch:, case v := <-ch:, case ch <- v:, or default:
+    fn parse_select_case(&mut self) -> Result<SelectCase> {
+        let case_start = self.peek_span();
+
+        // Check for default:
+        if let Some(Token::Ident(s)) = self.peek()
+            && s == "default"
+        {
+            self.advance(); // consume 'default'
+            self.expect(Token::Colon)?;
+            self.skip_terminators();
+
+            // Parse body
+            let body = self.parse_select_case_body()?;
+            let body_span_end = body.span.end;
+            let body_byte_end = body.span.byte_end;
+
+            return Ok(SelectCase {
+                kind: SelectCaseKind::Default,
+                body,
+                span: Span::with_bytes(
+                    case_start.start,
+                    body_span_end,
+                    self.file,
+                    case_start.byte_start,
+                    body_byte_end,
+                ),
+            });
+        }
+
+        self.expect(Token::Case)?;
+
+        // Now we need to determine the case kind:
+        // 1. <-ch             - recv (discard)
+        // 2. v := <-ch        - recv with decl
+        // 3. v, ok := <-ch    - recv with ok check
+        // 4. ch <- value      - send
+
+        // Check for receive without assignment: case <-ch:
+        if self.consume(&Token::Arrow) {
+            let channel = self.parse_expr()?;
+            self.expect(Token::Colon)?;
+            self.skip_terminators();
+
+            let body = self.parse_select_case_body()?;
+            let body_span_end = body.span.end;
+            let body_byte_end = body.span.byte_end;
+
+            return Ok(SelectCase {
+                kind: SelectCaseKind::Recv { channel },
+                body,
+                span: Span::with_bytes(
+                    case_start.start,
+                    body_span_end,
+                    self.file,
+                    case_start.byte_start,
+                    body_byte_end,
+                ),
+            });
+        }
+
+        // Parse the first expression/identifier
+        let first_expr = self.parse_expr()?;
+
+        // Check for send: ch <- value
+        if self.consume(&Token::Arrow) {
+            let value = self.parse_expr()?;
+            self.expect(Token::Colon)?;
+            self.skip_terminators();
+
+            let body = self.parse_select_case_body()?;
+            let body_span_end = body.span.end;
+            let body_byte_end = body.span.byte_end;
+
+            return Ok(SelectCase {
+                kind: SelectCaseKind::Send {
+                    channel: first_expr,
+                    value,
+                },
+                body,
+                span: Span::with_bytes(
+                    case_start.start,
+                    body_span_end,
+                    self.file,
+                    case_start.byte_start,
+                    body_byte_end,
+                ),
+            });
+        }
+
+        // Must be a receive with declaration
+        // Check for second variable (v, ok := <-ch)
+        let (first_name, second_name) = if let ExprKind::Ident(name) = &first_expr.kind {
+            let first_name = name.clone();
+            if self.consume(&Token::Comma) {
+                // v, ok := <-ch
+                match self.advance() {
+                    Some((Token::Ident(second), _)) => (first_name, Some(second)),
+                    Some((tok, span)) => {
+                        return Err(SoppoError::Parse {
+                            message: format!("Expected identifier after ',', found {:?}", tok),
+                            span,
+                        });
+                    }
+                    None => {
+                        return Err(SoppoError::Parse {
+                            message: "Expected identifier after ','".to_string(),
+                            span: Span::dummy(),
+                        });
+                    }
+                }
+            } else {
+                (first_name, None)
+            }
+        } else {
+            return Err(SoppoError::Parse {
+                message: "Expected identifier in select case".to_string(),
+                span: first_expr.span,
+            });
+        };
+
+        // Expect := <-ch
+        self.expect(Token::ColonAssign)?;
+        self.expect(Token::Arrow)?;
+        let channel = self.parse_expr()?;
+        self.expect(Token::Colon)?;
+        self.skip_terminators();
+
+        let body = self.parse_select_case_body()?;
+        let body_span_end = body.span.end;
+        let body_byte_end = body.span.byte_end;
+
+        let kind = if let Some(ok_name) = second_name {
+            SelectCaseKind::RecvDeclOk {
+                name: first_name,
+                ok_name,
+                channel,
+            }
+        } else {
+            SelectCaseKind::RecvDecl {
+                name: first_name,
+                channel,
+            }
+        };
+
+        Ok(SelectCase {
+            kind,
+            body,
+            span: Span::with_bytes(
+                case_start.start,
+                body_span_end,
+                self.file,
+                case_start.byte_start,
+                body_byte_end,
+            ),
+        })
+    }
+
+    /// Parse the body of a select case (statements until next case/default/})
+    fn parse_select_case_body(&mut self) -> Result<Block> {
+        let mut stmts = Vec::new();
+        let body_start = self.peek_span();
+
+        while !matches!(self.peek(), Some(Token::Case) | Some(Token::RBrace) | None) {
+            // Check if it's 'default'
+            if let Some(Token::Ident(s)) = self.peek()
+                && s == "default"
+            {
+                break;
+            }
+
+            stmts.push(self.parse_stmt()?);
+            self.skip_terminators();
+        }
+
+        let body_end = stmts
+            .last()
+            .map(|s| s.span.clone())
+            .unwrap_or(body_start.clone());
+
+        Ok(Block {
+            stmts,
+            span: body_end,
+        })
+    }
+
     /// Parse postfix operations (call, field access)
     fn parse_postfix(&mut self) -> Result<Expr> {
         let mut expr = self.parse_primary()?;
@@ -1886,7 +2099,11 @@ impl Parser {
 
             Some(Token::Return) => {
                 self.advance();
-                let values = if matches!(self.peek(), Some(Token::RBrace) | None) {
+                // Newline or semicolon after return means empty return
+                let values = if matches!(
+                    self.peek(),
+                    Some(Token::RBrace) | Some(Token::Newline) | Some(Token::Semicolon) | None
+                ) {
                     vec![]
                 } else {
                     // Parse comma-separated return values
@@ -1917,6 +2134,11 @@ impl Parser {
             Some(Token::Match) => {
                 self.advance();
                 self.parse_match_stmt(start_span)
+            }
+
+            Some(Token::Select) => {
+                self.advance();
+                self.parse_select_stmt(start_span)
             }
 
             Some(Token::Go) => {
@@ -3088,5 +3310,57 @@ mod tests {
 
         assert_eq!(func.name, "add");
         assert_eq!(func.body.stmts.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_select() {
+        let source = r#"select {
+            case v := <-ch:
+                x := 1
+            case ch2 <- msg:
+                y := 2
+            case <-done:
+                return
+            default:
+                w := 4
+        }"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let stmt = parser.parse_stmt().unwrap();
+
+        match stmt.kind {
+            StmtKind::Select { cases } => {
+                assert_eq!(cases.len(), 4);
+
+                // First case: v := <-ch (RecvDecl)
+                match &cases[0].kind {
+                    SelectCaseKind::RecvDecl { name, channel } => {
+                        assert_eq!(name, "v");
+                        assert!(matches!(&channel.kind, ExprKind::Ident(s) if s == "ch"));
+                    }
+                    _ => panic!("Expected RecvDecl"),
+                }
+
+                // Second case: ch2 <- msg (Send)
+                match &cases[1].kind {
+                    SelectCaseKind::Send { channel, value } => {
+                        assert!(matches!(&channel.kind, ExprKind::Ident(s) if s == "ch2"));
+                        assert!(matches!(&value.kind, ExprKind::Ident(s) if s == "msg"));
+                    }
+                    _ => panic!("Expected Send"),
+                }
+
+                // Third case: <-done (Recv)
+                match &cases[2].kind {
+                    SelectCaseKind::Recv { channel } => {
+                        assert!(matches!(&channel.kind, ExprKind::Ident(s) if s == "done"));
+                    }
+                    _ => panic!("Expected Recv"),
+                }
+
+                // Fourth case: default
+                assert!(matches!(cases[3].kind, SelectCaseKind::Default));
+            }
+            _ => panic!("Expected select statement"),
+        }
     }
 }

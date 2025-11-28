@@ -54,6 +54,8 @@ pub enum Token {
     Continue,
     #[token("range")]
     Range,
+    #[token("select")]
+    Select,
 
     // Identifiers and literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", priority = 1, callback = |lex| lex.slice().to_string())]

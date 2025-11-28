@@ -217,6 +217,39 @@ func main() {
     go func() {
         fmt.Println("anonymous goroutine")
     }()
+    selectCh1 := make(chan int, 1)
+    selectCh2 := make(chan string, 1)
+    selectCh1 <- 42
+    select {
+    case v := <-selectCh1:
+        fmt.Println(v)
+    case msg := <-selectCh2:
+        fmt.Println(msg)
+    default:
+        fmt.Println("no message")
+    }
+    select {
+    case selectCh2 <- "hello":
+        fmt.Println("sent")
+    default:
+        fmt.Println("could not send")
+    }
+    selectCh3 := make(chan int, 1)
+    selectCh3 <- 99
+    select {
+    case <-selectCh3:
+        fmt.Println("received and discarded")
+    default:
+        fmt.Println("channel empty")
+    }
+    selectCh4 := make(chan int)
+    close(selectCh4)
+    select {
+    case val, ok := <-selectCh4:
+        fmt.Println(val, ok)
+    default:
+        fmt.Println("channel empty")
+    }
     defer cleanup()
     defer fmt.Println("deferred")
     loopIdx := 0

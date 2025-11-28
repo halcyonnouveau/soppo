@@ -1,6 +1,6 @@
 use crate::parse::{
     BinOp, Block, ConstDecl, Decl, EnumVariant, Expr, ExprKind, File, FuncDecl, Generic, Literal,
-    Pattern, PatternKind, Stmt, StmtKind, TypeDecl, TypeKind,
+    Pattern, PatternKind, SelectCaseKind, Stmt, StmtKind, TypeDecl, TypeKind, UnaryOp,
 };
 use crate::types::GlobalState;
 
@@ -387,7 +387,7 @@ impl Codegen {
                                 if i > 0 {
                                     self.emit(", ");
                                 }
-                                self.emit(&self.go_type(&ty.name));
+                                self.emit(self.go_type(&ty.name));
                             }
                             self.emit(")");
                         }
@@ -804,6 +804,56 @@ impl Codegen {
                 self.emit("\n");
             }
 
+            StmtKind::Select { cases } => {
+                self.emit_indent();
+                self.emit("select {\n");
+
+                for case in cases {
+                    self.emit_indent();
+
+                    match &case.kind {
+                        SelectCaseKind::Recv { channel } => {
+                            self.emit("case <-");
+                            self.gen_expr(channel);
+                            self.emit(":\n");
+                        }
+                        SelectCaseKind::RecvDecl { name, channel } => {
+                            self.emit(&format!("case {} := <-", name));
+                            self.gen_expr(channel);
+                            self.emit(":\n");
+                        }
+                        SelectCaseKind::RecvDeclOk {
+                            name,
+                            ok_name,
+                            channel,
+                        } => {
+                            self.emit(&format!("case {}, {} := <-", name, ok_name));
+                            self.gen_expr(channel);
+                            self.emit(":\n");
+                        }
+                        SelectCaseKind::Send { channel, value } => {
+                            self.emit("case ");
+                            self.gen_expr(channel);
+                            self.emit(" <- ");
+                            self.gen_expr(value);
+                            self.emit(":\n");
+                        }
+                        SelectCaseKind::Default => {
+                            self.emit("default:\n");
+                        }
+                    }
+
+                    self.indent();
+                    for stmt in &case.body.stmts {
+                        self.gen_stmt(stmt);
+                    }
+                    self.dedent();
+                }
+
+                self.emit_indent();
+                self.emit("}\n");
+            }
+
             StmtKind::Go(expr) => {
                 self.emit_indent();
                 self.emit("go ");
@@ -1047,36 +1097,33 @@ impl Codegen {
                 self.emit("}");
             }
 
-            ExprKind::Unary { op, operand } => {
-                use crate::parse::UnaryOp;
-                match op {
-                    UnaryOp::Neg => {
-                        self.emit("(-");
-                        self.gen_expr(operand);
-                        self.emit(")");
-                    }
-                    UnaryOp::Not => {
-                        self.emit("(!");
-                        self.gen_expr(operand);
-                        self.emit(")");
-                    }
-                    UnaryOp::Ref => {
-                        self.emit("(&");
-                        self.gen_expr(operand);
-                        self.emit(")");
-                    }
-                    UnaryOp::Deref => {
-                        self.emit("(*");
-                        self.gen_expr(operand);
-                        self.emit(")");
-                    }
-                    UnaryOp::Recv => {
-                        self.emit("(<-");
-                        self.gen_expr(operand);
-                        self.emit(")");
-                    }
+            ExprKind::Unary { op, operand } => match op {
+                UnaryOp::Neg => {
+                    self.emit("(-");
+                    self.gen_expr(operand);
+                    self.emit(")");
                 }
-            }
+                UnaryOp::Not => {
+                    self.emit("(!");
+                    self.gen_expr(operand);
+                    self.emit(")");
+                }
+                UnaryOp::Ref => {
+                    self.emit("(&");
+                    self.gen_expr(operand);
+                    self.emit(")");
+                }
+                UnaryOp::Deref => {
+                    self.emit("(*");
+                    self.gen_expr(operand);
+                    self.emit(")");
+                }
+                UnaryOp::Recv => {
+                    self.emit("(<-");
+                    self.gen_expr(operand);
+                    self.emit(")");
+                }
+            },
 
             ExprKind::FuncLit {
                 params,
