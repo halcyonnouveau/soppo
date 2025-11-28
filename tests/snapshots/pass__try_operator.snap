@@ -120,6 +120,22 @@ func multipleTry() error {
     return nil
 }
 
+// === Nested ? with different error names (avoids shadowing) ===
+func nestedTry() error {
+    port, _err0 := parsePort("8080")
+    if _err0 != nil {
+        err := _err0
+        _err1 := deleteFile("/tmp/cleanup")
+        if _err1 != nil {
+            deleteErr := _err1
+            return fmt.Errorf("cleanup failed after %v: %v", err, deleteErr)
+        }
+        return fmt.Errorf("parse failed: %v", err)
+    }
+    fmt.Println(port)
+    return nil
+}
+
 // === ? with int return ===
 func tryWithIntReturn() (int, error) {
     port, _err0 := parsePort("8080")
@@ -155,6 +171,7 @@ func main() {
     multiReturn()
     nilSafety()
     multipleTry()
+    nestedTry()
     tryWithIntReturn()
     tryWithStringReturn()
     tryWithStructReturn()

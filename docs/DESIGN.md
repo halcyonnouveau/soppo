@@ -11,15 +11,13 @@ This document describes the design of Soppo - the principles that guide developm
 - Every feature should complement Go's design
 - Always provide useful error messages
 
-## Architecture
+## Compiler Architecture
 
 ```
 Source (.sop) -> Parser -> AST -> Type Checking/Inference -> Codegen -> Output (.go)
                                             ^
                                    External .go packages
 ```
-
-Go imports are resolved by parsing Go source files with tree-sitter to extract type signatures.
 
 ## Enums
 
@@ -109,14 +107,17 @@ Go's `if err != nil { return err }` is verbose and repetitive. The `?` operator 
 // Propagate error directly
 port := parsePort(config) ?
 
-// Custom handling, no variable needed
+// Custom handling
 port := parsePort(config) ? {
-    return fmt.Errorf("parse failed")
+	return fmt.Errorf("parse failed")
 }
 
-// Custom handling with named error (avoids shadowing)
-port := parsePort(config) ? parseErr {
-    return fmt.Errorf("parse failed: %v", parseErr)
+// Custom handling with named error
+port := parsePort(config) ? err {
+	deleteFile(path) ? deleteErr {
+		return fmt.Errorf("cleanup failed after %v: %v", err, deleteErr)
+	}
+	return fmt.Errorf("parse failed: %v", err)
 }
 
 // Works with error-only returns too
@@ -143,6 +144,7 @@ if user != nil {
 if user == nil {
     return
 }
+
 fmt.Println(user.Name)      // OK: user is non-nil after the guard
 ```
 
@@ -224,12 +226,12 @@ Soppo uses Go-style module-qualified import paths for all imports. Local Soppo p
 - If an import path starts with your module path (from `go.mod`) AND
 - The corresponding local directory contains `.sop` files
 
-Then it's treated as a Soppo import and the generated Go import path is adjusted to point to the `gen/` output directory.
+Then it's treated as a Soppo import and the generated Go import path is adjusted to point to the compilation output directory.
 
 For example, with module `github.com/user/project`:
-- `import "github.com/user/project/helpers"` → Soppo import if `helpers/` has `.sop` files
-- `import "github.com/user/project/helpers"` → Go import if `helpers/` only has `.go` files
-- `import "fmt"` → Go import (external package)
+- `import "github.com/user/project/helpers"`: Soppo import if `helpers/` has `.sop` files
+- `import "github.com/user/project/helpers"`: Go import if `helpers/` only has `.go` files
+- `import "fmt"`: Go import (external package)
 
 Like Go, Soppo imports are package-based (directory-based). Each directory with `.sop` files forms a package.
 
