@@ -1,13 +1,15 @@
 # Soppo Language Design
 
-A language that compiles to Go, adding enums, pattern matching, and safer error/nil handling.
+This document describes the design of Soppo - the principles that guide development and the features it provides. It's intended for contributors and anyone wanting to understand why Soppo works the way it does.
 
 ## Principles
 
-- Go syntax compatibility - if Go has syntax for it, use it
+- Reuse Go syntax where it exists
 - Compile to idiomatic Go
-- Type safety via enums, exhaustive matching, nil tracking
-- Rust-inspired error messages
+- Catch errors at compile time, not runtime
+- Do the hard work to make correctness easy
+- Every feature should complement Go's design
+- Always provide useful error messages
 
 ## Architecture
 
@@ -20,6 +22,8 @@ Source (.sop) -> Parser -> AST -> Type Checking/Inference -> Codegen -> Output (
 Go imports are resolved by parsing Go source files with tree-sitter to extract type signatures.
 
 ## Enums
+
+Go lacks sum types, forcing developers to use interfaces or constants with no compile-time exhaustiveness checking. Soppo enums provide tagged unions that the compiler can verify.
 
 ```go
 // Unit variants
@@ -53,7 +57,7 @@ type Option[T any] enum {
 
 ## Pattern Matching
 
-`match` replaces `switch` in Soppo.
+Go's `switch` lacks destructuring and exhaustiveness checking. `match` replaces `switch` in Soppo, making it safe and ergonomic to work with enums and structured data.
 
 ```go
 match colour {
@@ -99,7 +103,7 @@ All variants must be handled (exhaustiveness checking).
 
 ## Error Handling (`?` operator)
 
-Works with `error` and `(T, error)` returns. On non-nil error, returns early with zero values + error.
+Go's `if err != nil { return err }` is verbose and repetitive. The `?` operator reduces boilerplate while keeping error handling explicit and visible.
 
 ```go
 // Propagate error directly
@@ -119,9 +123,28 @@ port := parsePort(config) ? parseErr {
 deleteFile(path) ?
 ```
 
+Works with `error` and `(T, error)` returns. On non-nil error, returns early with zero values + error.
+
 **Note**: There is a space before the `?` (not like Rust).
 
+## Nil Safety
+
+Nil pointer dereferences are a common source of runtime panics in Go. Soppo tracks nil state through control flow and catches unsafe access at compile time.
+
+```go
+user := findUser(1)         // *User, may be nil
+fmt.Println(user.Name)      // ERROR: user may be nil
+
+if user != nil {
+    fmt.Println(user.Name)  // OK
+}
+```
+
+**Note**: Flow-sensitive nil tracking is complex and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees.
+
 ## Named Arguments
+
+Positional arguments can be unclear when multiple parameters share the same type. Named arguments make call sites self-documenting without requiring wrapper structs.
 
 ```go
 func createUser(name string, age int, active bool) User
@@ -142,6 +165,8 @@ log(level: "info", "msg1", "msg2")  // ok
 
 ## String Interpolation
 
+`fmt.Sprintf` with format verbs is error-prone - mismatched types or argument counts are only caught at runtime. Interpolation is safer and more readable.
+
 ```go
 name := "alice"
 age := 30
@@ -150,19 +175,6 @@ msg := "hello {name}, you are {age}"
 ```
 
 Variables only, no expressions. Use `{{` to escape literal braces.
-
-## Nil Safety
-
-Flow-sensitive nil tracking:
-
-```go
-user := findUser(1)         // *User, may be nil
-fmt.Println(user.Name)      // ERROR: user may be nil
-
-if user != nil {
-    fmt.Println(user.Name)  // OK
-}
-```
 
 ## Imports
 

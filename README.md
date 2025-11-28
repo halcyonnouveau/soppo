@@ -10,12 +10,12 @@ Soppo is not production ready.
 
 ## Features
 
-- **Nil safety:** Compile-time nil checks
 - **Enums:** Tagged unions with struct variants
 - **Pattern matching:** Exhaustive matching with destructuring
 - **Error handling:** `?` propagation and `? err { }` custom handling
-- **String interpolation:** `"value: {var}"` syntax
+- **Nil safety:** Compile-time nil checks
 - **Named arguments:** `func(name: value)` for clarity
+- **String interpolation:** `"value: {var}"` syntax
 - **Detailed error messages:** Rust-inspired compiler diagnostics
 
 ## Quick Look
