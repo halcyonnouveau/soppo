@@ -47,7 +47,7 @@ impl Parser {
         }
 
         // Now we need an identifier
-        let (name, span) = match self.advance() {
+        let (mut name, mut span) = match self.advance() {
             Some((Token::Ident(name), span)) => (name, span),
             Some((tok, span)) => {
                 return Err(SoppoError::Parse {
@@ -62,6 +62,33 @@ impl Parser {
                 });
             }
         };
+
+        // Handle qualified types like Option.Some (for enum variants in type assertions)
+        while self.consume(&Token::Dot) {
+            let (field_name, field_span) = match self.advance() {
+                Some((Token::Ident(field), field_span)) => (field, field_span),
+                Some((tok, span)) => {
+                    return Err(SoppoError::Parse {
+                        message: format!("Expected identifier after '.', found {:?}", tok),
+                        span,
+                    });
+                }
+                None => {
+                    return Err(SoppoError::Parse {
+                        message: "Expected identifier after '.'".to_string(),
+                        span: Span::dummy(),
+                    });
+                }
+            };
+            name = format!("{}.{}", name, field_name);
+            span = Span::with_bytes(
+                span.start,
+                field_span.end,
+                self.file,
+                span.byte_start,
+                field_span.byte_end,
+            );
+        }
 
         // Map type: map[K]V
         if name == "map" {

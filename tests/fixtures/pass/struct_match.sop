@@ -1,0 +1,78 @@
+package main
+
+import "fmt"
+
+type Point struct {
+    x int
+    y int
+}
+
+type Person struct {
+    name string
+    age int
+}
+
+// Match on struct field values
+func describePoint(p Point) string {
+    var result string
+    match p {
+    case Point{x: 0, y: 0}:
+        result = "origin"
+    case Point{x: 0, y}:
+        result = fmt.Sprintf("on y-axis at %d", y)
+    case Point{x, y: 0}:
+        result = fmt.Sprintf("on x-axis at %d", x)
+    default:
+        result = fmt.Sprintf("at (%d, %d)", p.x, p.y)
+    }
+    return result
+}
+
+// Match with multiple literal fields
+func isOrigin(p Point) bool {
+    var result bool
+    match p {
+    case Point{x: 0, y: 0}:
+        result = true
+    default:
+        result = false
+    }
+    return result
+}
+
+// Match with string literals
+func greet(p Person) string {
+    var result string
+    match p {
+    case Person{name: "Alice", age}:
+        result = fmt.Sprintf("Hello Alice, you are %d", age)
+    case Person{name: "Bob", age}:
+        result = fmt.Sprintf("Hi Bob, you are %d", age)
+    default:
+        result = fmt.Sprintf("Hello %s, you are %d", p.name, p.age)
+    }
+    return result
+}
+
+func main() {
+    origin := Point{x: 0, y: 0}
+    onY := Point{x: 0, y: 5}
+    onX := Point{x: 3, y: 0}
+    other := Point{x: 2, y: 7}
+
+    fmt.Println(describePoint(origin))
+    fmt.Println(describePoint(onY))
+    fmt.Println(describePoint(onX))
+    fmt.Println(describePoint(other))
+
+    fmt.Println(isOrigin(origin))
+    fmt.Println(isOrigin(other))
+
+    alice := Person{name: "Alice", age: 30}
+    bob := Person{name: "Bob", age: 25}
+    charlie := Person{name: "Charlie", age: 40}
+
+    fmt.Println(greet(alice))
+    fmt.Println(greet(bob))
+    fmt.Println(greet(charlie))
+}

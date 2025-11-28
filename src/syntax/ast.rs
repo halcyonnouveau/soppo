@@ -208,6 +208,14 @@ pub enum StmtKind {
         then_block: Block,
         else_block: Option<Block>,
     },
+    // if x := expr.(Variant) { ... } else { ... }
+    IfLet {
+        binding: String, // The variable to bind (e.g., "x")
+        expr: Expr,      // The expression to match against
+        variant: String, // The variant to check (e.g., "Option.Some")
+        then_block: Block,
+        else_block: Option<Block>,
+    },
     Return {
         values: Vec<Expr>, // Empty = no return, one = single, many = multi-value
     },
@@ -418,14 +426,23 @@ pub enum PatternKind {
     Literal(Literal),
     /// Variant with data extraction: Result.Ok(value)
     Destructor { name: String, binding: String },
-    /// Struct variant destructuring: Shape.Circle{radius: r, ...}
+    /// Struct destructuring: Shape.Circle{radius: r, ...} or Point{x: 0, y}
     StructDestructor {
-        name: String,                  // e.g., "Shape.Circle"
-        fields: Vec<(String, String)>, // (field_name, binding_name) pairs
-        rest: bool,                    // true if `...` was used to ignore remaining fields
+        name: String,                        // e.g., "Shape.Circle" or "Point"
+        fields: Vec<(String, FieldPattern)>, // (field_name, pattern) pairs
+        rest: bool,                          // true if `...` was used to ignore remaining fields
     },
     /// Guard expression for expression-less match: case x > 0:
     Guard(Box<Expr>),
+}
+
+/// Field pattern in struct destructuring
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldPattern {
+    /// Bind field value to a variable: `field: binding` or just `field`
+    Bind(String),
+    /// Match field against a literal: `field: 42`
+    Literal(Literal),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -692,6 +692,86 @@ impl Parser {
 
             Some(Token::If) => {
                 self.advance();
+
+                // Check for if-let pattern: if x := expr.(Variant) { ... }
+                // We need to look ahead to see if this is `ident :=` or `_ :=`
+                let saved_pos = self.pos;
+
+                // Handle both regular identifiers and underscore as binding
+                let binding = match self.peek() {
+                    Some(Token::Ident(name)) => Some(name.clone()),
+                    Some(Token::Underscore) => Some("_".to_string()),
+                    _ => None,
+                };
+
+                if let Some(binding) = binding {
+                    self.advance(); // consume ident or underscore
+
+                    if self.consume(&Token::ColonAssign) {
+                        // Parse the expression after :=
+                        let expr = self.parse_expr()?;
+
+                        // Check if it's a type assertion (if-let pattern)
+                        if let ExprKind::TypeAssert {
+                            expr: inner_expr,
+                            ty,
+                        } = expr.kind
+                        {
+                            // This is if-let: if x := expr.(Variant) { ... }
+                            let then_block = self.parse_block()?;
+
+                            let else_block = if self.consume(&Token::Else) {
+                                if matches!(self.peek(), Some(Token::If)) {
+                                    let if_stmt = self.parse_stmt()?;
+                                    let span = if_stmt.span;
+                                    Some(Block {
+                                        stmts: vec![if_stmt],
+                                        span,
+                                    })
+                                } else {
+                                    Some(self.parse_block()?)
+                                }
+                            } else {
+                                None
+                            };
+
+                            let end_span = else_block
+                                .as_ref()
+                                .map(|b| b.span)
+                                .unwrap_or(then_block.span);
+
+                            return Ok(Stmt {
+                                span: Span::with_bytes(
+                                    start_span.start,
+                                    end_span.end,
+                                    self.file,
+                                    start_span.byte_start,
+                                    end_span.byte_end,
+                                ),
+                                kind: StmtKind::IfLet {
+                                    binding,
+                                    expr: *inner_expr,
+                                    variant: ty.name,
+                                    then_block,
+                                    else_block,
+                                },
+                            });
+                        } else {
+                            // Not a type assertion - error for now
+                            // (Could support init statements later: if x := foo(); cond { })
+                            return Err(SoppoError::Parse {
+                                message: "Expected type assertion in if-let pattern (e.g., `if x := expr.(Variant)`)"
+                                    .to_string(),
+                                span: expr.span,
+                            });
+                        }
+                    } else {
+                        // Not := after ident, backtrack and parse as regular if
+                        self.pos = saved_pos;
+                    }
+                }
+
+                // Regular if statement
                 let condition = self.parse_expr()?;
                 let then_block = self.parse_block()?;
 

@@ -95,9 +95,89 @@ case x < 0:
 case x == 0 || y == 0:
     zero()
 }
+
+// Struct matching with literal field values
+match point {
+case Point{x: 0, y: 0}:
+    origin()
+case Point{x: 0, y}:
+    onYAxis(y)
+case Point{x, y: 0}:
+    onXAxis(x)
+default:
+    other(point.x, point.y)
+}
 ```
 
-All variants must be handled (exhaustiveness checking).
+All variants must be handled (exhaustiveness checking for enums).
+
+**Codegen Limitation:** Using match as the final statement in a returning function is semantically valid in Soppo, but the generated Go code won't compile. This is because Go doesn't recognise exhaustive switch statements - it requires a return after the switch even when all cases return. Assign to a variable instead:
+
+```go
+// Semantically correct, but generated Go won't compile
+func describe(c Colour) string {
+    match c {
+    case Colour.Red:
+        return "red"
+    case Colour.Green:
+        return "green"
+    case Colour.Blue:
+        return "blue"
+    }
+}
+
+// Use assignment instead
+func describe(c Colour) string {
+    var result string
+    match c {
+    case Colour.Red:
+        result = "red"
+    case Colour.Green:
+        result = "green"
+    case Colour.Blue:
+        result = "blue"
+    }
+    return result
+}
+```
+
+### Partial Matching
+
+When you only care about one variant, full `match` is verbose. Combining `if` with a type assertion provides a concise way to check and destructure a single variant:
+
+```go
+// Instead of:
+match opt {
+case Option.Some(x):
+    use(x)
+case Option.None:
+    // nothing
+}
+
+// Write:
+if x := opt.(Option.Some) {
+    use(x)
+}
+
+// With else block:
+if x := opt.(Option.Some) {
+    use(x)
+} else {
+    handleNone()
+}
+
+// For struct variants, binding gets the full struct:
+if c := shape.(Shape.Circle) {
+    area = 3.14 * c.radius * c.radius
+}
+
+// Unit variants work too (binding is the zero struct):
+if _ := colour.(Colour.Red) {
+    stop()
+}
+```
+
+Uses Go's type assertion syntax `.(Type)` but the block only executes if the variant matches. The binding receives the variant's data (inner value for single-value variants, full struct for struct variants).
 
 ## Error Handling (`?` operator)
 

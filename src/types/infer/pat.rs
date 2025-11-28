@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::Infer;
 use crate::error::Result;
-use crate::syntax::{EnumVariant, Pattern, PatternKind};
+use crate::syntax::{EnumVariant, FieldPattern, Pattern, PatternKind};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
 
@@ -60,53 +60,77 @@ impl Infer {
                 fields,
                 rest: _,
             } => {
-                // For struct destructor patterns like Circle{radius: r, ...}
+                // For struct destructor patterns like Circle{radius: r, ...} or Point{x: 0, y}
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
                 // Collect field types first to avoid borrow conflicts
                 let mut bindings: Vec<(String, Type)> = Vec::new();
-                let mut found_variant = false;
+                let mut found_type = false;
 
-                // Look up the struct variant to get field types
+                // Look up the type - could be an enum variant or a regular struct
                 if let Type::Con {
                     name: type_name, ..
                 } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
-                    && let TypeDefKind::Enum { variants } = &type_def.kind
                 {
-                    for variant in variants {
-                        if let EnumVariant::Struct {
-                            name: vname,
-                            fields: variant_fields,
-                            ..
-                        } = variant
-                            && vname == variant_name
-                        {
-                            found_variant = true;
-                            // Collect field types
-                            for (field_name, binding_name) in fields {
-                                if let Some(field) =
-                                    variant_fields.iter().find(|f| &f.name == field_name)
+                    match &type_def.kind {
+                        TypeDefKind::Enum { variants } => {
+                            // Enum struct variant
+                            for variant in variants {
+                                if let EnumVariant::Struct {
+                                    name: vname,
+                                    fields: variant_fields,
+                                    ..
+                                } = variant
+                                    && vname == variant_name
                                 {
-                                    let field_ty = Type::simple(&field.ty.name);
-                                    bindings.push((binding_name.clone(), field_ty));
+                                    found_type = true;
+                                    for (field_name, field_pattern) in fields {
+                                        if let FieldPattern::Bind(binding_name) = field_pattern
+                                            && let Some(field) = variant_fields
+                                                .iter()
+                                                .find(|f| &f.name == field_name)
+                                            {
+                                                let field_ty = Type::simple(&field.ty.name);
+                                                bindings.push((binding_name.clone(), field_ty));
+                                            }
+                                        // Literals don't create bindings
+                                    }
+                                    break;
                                 }
                             }
-                            break;
                         }
+                        TypeDefKind::Struct {
+                            fields: struct_fields,
+                        } => {
+                            // Regular struct matching
+                            found_type = true;
+                            for (field_name, field_pattern) in fields {
+                                if let FieldPattern::Bind(binding_name) = field_pattern
+                                    && let Some((_, field_ty)) =
+                                        struct_fields.iter().find(|(name, _)| name == field_name)
+                                    {
+                                        bindings.push((binding_name.clone(), field_ty.clone()));
+                                    }
+                                // Literals don't create bindings
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
                 // Insert bindings after borrows are released
-                if found_variant {
+                if found_type {
                     for (binding_name, field_ty) in bindings {
                         self.insert_var(binding_name, field_ty);
                     }
                 } else {
                     // Fallback: add bindings with fresh type variables
-                    for (_field_name, binding_name) in fields {
-                        let binding_ty = self.fresh_ty_var();
-                        self.insert_var(binding_name.clone(), binding_ty);
+                    for (_field_name, field_pattern) in fields {
+                        if let FieldPattern::Bind(binding_name) = field_pattern {
+                            let binding_ty = self.fresh_ty_var();
+                            self.insert_var(binding_name.clone(), binding_ty);
+                        }
                     }
                 }
                 Ok(())
@@ -174,34 +198,54 @@ impl Infer {
                     name: type_name, ..
                 } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
-                    && let TypeDefKind::Enum { variants } = &type_def.kind
                 {
-                    for variant in variants {
-                        if let EnumVariant::Struct {
-                            name: vname,
-                            fields: variant_fields,
-                            ..
-                        } = variant
-                            && vname == variant_name
-                        {
-                            for (field_name, binding_name) in fields {
-                                if let Some(field) =
-                                    variant_fields.iter().find(|f| &f.name == field_name)
+                    match &type_def.kind {
+                        TypeDefKind::Enum { variants } => {
+                            for variant in variants {
+                                if let EnumVariant::Struct {
+                                    name: vname,
+                                    fields: variant_fields,
+                                    ..
+                                } = variant
+                                    && vname == variant_name
                                 {
-                                    let field_ty = Type::simple(&field.ty.name);
-                                    bindings.insert(binding_name.clone(), field_ty);
+                                    for (field_name, field_pattern) in fields {
+                                        if let FieldPattern::Bind(binding_name) = field_pattern
+                                            && let Some(field) = variant_fields
+                                                .iter()
+                                                .find(|f| &f.name == field_name)
+                                            {
+                                                let field_ty = Type::simple(&field.ty.name);
+                                                bindings.insert(binding_name.clone(), field_ty);
+                                            }
+                                    }
+                                    break;
                                 }
                             }
-                            break;
                         }
+                        TypeDefKind::Struct {
+                            fields: struct_fields,
+                        } => {
+                            for (field_name, field_pattern) in fields {
+                                if let FieldPattern::Bind(binding_name) = field_pattern
+                                    && let Some((_, field_ty)) =
+                                        struct_fields.iter().find(|(name, _)| name == field_name)
+                                    {
+                                        bindings.insert(binding_name.clone(), field_ty.clone());
+                                    }
+                            }
+                        }
+                        _ => {}
                     }
                 }
 
                 // Fallback for any bindings not found
-                for (_field_name, binding_name) in fields {
-                    bindings
-                        .entry(binding_name.clone())
-                        .or_insert_with(|| self.fresh_ty_var());
+                for (_field_name, field_pattern) in fields {
+                    if let FieldPattern::Bind(binding_name) = field_pattern {
+                        bindings
+                            .entry(binding_name.clone())
+                            .or_insert_with(|| self.fresh_ty_var());
+                    }
                 }
             }
         }

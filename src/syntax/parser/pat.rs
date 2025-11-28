@@ -1,6 +1,6 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
-use crate::syntax::ast::{Arm, Block, Pattern, PatternKind, Stmt, StmtKind};
+use crate::syntax::ast::{Arm, Block, FieldPattern, Literal, Pattern, PatternKind, Stmt, StmtKind};
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
@@ -249,7 +249,7 @@ impl Parser {
                                 break;
                             }
 
-                            // Parse field_name: binding_name
+                            // Parse field_name: pattern or just field_name (shorthand)
                             let field_name = match self.advance() {
                                 Some((Token::Ident(name), _)) => name,
                                 Some((tok, span)) => {
@@ -270,29 +270,58 @@ impl Parser {
                                 }
                             };
 
-                            self.expect(Token::Colon)?;
-
-                            let binding_name = match self.advance() {
-                                Some((Token::Ident(name), _)) => name,
-                                Some((tok, span)) => {
-                                    return Err(SoppoError::Parse {
-                                        message: format!(
-                                            "Expected binding name in struct pattern, found {:?}",
-                                            tok
-                                        ),
-                                        span,
-                                    });
+                            // Check for colon - if not present, use shorthand (field binds to same name)
+                            let field_pattern = if self.consume(&Token::Colon) {
+                                // After colon: either a literal or a binding name
+                                match self.peek() {
+                                    Some(Token::Integer(n)) => {
+                                        let n = *n;
+                                        self.advance();
+                                        FieldPattern::Literal(Literal::Integer(n))
+                                    }
+                                    Some(Token::String(s)) => {
+                                        let s = s.clone();
+                                        self.advance();
+                                        FieldPattern::Literal(Literal::String(s))
+                                    }
+                                    Some(Token::True) => {
+                                        self.advance();
+                                        FieldPattern::Literal(Literal::Bool(true))
+                                    }
+                                    Some(Token::False) => {
+                                        self.advance();
+                                        FieldPattern::Literal(Literal::Bool(false))
+                                    }
+                                    Some(Token::Ident(name)) => {
+                                        let name = name.clone();
+                                        self.advance();
+                                        FieldPattern::Bind(name)
+                                    }
+                                    Some(tok) => {
+                                        let tok = tok.clone();
+                                        return Err(SoppoError::Parse {
+                                            message: format!(
+                                                "Expected binding name or literal in struct pattern, found {:?}",
+                                                tok
+                                            ),
+                                            span: self.peek_span(),
+                                        });
+                                    }
+                                    None => {
+                                        return Err(SoppoError::Parse {
+                                            message:
+                                                "Expected binding name or literal in struct pattern"
+                                                    .to_string(),
+                                            span: Span::dummy(),
+                                        });
+                                    }
                                 }
-                                None => {
-                                    return Err(SoppoError::Parse {
-                                        message: "Expected binding name in struct pattern"
-                                            .to_string(),
-                                        span: Span::dummy(),
-                                    });
-                                }
+                            } else {
+                                // Shorthand: `field` is same as `field: field`
+                                FieldPattern::Bind(field_name.clone())
                             };
 
-                            fields.push((field_name, binding_name));
+                            fields.push((field_name, field_pattern));
 
                             if !self.consume(&Token::Comma) {
                                 break;

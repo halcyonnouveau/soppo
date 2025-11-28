@@ -1,0 +1,192 @@
+---
+source: tests/pass.rs
+expression: output
+---
+package main
+
+import "fmt"
+
+/*soppo:enum
+Option {
+    Some int
+    None
+}
+*/
+type Option interface {
+    isOption()
+}
+
+type Option_Some struct {
+    Value int
+}
+func (Option_Some) isOption() {}
+
+type Option_None struct {}
+func (Option_None) isOption() {}
+func (Option_None) String() string { return "None" }
+
+var (
+    OptionNone Option = Option_None{}
+)
+func OptionSome(value int) Option {
+    return Option_Some{Value: value}
+}
+
+/*soppo:enum
+Result {
+    Ok string
+    Err string
+}
+*/
+type Result interface {
+    isResult()
+}
+
+type Result_Ok struct {
+    Value string
+}
+func (Result_Ok) isResult() {}
+
+type Result_Err struct {
+    Value string
+}
+func (Result_Err) isResult() {}
+
+func ResultOk(value string) Result {
+    return Result_Ok{Value: value}
+}
+func ResultErr(value string) Result {
+    return Result_Err{Value: value}
+}
+
+/*soppo:enum
+Shape {
+    Circle {
+        radius float64
+    }
+    Rectangle {
+        width float64
+        height float64
+    }
+}
+*/
+type Shape interface {
+    isShape()
+}
+
+type Shape_Circle struct {
+    radius float64
+}
+func (Shape_Circle) isShape() {}
+
+type Shape_Rectangle struct {
+    width float64
+    height float64
+}
+func (Shape_Rectangle) isShape() {}
+
+
+/*soppo:enum
+Colour {
+    Red
+    Green
+    Blue
+}
+*/
+type Colour interface {
+    isColour()
+}
+
+type Colour_Red struct {}
+func (Colour_Red) isColour() {}
+func (Colour_Red) String() string { return "Red" }
+
+type Colour_Green struct {}
+func (Colour_Green) isColour() {}
+func (Colour_Green) String() string { return "Green" }
+
+type Colour_Blue struct {}
+func (Colour_Blue) isColour() {}
+func (Colour_Blue) String() string { return "Blue" }
+
+var (
+    ColourRed Colour = Colour_Red{}
+    ColourGreen Colour = Colour_Green{}
+    ColourBlue Colour = Colour_Blue{}
+)
+
+// Test if-let with single-value variant
+func unwrapOr(opt Option, defaultVal int) int {
+    if __v, __ok := opt.(Option_Some); __ok {
+        x := __v.Value
+        _ = x
+        return x
+    }
+    return defaultVal
+}
+
+// Test if-let with else block
+func unwrapOrElse(opt Option, defaultVal int) int {
+    if __v, __ok := opt.(Option_Some); __ok {
+        x := __v.Value
+        _ = x
+        return x
+    } else {
+        return defaultVal
+    }
+}
+
+// Test if-let with struct variant
+func getRadius(s Shape) float64 {
+    if __v, __ok := s.(Shape_Circle); __ok {
+        c := __v
+        _ = c
+        return c.radius
+    }
+    return 0.0
+}
+
+// Test if-let with unit variant
+func isRed(c Colour) bool {
+    if _, __ok := c.(Colour_Red); __ok {
+        return true
+    }
+    return false
+}
+
+// Test nested if-let
+func processResult(r Result) string {
+    if __v, __ok := r.(Result_Ok); __ok {
+        ok := __v.Value
+        _ = ok
+        return "success: {ok}"
+    } else {
+        if __v, __ok := r.(Result_Err); __ok {
+            err := __v.Value
+            _ = err
+            return "error: {err}"
+        }
+        return "unknown"
+    }
+}
+
+func main() {
+    some := OptionSome(42)
+    none := OptionNone
+    fmt.Printf("unwrapOr(some, 0) = %d\n", unwrapOr(some, 0))
+    fmt.Printf("unwrapOr(none, 99) = %d\n", unwrapOr(none, 99))
+    fmt.Printf("unwrapOrElse(some, 0) = %d\n", unwrapOrElse(some, 0))
+    fmt.Printf("unwrapOrElse(none, 99) = %d\n", unwrapOrElse(none, 99))
+    circle := Shape_Circle{radius: 5.0}
+    rect := Shape_Rectangle{width: 3.0, height: 4.0}
+    fmt.Printf("getRadius(circle) = %f\n", getRadius(circle))
+    fmt.Printf("getRadius(rect) = %f\n", getRadius(rect))
+    red := ColourRed
+    green := ColourGreen
+    fmt.Printf("isRed(red) = %t\n", isRed(red))
+    fmt.Printf("isRed(green) = %t\n", isRed(green))
+    ok := ResultOk("done")
+    err := ResultErr("failed")
+    fmt.Printf("processResult(ok) = %s\n", processResult(ok))
+    fmt.Printf("processResult(err) = %s\n", processResult(err))
+}

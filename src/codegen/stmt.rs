@@ -1,5 +1,8 @@
 use super::Codegen;
-use crate::syntax::{PatternKind, SelectCaseKind, Stmt, StmtKind};
+use crate::syntax::{
+    EnumVariant, FieldPattern, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
+};
+use crate::types::TypeDefKind;
 
 impl Codegen {
     /// Emit a statement ending with optional trailing comment and newline
@@ -225,6 +228,80 @@ impl Codegen {
                 self.output.push('\n');
             }
 
+            StmtKind::IfLet {
+                binding,
+                expr,
+                variant,
+                then_block,
+                else_block,
+            } => {
+                // Generate: if __v, __ok := expr.(EnumType_Variant); __ok { binding := __v.Value; ... }
+                // If binding is _, use _ for __v to avoid unused variable error
+                self.emit_indent();
+                let val_var = if binding == "_" { "_" } else { "__v" };
+                self.emit(&format!("if {}, __ok := ", val_var));
+                self.gen_expr(expr);
+
+                // Convert variant name (e.g., "Option.Some") to Go type (e.g., "Option_Some")
+                let go_variant_type = variant.replace('.', "_");
+                self.emit(&format!(".({}); __ok ", go_variant_type));
+
+                // Generate the then block with binding extraction
+                self.emit("{\n");
+                self.indent();
+
+                // Determine how to extract the binding based on variant type
+                // Look up the enum to find the variant kind
+                let enum_name = variant.split('.').next().unwrap_or(variant);
+                let variant_name = variant.rsplit('.').next().unwrap_or(variant);
+
+                let mut is_single_value = false;
+                if let Some(type_def) = self.global_state.lookup_type(enum_name)
+                    && let TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    for v in variants {
+                        match v {
+                            EnumVariant::Single { name, .. } if name == variant_name => {
+                                is_single_value = true;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                // Generate the binding assignment (skip if binding is underscore)
+                if binding != "_" {
+                    self.emit_indent();
+                    if is_single_value {
+                        // Single value variant: extract the inner value
+                        self.emit(&format!("{} := __v.Value\n", binding));
+                    } else {
+                        // Unit or struct variant: binding is the full struct
+                        self.emit(&format!("{} := __v\n", binding));
+                    }
+
+                    // Suppress unused variable warning
+                    self.emit_indent();
+                    self.emit(&format!("_ = {}\n", binding));
+                }
+
+                // Generate then block statements
+                for stmt in &then_block.stmts {
+                    self.gen_stmt(stmt);
+                }
+
+                self.dedent();
+                self.emit_indent();
+                self.emit("}");
+
+                if let Some(else_block) = else_block {
+                    self.emit(" else ");
+                    self.gen_block(else_block);
+                }
+                self.output.push('\n');
+            }
+
             StmtKind::Return { values } => {
                 self.emit_indent();
                 if values.is_empty() {
@@ -242,10 +319,114 @@ impl Codegen {
             }
 
             StmtKind::Match { scrutinee, arms } => {
-                self.emit_indent();
-
                 // Expression-less match: `match { case x > 0: ... }` -> `switch { case x > 0: ... }`
                 let is_expression_less = scrutinee.is_none();
+
+                // Check if this is struct matching (regular structs, not enum variants)
+                // Struct patterns have names without dots (e.g., "Point"), enum variants have dots (e.g., "Shape.Circle")
+                let is_struct_match = !is_expression_less
+                    && arms.iter().any(|arm| {
+                        arm.patterns.iter().any(|p| {
+                            if let PatternKind::StructDestructor { name, .. } = &p.kind {
+                                !name.contains('.')
+                            } else {
+                                false
+                            }
+                        })
+                    });
+
+                // Handle struct matching with if/else chains
+                if is_struct_match {
+                    let scrutinee_expr = scrutinee.as_ref().unwrap();
+                    let mut first_arm = true;
+
+                    for arm in arms {
+                        let is_default = arm
+                            .patterns
+                            .iter()
+                            .any(|p| matches!(&p.kind, PatternKind::Default));
+
+                        self.emit_indent();
+                        if is_default {
+                            if first_arm {
+                                self.emit("{\n");
+                            } else {
+                                self.emit("} else {\n");
+                            }
+                        } else if let Some(pattern) = arm.patterns.first()
+                            && let PatternKind::StructDestructor { fields, .. } = &pattern.kind {
+                                // Collect literal conditions
+                                let conditions: Vec<_> = fields
+                                    .iter()
+                                    .filter_map(|(field_name, field_pattern)| {
+                                        if let FieldPattern::Literal(lit) = field_pattern {
+                                            Some((field_name.clone(), lit.clone()))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+
+                                if first_arm {
+                                    self.emit("if ");
+                                } else {
+                                    self.emit("} else if ");
+                                }
+
+                                // Generate condition from literal patterns
+                                if conditions.is_empty() {
+                                    // No literal conditions - this matches anything (like a default)
+                                    self.emit("true");
+                                } else {
+                                    for (i, (field_name, lit)) in conditions.iter().enumerate() {
+                                        if i > 0 {
+                                            self.emit(" && ");
+                                        }
+                                        self.gen_expr(scrutinee_expr);
+                                        self.emit(&format!(".{} == ", field_name));
+                                        match lit {
+                                            Literal::Integer(n) => self.emit(&format!("{}", n)),
+                                            Literal::String(s) => self.emit(&format!("\"{}\"", s)),
+                                            Literal::Bool(b) => self.emit(&format!("{}", b)),
+                                        }
+                                    }
+                                }
+
+                                self.emit(" {\n");
+                            }
+
+                        self.indent();
+
+                        // Extract bindings
+                        if let Some(pattern) = arm.patterns.first()
+                            && let PatternKind::StructDestructor { fields, .. } = &pattern.kind {
+                                for (field_name, field_pattern) in fields {
+                                    if let FieldPattern::Bind(binding_name) = field_pattern {
+                                        self.emit_indent();
+                                        self.emit(&format!("{} := ", binding_name));
+                                        self.gen_expr(scrutinee_expr);
+                                        self.emit(&format!(".{}\n", field_name));
+                                        self.emit_indent();
+                                        self.emit(&format!("_ = {}\n", binding_name));
+                                    }
+                                }
+                            }
+
+                        // Emit arm body
+                        for arm_stmt in &arm.body.stmts {
+                            self.gen_stmt(arm_stmt);
+                        }
+
+                        self.dedent();
+                        first_arm = false;
+                    }
+
+                    self.emit_indent();
+                    self.emit("}\n");
+                    return;
+                }
+
+                self.emit_indent();
 
                 // Check if this is a type switch or value switch
                 let is_type_switch = !is_expression_less
@@ -327,12 +508,15 @@ impl Codegen {
                         // Extract pattern bindings for struct destructor patterns
                         if let PatternKind::StructDestructor { fields, .. } = &first_pattern.kind {
                             // __v is already the concrete type from the switch statement
-                            for (field_name, binding_name) in fields {
-                                self.emit_indent();
-                                self.emit(&format!("{} := __v.{}\n", binding_name, field_name));
-                                // Add blank assignment to avoid unused variable warnings
-                                self.emit_indent();
-                                self.emit(&format!("_ = {}\n", binding_name));
+                            for (field_name, field_pattern) in fields {
+                                // Only emit bindings, not literal matches
+                                if let FieldPattern::Bind(binding_name) = field_pattern {
+                                    self.emit_indent();
+                                    self.emit(&format!("{} := __v.{}\n", binding_name, field_name));
+                                    // Add blank assignment to avoid unused variable warnings
+                                    self.emit_indent();
+                                    self.emit(&format!("_ = {}\n", binding_name));
+                                }
                             }
                         }
                     }

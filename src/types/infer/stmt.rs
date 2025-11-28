@@ -470,6 +470,80 @@ impl Infer {
                 }
             }
 
+            StmtKind::IfLet {
+                binding,
+                expr,
+                variant,
+                then_block,
+                else_block,
+            } => {
+                // Infer the type of the expression being matched
+                let expr_ty = self.infer_expr(expr)?;
+                let expr_ty = self.substitute(expr_ty);
+
+                // Extract the variant name (e.g., "Some" from "Option.Some")
+                let variant_name = variant.rsplit('.').next().unwrap_or(variant);
+
+                // Find the binding type from the enum variant
+                let binding_ty = if let Type::Con {
+                    name: type_name, ..
+                } = &expr_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
+                    && let TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    // Find the matching variant
+                    let mut found_ty = None;
+                    for v in variants {
+                        match v {
+                            EnumVariant::Unit { name, .. } if name == variant_name => {
+                                // Unit variant: binding has unit type (empty struct)
+                                found_ty = Some(Type::unit());
+                                break;
+                            }
+                            EnumVariant::Single { name, ty, .. } if name == variant_name => {
+                                // Single value variant: binding has the inner type
+                                found_ty = Some(Type::simple(&ty.name));
+                                break;
+                            }
+                            EnumVariant::Struct { name, .. } if name == variant_name => {
+                                // Struct variant: binding has the variant struct type
+                                // The Go type would be EnumName_VariantName
+                                found_ty = Some(Type::simple(&format!(
+                                    "{}_{}",
+                                    type_name.name, variant_name
+                                )));
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                    found_ty.unwrap_or_else(|| self.fresh_ty_var())
+                } else {
+                    // Not an enum type, use fresh type variable
+                    self.fresh_ty_var()
+                };
+
+                // Type check then block with binding in scope
+                self.push_scope();
+                self.insert_var(binding.clone(), binding_ty);
+                let then_ty = self.infer_block(then_block)?;
+                self.pop_scope();
+
+                // Type check else block if present
+                let else_ty = if let Some(else_block) = else_block {
+                    self.infer_block(else_block)?
+                } else {
+                    Type::unit()
+                };
+
+                // If both branches diverge, the if-let also diverges
+                if matches!(then_ty, Type::Never) && matches!(else_ty, Type::Never) {
+                    Ok(Type::never())
+                } else {
+                    Ok(Type::unit())
+                }
+            }
+
             StmtKind::Return { values } => {
                 // Check return values against expected return types
                 if let Some(expected_types) = self.expected_return_types.clone() {
