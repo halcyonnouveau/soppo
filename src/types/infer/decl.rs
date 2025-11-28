@@ -83,7 +83,7 @@ impl Infer {
             } else {
                 // Multi-value return: create a tuple type
                 Type::generic(
-                    "_tuple",
+                    "tuple",
                     func.return_types.iter().map(Type::from_ast).collect(),
                 )
             };

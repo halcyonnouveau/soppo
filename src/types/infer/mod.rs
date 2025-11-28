@@ -206,7 +206,7 @@ impl Infer {
                     .insert(package_name.to_string(), import_path.to_string());
 
                 // Add package name to scope with a special "soppo_package" type
-                self.insert_var(package_name.to_string(), Type::simple("_soppo_package"));
+                self.insert_var(package_name.to_string(), Type::simple("soppo_package"));
             } else {
                 // Go package import
                 // Use alias if provided, otherwise derive from path
@@ -221,7 +221,7 @@ impl Infer {
 
                 // Add package name to scope with a special "package" type
                 // This allows field access like fmt.Printf to work
-                self.insert_var(package_name.to_string(), Type::simple("_package"));
+                self.insert_var(package_name.to_string(), Type::simple("package"));
             }
         }
     }
@@ -256,9 +256,8 @@ impl Infer {
         } else if func_def.return_types.len() == 1 {
             func_def.return_types[0].clone()
         } else {
-            // Multiple return types - create a tuple-like type
-            // For now, just use the first one (Go-style multi-return handling is TODO)
-            func_def.return_types[0].clone()
+            // Multiple return types - use a tuple type
+            Type::generic("tuple", func_def.return_types.clone())
         };
 
         Some(Type::fun(param_types, return_type))

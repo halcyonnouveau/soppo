@@ -29,7 +29,7 @@ impl Infer {
                         name: type_name,
                         args,
                     } = &value_ty
-                        && type_name.name == "_tuple"
+                        && type_name.name == "tuple"
                         && args.len() == names.len()
                     {
                         for (name, ty) in names.iter().zip(args.iter()) {
@@ -114,7 +114,7 @@ impl Infer {
                         name: type_name,
                         args,
                     } = &value_ty
-                        && type_name.name == "_tuple"
+                        && type_name.name == "tuple"
                         && args.len() == names.len()
                     {
                         for (name, arg_ty) in names.iter().zip(args.iter()) {
@@ -209,7 +209,7 @@ impl Infer {
                         name: type_name,
                         args,
                     } = &value_ty
-                        && type_name.name == "_tuple"
+                        && type_name.name == "tuple"
                         && args.len() == targets.len()
                     {
                         for (target, expected_ty) in targets.iter().zip(args.iter()) {

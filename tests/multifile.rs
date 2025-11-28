@@ -283,3 +283,47 @@ func main() {}
         err
     );
 }
+
+#[test]
+fn test_multiple_return_types() {
+    // Test that functions with multiple return types work across packages
+    let files = &[
+        (
+            "helpers/lib.sop",
+            r#"package helpers
+
+func GetPair() (int, string) {
+    return 42, "hello"
+}
+"#,
+        ),
+        (
+            "cmd/main.sop",
+            r#"package main
+
+import (
+    "fmt"
+    "github.com/test/multiret/helpers"
+)
+
+func main() {
+    num, str := helpers.GetPair()
+    fmt.Println(num, str)
+}
+"#,
+        ),
+    ];
+
+    let results =
+        build_test_project("github.com/test/multiret", files).expect("Build should succeed");
+
+    assert_eq!(results.len(), 2);
+
+    // Check that the generated code compiles (go build runs in build_test_project)
+    let (_, main_content) = results.iter().find(|(p, _)| p.contains("main.go")).unwrap();
+    assert!(
+        main_content.contains("helpers.GetPair"),
+        "Should call helpers.GetPair.\nGot:\n{}",
+        main_content
+    );
+}
