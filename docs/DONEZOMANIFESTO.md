@@ -54,7 +54,7 @@ But that's also because of the different architectures between the two. At the t
 
 This is not the correct approach. I don't understand why you'd add a new type (`enum`), but not type check it properly. Yes, Dingo does attempt exhaustiveness checking - but it's done by pattern matching on variant names like "Ok" and "Err", not actual type information. It only works for built-in types (`Result`, `Option`) and falls back to "cannot determine type, skip exhaustiveness check" for anything it doesn't recognise. 
 
-And even after checking, they still add a `panic` to "unreachable" parts of the generated code because Go's compiler doesn't know the match is complete. "Unreachable" or not, I don't think you should ever be adding panics to your generated code.
+And even after checking, they still add a `panic` to "unreachable" parts of the generated code because Go's compiler doesn't know the match is complete. "Unreachable" or not (I seriously doubt every case this gets added in is actually unreachable), I don't think you should ever be adding panics to your generated code.
 
 > Ever wonder what a dingo actually is?
 > 
@@ -171,7 +171,15 @@ Without a lexer, you're doing surgery blindfolded - regex can't tell if `??` is 
 
 Any language that handles strings, comments, or nested structures (which is basically all of them) needs this foundation.
 
-Let me expand further on this. From what I can gather this is Dingo's architecture:
+Let me expand further on this. If you know compiler design, you'd expect something like:
+
+```
+Source -> Lexer -> Parser -> AST -> Type Checking -> Codegen -> Output
+```
+
+(Oh hey that's basically straight out of the Soppo docs)
+
+Parse first, get a structured representation of your language, then analyse and transform. From what I can gather, this is Dingo's architecture:
 
 ```
 Source (.dingo)
@@ -189,22 +197,20 @@ Plugins modify the Go AST
 Output (.go)
 ```
 
-Again, I think it bears repeating - this is not a good architecture for a programming language compiler. It works for simple cases sure, but:
+Notice the inversion. The structured representation comes after the main transforms, and it's Go's structure, not Dingo's. There is no Dingo AST ([Abstract Syntax Tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree)).
 
-1. No error recovery - if regex breaks, you get Go parser errors pointing at generated code, not your Dingo source
-2. No analysis - can't check exhaustiveness (properly), can't track nil, can't do anything that requires understanding structure
-3. No reliable transforms - regex can't count braces, can't handle nesting, can't know if it's in a string
-4. No tooling foundation - can't build a formatter, linter, or proper LSP (not just relying on `gopls`) because there's no Dingo AST to work with (also yes I'm aware of the "source maps", but like... source maps? really?)
+The "Plugins" step exists because regex can't do semantic work. It can transform `x?` into `error` handling boilerplate, but it can't figure out types. So plugins walk the Go AST looking for patterns - see a function call named `Ok`? That's probably a `Result` constructor, so infer the type, generate a struct declaration, and rewrite the call. It's pattern matching on names, not actual Dingo semantics.
+
+This is the core issue - the fragile tool (regex) does 90% of the work, and the reliable tool (AST plugins) just does cleanup. The division of labour is backwards.
+
+And as a result:
+
+1. No error recovery: if regex breaks, you get Go parser errors pointing at generated code, not your Dingo source
+2. Limited analysis: plugins are pattern-matching on Go AST, not Dingo structure. Exhaustiveness only works for hardcoded types
+3. No reliable transforms: regex can't count braces, can't handle nesting, can't know if it's in a string - and it's on the critical path
+4. No tooling foundation: can't build a formatter, linter, or proper LSP (not just relying on `gopls`) because there's no Dingo AST to work with (also yes I'm aware of the "source maps", but like... source maps? really?)
 
 If this were a human writing it, I'd tell them to read one of the canonical books on this stuff ["Crafting Interpreters"](https://craftinginterpreters.com/) to actually understand how things like this are supposed to be made.
-
-But anyway, if we look back at the architecture diagram, you might have noticed "Plugins modify the Go AST" - what's that about?
-
-Plugins are Dingo's "second stage". Regex handles text transforms (`x?` -> error handling boilerplate), but can't do semantic work like figuring out types. So after regex runs, Dingo parses the output with Go's parser and runs "plugins" on the Go AST. From what I've read, this system is meant to be extensible by anyone, and anyone can add new features.
-
-The plugins walk the AST looking for patterns - see a function call named `Ok`? That's probably a `Result` constructor, so infer the type from the argument, generate a struct declaration, and rewrite the call. It's not ideal since you're pattern matching on naming conventions rather than actual Dingo semantics, but it works for the common cases I guess? Seems highly brittle though.
-
-This two-stage approach is unusual. Most languages have a unified pipeline where the parser understands the full language. 
 
 I'm completely speculating here, but I think Dingo's architecture emerged because Claude started using regex first as it's simple and handles most syntax transforms, along with using Go's parser because why bother making your own?
 
@@ -214,7 +220,9 @@ The "extensible plugin system" framing is optimistic. Yes, someone could theoret
 
 I think it would be more accurate to say plugins are more how Dingo organises its internal code than a community extension point. Though I think it would be nice to be proven wrong, as it's an interesting idea *in theory*, but there's probably a reason other languages haven't done it. 
 
-Wait... aren't I supposed to be mean? Uhh... what I meant to say was "why the fuck would anyone even want to contribute a plugin to this garbage dumpster fire of a so-called 'language'?"
+Although, if Dingo managed to actually get plugins working in a reliable state in this fucked up bizarro world architecture, that would be a much greater achievement than just "making a better Go" and its innovation in compiler design should be shown off front and centre of the project instead.
+
+It'd be like how Go ignored the last 50 years of garbage collector research to do their own thing; Dingo also ignored the last 50 years of compiler research to do its own thing. Except hopefully, this time it will be an improvement. Unlike with Go.
 
 Finally, I get that like this isn't really supposed to be read by humans (which is a bad thing btw), but I don't think that excuses these all files being here.
 
