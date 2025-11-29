@@ -12,9 +12,11 @@ Soppo is not production ready.
 
 ## Installation
 
+Soppo requires [Go](https://go.dev/doc/install/) to be installed.
+
 Download a pre-built binary from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases).
 
-Or with Cargo:
+Or build from source with Cargo (requires Rust):
 ```sh
 cargo install soppo
 ```
