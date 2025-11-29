@@ -1,0 +1,24 @@
+package main
+
+import (
+    "fmt"
+    "github.com/test/import_gen_enum/generated"
+)
+
+func describe(s generated.Status) string {
+    result := ""
+    match s {
+    case generated.Status.Pending:
+        result = "waiting"
+    case generated.Status.Active:
+        result = "in progress"
+    case generated.Status.Complete:
+        result = "done"
+    }
+    return result
+}
+
+func main() {
+    status := generated.Status.Active
+    fmt.Println(describe(status))
+}

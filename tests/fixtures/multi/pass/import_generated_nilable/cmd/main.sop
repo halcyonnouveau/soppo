@@ -1,0 +1,24 @@
+package main
+
+import (
+    "fmt"
+    "github.com/test/import_nilable/models"
+)
+
+func main() {
+    user := models.User{Name: "Test"}
+
+    // Test field access
+    fmt.Println(user.Name)
+
+    // Test nilable field - Email has //soppo:nilable so nil check needed
+    if user.Email != nil {
+        fmt.Println(*user.Email)
+    }
+
+    // Nickname has no marker - in soppo-generated, it's not nilable
+    // But we still need to check if it's nil to be safe
+    if user.Nickname != nil {
+        fmt.Println(*user.Nickname)
+    }
+}

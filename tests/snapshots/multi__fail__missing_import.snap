@@ -1,0 +1,18 @@
+---
+source: tests/multi.rs
+expression: sanitise_error(& err)
+---
+Generated Go code failed to compile:
+cmd/main.go:4:8: no required module provides package github.com/test/missing/nonexistent; to add it:
+	go get github.com/test/missing/nonexistent
+
+
+Generated files:
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "github.com/test/missing/nonexistent"
+
+func main() {
+}

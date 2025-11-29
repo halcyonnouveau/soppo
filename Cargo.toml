@@ -19,4 +19,6 @@ tree-sitter-go = "0.25"
 
 [dev-dependencies]
 insta = "1.44"
+regex = "1.11"
 tempfile = "3.23"
+toml = "0.9"

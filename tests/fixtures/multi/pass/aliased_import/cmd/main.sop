@@ -1,0 +1,11 @@
+package main
+
+import (
+    "fmt"
+    u "github.com/test/aliased/mathutil"
+)
+
+func main() {
+    result := u.Multiply(3, 4)
+    fmt.Println(result)
+}

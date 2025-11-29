@@ -4,35 +4,35 @@ use common::compile_soppo_file;
 
 #[test]
 fn test_type_mismatch() {
-    let result = compile_soppo_file("tests/fixtures/fail/type_mismatch.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/type_mismatch.sop");
     assert!(result.is_err(), "Expected type error");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_undeclared_variable() {
-    let result = compile_soppo_file("tests/fixtures/fail/undeclared_variable.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/undeclared_variable.sop");
     assert!(result.is_err(), "Expected undeclared variable error");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_assign_wrong_type() {
-    let result = compile_soppo_file("tests/fixtures/fail/assign_wrong_type.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/assign_wrong_type.sop");
     assert!(result.is_err(), "Expected type mismatch on assignment");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_non_exhaustive() {
-    let result = compile_soppo_file("tests/fixtures/fail/non_exhaustive.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/non_exhaustive.sop");
     assert!(result.is_err(), "Expected non-exhaustive match error");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_var_no_type_or_value() {
-    let result = compile_soppo_file("tests/fixtures/fail/var_no_type_or_value.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/var_no_type_or_value.sop");
     assert!(
         result.is_err(),
         "Expected parse error for var without type or value"
@@ -42,7 +42,7 @@ fn test_var_no_type_or_value() {
 
 #[test]
 fn test_const_no_value() {
-    let result = compile_soppo_file("tests/fixtures/fail/const_no_value.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/const_no_value.sop");
     assert!(
         result.is_err(),
         "Expected parse error for const without value"
@@ -52,28 +52,28 @@ fn test_const_no_value() {
 
 #[test]
 fn test_go_unknown_function() {
-    let result = compile_soppo_file("tests/fixtures/fail/go_unknown_function.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/go_unknown_function.sop");
     assert!(result.is_err(), "Expected error for unknown Go function");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_go_wrong_arg_count() {
-    let result = compile_soppo_file("tests/fixtures/fail/go_wrong_arg_count.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/go_wrong_arg_count.sop");
     assert!(result.is_err(), "Expected error for wrong argument count");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_go_wrong_arg_type() {
-    let result = compile_soppo_file("tests/fixtures/fail/go_wrong_arg_type.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/go_wrong_arg_type.sop");
     assert!(result.is_err(), "Expected error for wrong argument type");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_duration_string_mul() {
-    let result = compile_soppo_file("tests/fixtures/fail/duration_string_mul.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/duration_string_mul.sop");
     assert!(
         result.is_err(),
         "Expected error for Duration * string (incompatible types)"
@@ -83,7 +83,7 @@ fn test_duration_string_mul() {
 
 #[test]
 fn test_nil_deref_no_check() {
-    let result = compile_soppo_file("tests/fixtures/fail/nil_deref_no_check.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/nil_deref_no_check.sop");
     assert!(
         result.is_err(),
         "Expected error for nil pointer dereference without check"
@@ -93,7 +93,7 @@ fn test_nil_deref_no_check() {
 
 #[test]
 fn test_nil_access_wrong_branch() {
-    let result = compile_soppo_file("tests/fixtures/fail/nil_access_wrong_branch.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/nil_access_wrong_branch.sop");
     assert!(
         result.is_err(),
         "Expected error for accessing nil pointer in wrong branch"
@@ -103,7 +103,7 @@ fn test_nil_access_wrong_branch() {
 
 #[test]
 fn test_nil_nested_no_check() {
-    let result = compile_soppo_file("tests/fixtures/fail/nil_nested_no_check.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/nil_nested_no_check.sop");
     assert!(
         result.is_err(),
         "Expected error for accessing nested pointer without check"
@@ -113,7 +113,7 @@ fn test_nil_nested_no_check() {
 
 #[test]
 fn test_nil_reassign_resets() {
-    let result = compile_soppo_file("tests/fixtures/fail/nil_reassign_resets.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/nil_reassign_resets.sop");
     assert!(
         result.is_err(),
         "Expected error after reassignment resets nil state"
@@ -123,7 +123,7 @@ fn test_nil_reassign_resets() {
 
 #[test]
 fn test_try_no_return_error() {
-    let result = compile_soppo_file("tests/fixtures/fail/try_no_return_error.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/try_no_return_error.sop");
     assert!(
         result.is_err(),
         "Expected error for ? in function not returning error"
@@ -133,7 +133,7 @@ fn test_try_no_return_error() {
 
 #[test]
 fn test_try_expr_no_error() {
-    let result = compile_soppo_file("tests/fixtures/fail/try_expr_no_error.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/try_expr_no_error.sop");
     assert!(
         result.is_err(),
         "Expected error for ? on expression not returning error"
@@ -143,14 +143,14 @@ fn test_try_expr_no_error() {
 
 #[test]
 fn test_named_arg_unknown() {
-    let result = compile_soppo_file("tests/fixtures/fail/named_arg_unknown.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/named_arg_unknown.sop");
     assert!(result.is_err(), "Expected error for unknown named argument");
     insta::assert_snapshot!(result.unwrap_err());
 }
 
 #[test]
 fn test_named_arg_duplicate() {
-    let result = compile_soppo_file("tests/fixtures/fail/named_arg_duplicate.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/named_arg_duplicate.sop");
     assert!(
         result.is_err(),
         "Expected error for duplicate named argument"
@@ -160,7 +160,7 @@ fn test_named_arg_duplicate() {
 
 #[test]
 fn test_named_arg_missing() {
-    let result = compile_soppo_file("tests/fixtures/fail/named_arg_missing.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/named_arg_missing.sop");
     assert!(
         result.is_err(),
         "Expected error for missing required argument"
@@ -170,7 +170,7 @@ fn test_named_arg_missing() {
 
 #[test]
 fn test_named_arg_wrong_order() {
-    let result = compile_soppo_file("tests/fixtures/fail/named_arg_wrong_order.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/named_arg_wrong_order.sop");
     assert!(
         result.is_err(),
         "Expected error for positional after named on non-variadic function"
@@ -180,7 +180,7 @@ fn test_named_arg_wrong_order() {
 
 #[test]
 fn test_nullable_nil_to_nonnull() {
-    let result = compile_soppo_file("tests/fixtures/fail/nullable_nil_to_nonnull.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/nullable_nil_to_nonnull.sop");
     assert!(
         result.is_err(),
         "Expected error for assigning nil to non-nullable type"
@@ -190,7 +190,7 @@ fn test_nullable_nil_to_nonnull() {
 
 #[test]
 fn test_nullable_no_init() {
-    let result = compile_soppo_file("tests/fixtures/fail/nullable_no_init.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/nullable_no_init.sop");
     assert!(
         result.is_err(),
         "Expected error for non-nullable type without initialization"
@@ -200,7 +200,7 @@ fn test_nullable_no_init() {
 
 #[test]
 fn test_nullable_assign_to_nonnull() {
-    let result = compile_soppo_file("tests/fixtures/fail/nullable_assign_to_nonnull.sop");
+    let result = compile_soppo_file("tests/fixtures/single/fail/nullable_assign_to_nonnull.sop");
     assert!(
         result.is_err(),
         "Expected error for assigning nullable to non-nullable"

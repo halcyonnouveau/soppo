@@ -73,6 +73,13 @@ impl Resolver {
             return Ok(kind);
         }
 
+        // Check for local Go package (requires project)
+        if let Some(proj) = project
+            && let Some(kind) = self.resolve_local_go(import_path, proj)
+        {
+            return Ok(kind);
+        }
+
         // Check stdlib (no project needed)
         if let Some(kind) = self.resolve_stdlib(import_path) {
             return Ok(kind);
@@ -104,6 +111,29 @@ impl Resolver {
             // Check if there are .sop files there
             if source_dir.is_dir() && has_files_with_extension(&source_dir, "sop") {
                 return Some(ImportKind::LocalSoppo { source_dir });
+            }
+        }
+
+        None
+    }
+
+    /// Check if import is a local Go package
+    ///
+    /// Import path like "github.com/user/project/pkg"
+    /// maps to source at "pkg/*.go"
+    fn resolve_local_go(&self, import_path: &str, project: &Project) -> Option<ImportKind> {
+        // Check if import starts with our module path + "/"
+        let module_prefix = format!("{}/", project.module_path);
+
+        if let Some(rest) = import_path.strip_prefix(&module_prefix) {
+            // Map module/pkg -> pkg
+            let source_dir = project.root.join(rest);
+            // Check if there are .go files there
+            if source_dir.is_dir() && has_files_with_extension(&source_dir, "go") {
+                return Some(ImportKind::ExternalGo {
+                    import_path: import_path.to_string(),
+                    source_dir,
+                });
             }
         }
 

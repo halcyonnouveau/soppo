@@ -131,6 +131,26 @@ pub enum SoppoError {
         #[label("expected non-nilable")]
         span: Span,
     },
+
+    #[error("Circular dependency detected\n\n{}", format_cycle(cycle))]
+    #[diagnostic(
+        code(soppo::circular_dependency),
+        help("break the cycle by extracting shared code into a separate package")
+    )]
+    CircularDependency {
+        /// List of (source_file, import_path) pairs forming the cycle
+        cycle: Vec<(String, String)>,
+    },
+}
+
+fn format_cycle(cycle: &[(String, String)]) -> String {
+    cycle
+        .iter()
+        .map(|(file, import)| format!("  {} imports \"{}\"\n    ↓", file, import))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end_matches("\n    ↓")
+        .to_string()
 }
 
 pub type Result<T> = std::result::Result<T, SoppoError>;

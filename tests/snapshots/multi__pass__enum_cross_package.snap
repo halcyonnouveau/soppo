@@ -1,0 +1,63 @@
+---
+source: tests/multi.rs
+expression: format_results(& results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/enum_cross/gen/types"
+
+func describeStatus(s types.Status) string {
+    result := ""
+    switch s.(type) {
+    case types.Status_Pending:
+        result = "waiting"
+    case types.Status_Active:
+        result = "in progress"
+    case types.Status_Complete:
+        result = "done"
+    }
+    return result
+}
+
+func main() {
+    status := types.StatusActive
+    fmt.Println(describeStatus(status))
+}
+
+
+
+=== types/status.go ===
+//soppo:generated
+package types
+
+/*soppo:enum
+Status {
+    Pending
+    Active
+    Complete
+}
+*/
+type Status interface {
+    isStatus()
+}
+
+type Status_Pending struct {}
+func (Status_Pending) isStatus() {}
+func (Status_Pending) String() string { return "Pending" }
+
+type Status_Active struct {}
+func (Status_Active) isStatus() {}
+func (Status_Active) String() string { return "Active" }
+
+type Status_Complete struct {}
+func (Status_Complete) isStatus() {}
+func (Status_Complete) String() string { return "Complete" }
+
+var (
+    StatusPending Status = Status_Pending{}
+    StatusActive Status = Status_Active{}
+    StatusComplete Status = Status_Complete{}
+)

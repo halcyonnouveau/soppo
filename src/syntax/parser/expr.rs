@@ -576,7 +576,8 @@ impl Parser {
 
             Token::Star => {
                 // *p - dereference (when used as unary prefix)
-                let operand = self.parse_primary()?;
+                // Use parse_postfix so *user.Email parses as *(user.Email)
+                let operand = self.parse_postfix()?;
                 let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
@@ -595,7 +596,8 @@ impl Parser {
 
             Token::Minus => {
                 // -x - negation
-                let operand = self.parse_primary()?;
+                // Use parse_postfix so -obj.field parses as -(obj.field)
+                let operand = self.parse_postfix()?;
                 let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
@@ -614,7 +616,8 @@ impl Parser {
 
             Token::Not => {
                 // !x - logical not
-                let operand = self.parse_primary()?;
+                // Use parse_postfix so !obj.valid parses as !(obj.valid)
+                let operand = self.parse_postfix()?;
                 let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {

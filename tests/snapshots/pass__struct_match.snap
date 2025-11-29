@@ -2,6 +2,7 @@
 source: tests/pass.rs
 expression: output
 ---
+//soppo:generated
 package main
 
 import "fmt"

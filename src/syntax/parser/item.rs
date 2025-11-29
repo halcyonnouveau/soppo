@@ -273,11 +273,16 @@ impl Parser {
 
             let end_span = self.expect(Token::RBrace)?;
             (TypeKind::Interface { methods }, end_span)
-        } else {
-            // Type alias: type Foo = Bar or type Foo int
+        } else if self.consume(&Token::Assign) {
+            // Type alias: type Foo = Bar (Foo is exactly Bar)
             let target = self.parse_type()?;
             let end_span = target.span;
             (TypeKind::Alias { target }, end_span)
+        } else {
+            // Type definition: type Foo Bar (Foo is a new distinct type based on Bar)
+            let target = self.parse_type()?;
+            let end_span = target.span;
+            (TypeKind::Definition { target }, end_span)
         };
 
         Ok(TypeDecl {
@@ -544,6 +549,130 @@ impl Parser {
         })
     }
 
+    /// Parse a const declaration after the 'const' keyword has been consumed
+    fn parse_const_after_keyword(&mut self) -> Result<ConstDecl> {
+        let start = self.peek_span();
+
+        let (name, name_span) = match self.advance() {
+            Some((Token::Ident(name), span)) => (name, span),
+            Some((tok, span)) => {
+                return Err(SoppoError::Parse {
+                    message: format!("Expected identifier, found {:?}", tok),
+                    span,
+                });
+            }
+            None => {
+                return Err(SoppoError::Parse {
+                    message: "Expected identifier".to_string(),
+                    span: self.peek_span(),
+                });
+            }
+        };
+
+        self.validate_identifier(&name, &name_span)?;
+
+        // Check if next token is = (type inference) or a type name
+        let ty = if self.consume(&Token::Assign) {
+            None
+        } else if matches!(
+            self.peek(),
+            Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+        ) {
+            let ty = self.parse_type()?;
+            self.expect(Token::Assign)?;
+            Some(ty)
+        } else {
+            return Err(SoppoError::Parse {
+                message: "Expected type or '=' in const declaration".to_string(),
+                span: name_span,
+            });
+        };
+
+        let value = self.parse_expr()?;
+
+        Ok(ConstDecl {
+            name,
+            ty,
+            value,
+            span: start,
+        })
+    }
+
+    /// Parse a const declaration inside a grouped const block
+    /// Supports: NAME = VALUE, NAME TYPE = VALUE, NAME (implicit iota continuation)
+    fn parse_const_in_group(&mut self) -> Result<ConstDecl> {
+        let start = self.peek_span();
+
+        let (name, name_span) = match self.advance() {
+            Some((Token::Ident(name), span)) => (name, span),
+            Some((tok, span)) => {
+                return Err(SoppoError::Parse {
+                    message: format!("Expected identifier, found {:?}", tok),
+                    span,
+                });
+            }
+            None => {
+                return Err(SoppoError::Parse {
+                    message: "Expected identifier".to_string(),
+                    span: self.peek_span(),
+                });
+            }
+        };
+
+        self.validate_identifier(&name, &name_span)?;
+
+        // In grouped const, we might have:
+        // 1. NAME = VALUE
+        // 2. NAME TYPE = VALUE
+        // 3. NAME (implicit, uses previous iota value - for Go compatibility)
+        let (ty, value) = if self.consume(&Token::Assign) {
+            // NAME = VALUE
+            let value = self.parse_expr()?;
+            (None, value)
+        } else if matches!(
+            self.peek(),
+            Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+        ) {
+            // Could be NAME TYPE = VALUE or NAME (implicit)
+            // Need to check if after type there's an =
+            let ty = self.parse_type()?;
+            if self.consume(&Token::Assign) {
+                let value = self.parse_expr()?;
+                (Some(ty), value)
+            } else {
+                // Implicit iota continuation - generate iota as value
+                // For now, we require explicit values
+                return Err(SoppoError::Parse {
+                    message: "Expected '=' after type in const declaration".to_string(),
+                    span: name_span,
+                });
+            }
+        } else if matches!(
+            self.peek(),
+            Some(&Token::Newline) | Some(&Token::RParen) | None
+        ) {
+            // Implicit iota continuation (NAME on its own line)
+            // For now, require explicit values - this is a simplification
+            return Err(SoppoError::Parse {
+                message: "Implicit iota continuation not yet supported, use explicit value"
+                    .to_string(),
+                span: name_span,
+            });
+        } else {
+            return Err(SoppoError::Parse {
+                message: "Expected type, '=', or newline in const declaration".to_string(),
+                span: name_span,
+            });
+        };
+
+        Ok(ConstDecl {
+            name,
+            ty,
+            value,
+            span: start,
+        })
+    }
+
     /// Parse a single import: "path" or alias "path"
     fn parse_single_import(&mut self) -> Result<Import> {
         match self.advance() {
@@ -643,6 +772,28 @@ impl Parser {
 
             if self.peek().is_none() {
                 break;
+            }
+
+            // Check for grouped const: const ( ... )
+            if self.peek() == Some(&Token::Const) {
+                self.advance(); // consume 'const'
+                if self.consume(&Token::LParen) {
+                    // Grouped const block
+                    self.skip_terminators();
+                    while self.peek() != Some(&Token::RParen) {
+                        let const_decl = self.parse_const_in_group()?;
+                        decls.push(Decl::Const(const_decl));
+                        self.skip_terminators();
+                    }
+                    self.expect(Token::RParen)?;
+                    continue;
+                } else {
+                    // Single const - need to parse it, but we already consumed 'const'
+                    // So call a helper that doesn't expect 'const' at the start
+                    let const_decl = self.parse_const_after_keyword()?;
+                    decls.push(Decl::Const(const_decl));
+                    continue;
+                }
             }
 
             decls.push(self.parse_decl()?);

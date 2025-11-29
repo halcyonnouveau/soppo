@@ -1,0 +1,25 @@
+---
+source: tests/multi.rs
+expression: format_results(& results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/multiret/gen/helpers"
+
+func main() {
+    num, str := helpers.GetPair()
+    fmt.Println(num, str)
+}
+
+
+
+=== helpers/lib.go ===
+//soppo:generated
+package helpers
+
+func GetPair() (int, string) {
+    return 42, "hello"
+}

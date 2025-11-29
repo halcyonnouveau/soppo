@@ -1,0 +1,26 @@
+---
+source: tests/pass.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+type MyInt = int
+
+type StringSlice = []string
+
+func getInt() MyInt {
+    return 42
+}
+
+func getNames() StringSlice {
+    return []string{"Alice", "Bob"}
+}
+
+func main() {
+    x := getInt()
+    names := getNames()
+    fmt.Println(x, names)
+}

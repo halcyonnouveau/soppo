@@ -1,0 +1,34 @@
+---
+source: tests/multi.rs
+expression: format_results(& results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/nilable_cross/gen/types"
+
+func main() {
+    cfg1 := types.Config{Name: "app", Logger: nil}
+    cfg2 := types.Config{Name: "app", Logger: (&types.Logger{Prefix: "[INFO]"})}
+    fmt.Println(cfg1.Name)
+    if (cfg2.Logger != nil) {
+        fmt.Println(cfg2.Logger.Prefix)
+    }
+}
+
+
+
+=== types/user.go ===
+//soppo:generated
+package types
+
+type Logger struct {
+    Prefix string
+}
+
+type Config struct {
+    Name string
+    Logger *Logger //soppo:nilable
+}

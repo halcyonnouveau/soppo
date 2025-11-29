@@ -1,5 +1,18 @@
 use std::fs;
+use std::path::Path;
 use std::process::Command;
+
+use serde::Deserialize;
+use tempfile::TempDir;
+
+/// Configuration for a multi-file test, parsed from test.toml
+#[derive(Deserialize)]
+pub struct TestConfig {
+    /// Go module name for go.mod
+    pub module: String,
+    /// Optional expected error substring for fail tests
+    pub expected_error: Option<String>,
+}
 
 pub fn compile_soppo_file(input_file: &str) -> Result<String, String> {
     let output_file = input_file.replace(".sop", ".go");
@@ -32,4 +45,171 @@ pub fn compile_soppo_file(input_file: &str) -> Result<String, String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
+}
+
+// ============================================================================
+// Multi-file test helpers
+// ============================================================================
+
+/// Parse test.toml configuration from a fixture directory
+pub fn parse_test_toml(path: &Path) -> TestConfig {
+    let content = fs::read_to_string(path).expect("Failed to read test.toml");
+    toml::from_str(&content).expect("Failed to parse test.toml")
+}
+
+/// Recursively find all .sop files in a directory
+pub fn find_sop_files(dir: &Path) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    find_sop_files_recursive(dir, dir, &mut files);
+    files
+}
+
+fn find_sop_files_recursive(base: &Path, dir: &Path, files: &mut Vec<(String, String)>) {
+    for entry in fs::read_dir(dir).expect("Failed to read directory") {
+        let entry = entry.expect("Failed to read entry");
+        let path = entry.path();
+
+        if path.is_dir() {
+            find_sop_files_recursive(base, &path, files);
+        } else if path.extension().is_some_and(|e| e == "sop") {
+            let relative = path.strip_prefix(base).expect("Failed to strip prefix");
+            let content = fs::read_to_string(&path).expect("Failed to read .sop file");
+            files.push((relative.to_string_lossy().to_string(), content));
+        }
+    }
+}
+
+/// Recursively find all .go files in a directory (for testing import of generated Go)
+pub fn find_go_files(dir: &Path) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    find_go_files_recursive(dir, dir, &mut files);
+    files
+}
+
+fn find_go_files_recursive(base: &Path, dir: &Path, files: &mut Vec<(String, String)>) {
+    for entry in fs::read_dir(dir).expect("Failed to read directory") {
+        let entry = entry.expect("Failed to read entry");
+        let path = entry.path();
+
+        if path.is_dir() {
+            find_go_files_recursive(base, &path, files);
+        } else if path.extension().is_some_and(|e| e == "go") {
+            let relative = path.strip_prefix(base).expect("Failed to strip prefix");
+            let content = fs::read_to_string(&path).expect("Failed to read .go file");
+            files.push((relative.to_string_lossy().to_string(), content));
+        }
+    }
+}
+
+/// Build a multi-file test project and return generated Go code
+pub fn run_multi_test(fixture_dir: &Path) -> Result<Vec<(String, String)>, String> {
+    let config = parse_test_toml(&fixture_dir.join("test.toml"));
+    let sop_files = find_sop_files(fixture_dir);
+    let go_files = find_go_files(fixture_dir);
+
+    build_test_project(&config.module, &sop_files, &go_files)
+}
+
+/// Create a test project with go.mod and compile it using the library directly
+fn build_test_project(
+    module_name: &str,
+    sop_files: &[(String, String)],
+    go_files: &[(String, String)],
+) -> Result<Vec<(String, String)>, String> {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let root = temp.path();
+
+    // Create go.mod
+    fs::write(
+        root.join("go.mod"),
+        format!("module {}\n\ngo 1.23\n", module_name),
+    )
+    .expect("Failed to write go.mod");
+
+    // Create .sop source files
+    for (path, content) in sop_files {
+        let file_path = root.join(path);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).expect("Failed to create directories");
+        }
+        fs::write(&file_path, content).expect("Failed to write source file");
+    }
+
+    // Create .go source files (for testing import of generated Go packages)
+    for (path, content) in go_files {
+        let file_path = root.join(path);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).expect("Failed to create directories");
+        }
+        fs::write(&file_path, content).expect("Failed to write go file");
+    }
+
+    // Build using the library directly
+    let results = soppo::build::build_project(root, None).map_err(|e| {
+        // Render the full miette diagnostic for better error messages
+        format!("{:?}", e)
+    })?;
+
+    // Write generated files to disk for go build validation
+    let gen_dir = root.join("gen");
+    for (relative_path, go_code) in &results {
+        let output_path = gen_dir.join(relative_path);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).expect("Failed to create output directories");
+        }
+        fs::write(&output_path, go_code).expect("Failed to write generated file");
+    }
+
+    // Add replace directive to go.mod so Go can find local packages
+    let go_mod_path = root.join("go.mod");
+    let go_mod_content = fs::read_to_string(&go_mod_path).expect("Failed to read go.mod");
+    let updated_go_mod = format!(
+        "{}\nreplace {}/gen => ./gen\n",
+        go_mod_content.trim(),
+        module_name
+    );
+    fs::write(&go_mod_path, updated_go_mod).expect("Failed to update go.mod");
+
+    // Run go build to verify the generated code compiles
+    // Use -o /dev/null to avoid creating binaries (which can conflict with dir names)
+    if gen_dir.exists() {
+        let go_output = Command::new("go")
+            .args(["build", "-o", "/dev/null", "./..."])
+            .current_dir(&gen_dir)
+            .output()
+            .expect("Failed to run go build");
+
+        if !go_output.status.success() {
+            let go_error = String::from_utf8_lossy(&go_output.stderr);
+            return Err(format!(
+                "Generated Go code failed to compile:\n{}\n\nGenerated files:\n{}",
+                go_error,
+                results
+                    .iter()
+                    .map(|(p, c)| format!("=== {} ===\n{}", p, c))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            ));
+        }
+    }
+
+    Ok(results)
+}
+
+/// Format multi-file results for snapshot comparison
+pub fn format_results(results: &[(String, String)]) -> String {
+    let mut sorted = results.to_vec();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    sorted
+        .iter()
+        .map(|(path, content)| format!("=== {} ===\n{}", path, content))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Sanitise error messages by replacing temp paths with a placeholder
+pub fn sanitise_error(err: &str) -> String {
+    // Replace temp paths like /tmp/.tmpXXXXXX/ with [TEMP]/
+    let re = regex::Regex::new(r"/tmp/\.tmp[A-Za-z0-9]+/").unwrap();
+    re.replace_all(err, "[TEMP]/").to_string()
 }

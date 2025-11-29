@@ -1,0 +1,10 @@
+package types
+
+type Logger struct {
+    Prefix string
+}
+
+type Config struct {
+    Name string
+    Logger ?*Logger
+}

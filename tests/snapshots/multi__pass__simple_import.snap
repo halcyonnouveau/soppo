@@ -1,0 +1,25 @@
+---
+source: tests/multi.rs
+expression: format_results(& results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/simple/gen/helpers"
+
+func main() {
+    result := helpers.Add(1, 2)
+    fmt.Println(result)
+}
+
+
+
+=== helpers/lib.go ===
+//soppo:generated
+package helpers
+
+func Add(a int, b int) int {
+    return (a + b)
+}

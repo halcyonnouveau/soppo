@@ -2,12 +2,39 @@ use super::Infer;
 use crate::error::{Result, SoppoError};
 use crate::syntax::Span;
 use crate::types::Type;
+use crate::types::ctx::TypeDefKind;
 
 impl Infer {
+    /// Resolve type aliases to their target types
+    fn resolve_alias(&self, ty: Type) -> Type {
+        match &ty {
+            Type::Con {
+                name,
+                args: _,
+                nullable,
+            } => {
+                // Check if this type name is a type alias in the current module
+                if let Some(type_def) = self.global_state.current_module().types.get(&name.name)
+                    && let TypeDefKind::Alias { target } = &type_def.kind
+                {
+                    // Recursively resolve in case of chained aliases
+                    let mut resolved = target.clone();
+                    // Preserve nullability from the original type
+                    if *nullable {
+                        resolved = resolved.as_nullable();
+                    }
+                    return self.resolve_alias(resolved);
+                }
+                ty
+            }
+            _ => ty,
+        }
+    }
+
     /// Unify two types (solve constraint)
     pub fn unify(&mut self, t1: &Type, t2: &Type, span: &Span) -> Result<()> {
-        let t1 = self.substitute(t1.clone());
-        let t2 = self.substitute(t2.clone());
+        let t1 = self.resolve_alias(self.substitute(t1.clone()));
+        let t2 = self.resolve_alias(self.substitute(t2.clone()));
 
         match (&t1, &t2) {
             // Never type unifies with anything (it's bottom type)
@@ -74,7 +101,15 @@ impl Infer {
                         span: *span,
                     });
                 }
-                if a1.len() != a2.len() {
+                // For composite types (slices, pointers, maps, channels) where the element type
+                // is encoded in the name (e.g., "[]string", "*int"), we allow mismatched args
+                // since both representations are equivalent when names match
+                let is_composite = n1.name.starts_with("[]")
+                    || n1.name.starts_with('*')
+                    || n1.name.starts_with("map[")
+                    || n1.name.starts_with("chan ");
+
+                if !is_composite && a1.len() != a2.len() {
                     return Err(SoppoError::Type {
                         message: format!(
                             "Type constructor {} has wrong number of arguments",

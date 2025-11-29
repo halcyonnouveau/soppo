@@ -1,0 +1,11 @@
+package main
+
+import (
+    "fmt"
+    "github.com/test/simple/helpers"
+)
+
+func main() {
+    result := helpers.Add(1, 2)
+    fmt.Println(result)
+}

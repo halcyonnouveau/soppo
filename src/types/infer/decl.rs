@@ -141,6 +141,13 @@ impl Infer {
                 Ok(())
             }
 
+            TypeKind::Definition { .. } => {
+                // Type definitions create new distinct types
+                // Just register the type in global state
+                self.global_state.register_type(type_decl);
+                Ok(())
+            }
+
             TypeKind::Enum { variants } => {
                 // Register the enum type in the global state
                 self.global_state.register_type(type_decl);

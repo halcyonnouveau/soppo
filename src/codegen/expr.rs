@@ -121,15 +121,38 @@ impl Codegen {
             }
 
             ExprKind::Field { expr, field, .. } => {
-                // Check if this is an enum constructor like Colour.Red
+                // Check if this is an enum constructor like Colour.Red or pkg.Status.Active
                 if let ExprKind::Ident(type_name) = &expr.kind {
-                    // Check if it's a registered type (enum)
-                    if self.global_state.has_type(type_name) {
+                    // Check if it's a registered local enum type
+                    if self.global_state.is_local_enum(type_name) {
                         // Enum values: Colour.Red → ColourRed (var or function)
                         self.emit(&format!("{}{}", type_name, field));
                     } else {
                         // Regular field access (like fmt.Printf)
                         self.emit(type_name);
+                        self.emit(".");
+                        self.emit(field);
+                    }
+                } else if let ExprKind::Field {
+                    expr: inner_expr,
+                    field: type_name,
+                    ..
+                } = &expr.kind
+                {
+                    // Check for cross-package enum: pkg.Type.Variant
+                    if let ExprKind::Ident(pkg_name) = &inner_expr.kind {
+                        if self.global_state.is_soppo_enum(pkg_name, type_name) {
+                            // Cross-package enum: types.Status.Active → types.StatusActive
+                            self.emit(&format!("{}.{}{}", pkg_name, type_name, field));
+                        } else {
+                            // Regular nested field access
+                            self.gen_expr(expr);
+                            self.emit(".");
+                            self.emit(field);
+                        }
+                    } else {
+                        // Regular nested field access
+                        self.gen_expr(expr);
                         self.emit(".");
                         self.emit(field);
                     }
@@ -221,11 +244,9 @@ impl Codegen {
             ExprKind::StructLit { ty, fields } => {
                 // Generate Type{field: value, ...}
                 // For enum variants like Shape.Circle, convert to Shape_Circle
-                let type_name = if ty.name.contains('.') {
-                    ty.name.replace('.', "_")
-                } else {
-                    ty.name.clone()
-                };
+                // For cross-package types like types.User, keep as types.User
+                // For cross-package enum variants like pkg.Type.Variant, convert to pkg.Type_Variant
+                let type_name = convert_struct_type_name(&ty.name);
                 self.emit(self.go_type(&type_name));
                 self.emit("{");
                 for (i, (field_name, value)) in fields.iter().enumerate() {
@@ -397,6 +418,43 @@ impl Codegen {
         } else {
             // Unknown function - just use positional order (type checker would have errored)
             args.iter().map(|(_, arg)| arg).collect()
+        }
+    }
+}
+
+/// Convert a struct type name for codegen:
+/// - `Type` → `Type` (simple type)
+/// - `pkg.Type` → `pkg.Type` (cross-package type)
+/// - `Type.Variant` → `Type_Variant` (enum variant)
+/// - `pkg.Type.Variant` → `pkg.Type_Variant` (cross-package enum variant)
+fn convert_struct_type_name(name: &str) -> String {
+    let parts: Vec<&str> = name.split('.').collect();
+    match parts.len() {
+        0 | 1 => name.to_string(), // Simple type
+        2 => {
+            // Could be pkg.Type or Type.Variant
+            // If first char of first part is lowercase, assume package
+            // If first char is uppercase, assume enum variant
+            let first_char = parts[0].chars().next().unwrap_or('a');
+            if first_char.is_lowercase() {
+                // pkg.Type - keep as is
+                name.to_string()
+            } else {
+                // Type.Variant - convert to Type_Variant
+                format!("{}_{}", parts[0], parts[1])
+            }
+        }
+        _ => {
+            // pkg.Type.Variant or deeper - join all but last two with dots,
+            // then underscore the last dot
+            let prefix = parts[..parts.len() - 2].join(".");
+            let type_name = parts[parts.len() - 2];
+            let variant = parts[parts.len() - 1];
+            if prefix.is_empty() {
+                format!("{}_{}", type_name, variant)
+            } else {
+                format!("{}.{}_{}", prefix, type_name, variant)
+            }
         }
     }
 }

@@ -3,6 +3,15 @@ use std::collections::HashMap;
 use super::ty::Type;
 use crate::syntax::{ConstDecl, EnumVariant, FuncDecl, ModuleId, TypeDecl, TypeKind};
 
+/// Kind of Soppo type discovered from Go package markers
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GoSoppoKind {
+    /// Enum type from //soppo:enum marker
+    Enum,
+    /// Nilable field from //soppo:nilable marker
+    Nilable,
+}
+
 /// Global context tracking all modules and types
 #[derive(Debug, Clone)]
 pub struct GlobalCtxt {
@@ -11,6 +20,14 @@ pub struct GlobalCtxt {
 
     /// Currently active module
     current_module: ModuleId,
+
+    /// Soppo import mappings for current module: package alias → ModuleId
+    /// This is set per-file during compilation
+    soppo_imports: HashMap<String, ModuleId>,
+
+    /// Soppo types discovered from Go packages via //soppo: markers
+    /// Maps package alias to type name to type kind
+    go_soppo_types: HashMap<String, HashMap<String, GoSoppoKind>>,
 }
 
 /// A module containing type, function, and constant definitions
@@ -39,10 +56,23 @@ pub struct TypeDef {
 
 #[derive(Debug, Clone)]
 pub enum TypeDefKind {
-    Alias,
-    Enum { variants: Vec<EnumVariant> },
-    Struct { fields: Vec<(String, Type)> },
-    Interface { methods: Vec<MethodSig> },
+    /// Type alias: type X = Y (X is exactly Y)
+    Alias {
+        target: Type,
+    },
+    /// Type definition: type X Y (X is a new distinct type based on Y)
+    Definition {
+        target: Type,
+    },
+    Enum {
+        variants: Vec<EnumVariant>,
+    },
+    Struct {
+        fields: Vec<(String, Type)>,
+    },
+    Interface {
+        methods: Vec<MethodSig>,
+    },
 }
 
 /// Method signature for interfaces
@@ -74,6 +104,8 @@ impl GlobalCtxt {
         let mut gs = Self {
             modules: HashMap::new(),
             current_module: ModuleId::new("main"),
+            soppo_imports: HashMap::new(),
+            go_soppo_types: HashMap::new(),
         };
 
         // Create main module
@@ -131,7 +163,12 @@ impl GlobalCtxt {
             name: type_decl.name.clone(),
             generics: type_decl.generics.iter().map(|g| g.name.clone()).collect(),
             kind: match &type_decl.kind {
-                TypeKind::Alias { .. } => TypeDefKind::Alias,
+                TypeKind::Alias { target } => TypeDefKind::Alias {
+                    target: Type::from_ast(target),
+                },
+                TypeKind::Definition { target } => TypeDefKind::Definition {
+                    target: Type::from_ast(target),
+                },
                 TypeKind::Enum { variants } => TypeDefKind::Enum {
                     variants: variants.clone(),
                 },
@@ -226,6 +263,62 @@ impl GlobalCtxt {
     /// Check if a type is registered in current module
     pub fn has_type(&self, name: &str) -> bool {
         self.current_module().types.contains_key(name)
+    }
+
+    /// Register a Soppo import mapping
+    pub fn register_soppo_import(&mut self, alias: String, module_id: ModuleId) {
+        self.soppo_imports.insert(alias, module_id);
+    }
+
+    /// Clear Soppo imports (call when moving to a new file)
+    pub fn clear_soppo_imports(&mut self) {
+        self.soppo_imports.clear();
+    }
+
+    /// Get the ModuleId for a Soppo import alias
+    pub fn get_soppo_module(&self, alias: &str) -> Option<&ModuleId> {
+        self.soppo_imports.get(alias)
+    }
+
+    /// Check if pkg.Type refers to a Soppo enum (either from Soppo imports or Go packages)
+    pub fn is_soppo_enum(&self, pkg: &str, type_name: &str) -> bool {
+        // Check Soppo imports first
+        if let Some(module_id) = self.soppo_imports.get(pkg)
+            && let Some(type_def) = self.lookup_type_in(module_id, type_name)
+        {
+            return matches!(type_def.kind, TypeDefKind::Enum { .. });
+        }
+        // Check Go package enums (from //soppo:enum markers)
+        if let Some(types) = self.go_soppo_types.get(pkg) {
+            return types.get(type_name) == Some(&GoSoppoKind::Enum);
+        }
+        false
+    }
+
+    /// Register a Soppo type discovered from a Go package via //soppo: markers
+    pub fn register_go_soppo_type(&mut self, pkg: &str, type_name: &str, kind: GoSoppoKind) {
+        self.go_soppo_types
+            .entry(pkg.to_string())
+            .or_default()
+            .insert(type_name.to_string(), kind);
+    }
+
+    /// Get the kind of a Soppo type in a Go package
+    pub fn get_go_soppo_kind(&self, pkg: &str, type_name: &str) -> Option<&GoSoppoKind> {
+        self.go_soppo_types.get(pkg)?.get(type_name)
+    }
+
+    /// Clear Go soppo types for current file
+    pub fn clear_go_soppo_types(&mut self) {
+        self.go_soppo_types.clear();
+    }
+
+    /// Check if a type in current module is an enum
+    pub fn is_local_enum(&self, type_name: &str) -> bool {
+        if let Some(type_def) = self.lookup_type(type_name) {
+            return matches!(type_def.kind, TypeDefKind::Enum { .. });
+        }
+        false
     }
 }
 

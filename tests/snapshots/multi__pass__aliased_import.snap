@@ -1,0 +1,25 @@
+---
+source: tests/multi.rs
+expression: format_results(& results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import u "github.com/test/aliased/gen/mathutil"
+
+func main() {
+    result := u.Multiply(3, 4)
+    fmt.Println(result)
+}
+
+
+
+=== mathutil/lib.go ===
+//soppo:generated
+package mathutil
+
+func Multiply(a int, b int) int {
+    return (a * b)
+}

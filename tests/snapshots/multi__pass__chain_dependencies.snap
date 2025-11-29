@@ -1,0 +1,36 @@
+---
+source: tests/multi.rs
+expression: format_results(& results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/chain/gen/pkgb"
+
+func main() {
+    fmt.Println(pkgb.GetB())
+}
+
+
+
+=== pkga/lib.go ===
+//soppo:generated
+package pkga
+
+func GetA() int {
+    return 1
+}
+
+
+
+=== pkgb/lib.go ===
+//soppo:generated
+package pkgb
+
+import "github.com/test/chain/gen/pkga"
+
+func GetB() int {
+    return (pkga.GetA() + 1)
+}

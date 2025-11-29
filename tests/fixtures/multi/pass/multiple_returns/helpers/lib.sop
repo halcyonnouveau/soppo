@@ -1,0 +1,5 @@
+package helpers
+
+func GetPair() (int, string) {
+    return 42, "hello"
+}

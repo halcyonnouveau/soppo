@@ -5,13 +5,26 @@ use miette::{Result, miette};
 
 use crate::syntax::{FileId, Parser};
 
+/// An import edge: source file imports a target via an import path
+#[derive(Debug, Clone)]
+struct ImportEdge {
+    /// The resolved target file(s)
+    targets: Vec<PathBuf>,
+    /// The original import path (e.g., "github.com/test/pkg")
+    import_path: String,
+}
+
 /// Dependency graph for Soppo files based on local imports
 #[derive(Debug)]
 pub struct DepGraph {
-    /// Map from file path to its local Soppo dependencies (resolved to file paths)
+    /// Map from file path to its imports (with import paths preserved)
+    imports: HashMap<PathBuf, Vec<ImportEdge>>,
+    /// Flattened edges for topological sort (file -> all dependency files)
     edges: HashMap<PathBuf, Vec<PathBuf>>,
     /// All files in the graph
     files: HashSet<PathBuf>,
+    /// Project root for making paths relative in error messages
+    project_root: PathBuf,
 }
 
 impl DepGraph {
@@ -21,6 +34,7 @@ impl DepGraph {
     /// Local imports are identified by checking if the import path starts with
     /// the module path and corresponds to a local directory with .sop files.
     pub fn build(sources: &[PathBuf], project_root: &Path, module_path: &str) -> Result<Self> {
+        let mut imports: HashMap<PathBuf, Vec<ImportEdge>> = HashMap::new();
         let mut edges: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         let mut files: HashSet<PathBuf> = HashSet::new();
 
@@ -37,21 +51,32 @@ impl DepGraph {
                 .map_err(|e| miette!("Failed to parse {}: {:?}", source_path.display(), e))?;
 
             // Extract local Soppo imports and resolve to package files
-            let mut deps = Vec::new();
+            let mut import_edges = Vec::new();
+            let mut all_deps = Vec::new();
             for import in &file.imports {
                 if let Some(local_path) = get_local_package_path(&import.path, module_path) {
                     // Check if this is actually a Soppo package (has .sop files)
                     if let Some(package_files) = resolve_local_package(local_path, project_root) {
-                        deps.extend(package_files);
+                        import_edges.push(ImportEdge {
+                            targets: package_files.clone(),
+                            import_path: import.path.clone(),
+                        });
+                        all_deps.extend(package_files);
                     }
                     // If no .sop files, it's a local Go package - not a dependency for us
                 }
             }
 
-            edges.insert(source_path.clone(), deps);
+            imports.insert(source_path.clone(), import_edges);
+            edges.insert(source_path.clone(), all_deps);
         }
 
-        Ok(Self { edges, files })
+        Ok(Self {
+            imports,
+            edges,
+            files,
+            project_root: project_root.to_path_buf(),
+        })
     }
 
     /// Topologically sort the files so dependencies come before dependents
@@ -102,20 +127,116 @@ impl DepGraph {
 
         // Check for cycles
         if result.len() != self.files.len() {
-            let remaining: Vec<_> = self
-                .files
-                .iter()
-                .filter(|f| !result.contains(f))
-                .map(|f| f.display().to_string())
-                .collect();
-
-            return Err(miette!(
-                "Circular dependency detected involving: {}",
-                remaining.join(", ")
-            ));
+            let cycle = self.find_cycle(&result);
+            return Err(crate::error::SoppoError::CircularDependency { cycle }.into());
         }
 
         Ok(result)
+    }
+
+    /// Find a cycle in the dependency graph, returning (source_file, import_path) pairs
+    fn find_cycle(&self, processed: &[PathBuf]) -> Vec<(String, String)> {
+        // Get files that weren't processed (part of a cycle)
+        let remaining: HashSet<_> = self
+            .files
+            .iter()
+            .filter(|f| !processed.contains(f))
+            .collect();
+
+        if remaining.is_empty() {
+            return Vec::new();
+        }
+
+        // Pick a deterministic starting file (sorted order) and trace the cycle using DFS
+        let mut remaining_sorted: Vec<_> = remaining.iter().copied().collect();
+        remaining_sorted.sort();
+        let start = remaining_sorted[0];
+        let mut visited: HashSet<&PathBuf> = HashSet::new();
+        let mut path: Vec<&PathBuf> = Vec::new();
+
+        if let Some(cycle_start_idx) =
+            self.dfs_find_cycle(start, &remaining, &mut visited, &mut path)
+        {
+            // Extract the cycle portion of the path
+            let cycle_path = &path[cycle_start_idx..];
+
+            // Build the result with import paths
+            let mut result = Vec::new();
+            for i in 0..cycle_path.len() {
+                let source = cycle_path[i];
+                let target = cycle_path[(i + 1) % cycle_path.len()];
+
+                // Find the import path from source to target
+                let import_path = self
+                    .imports
+                    .get(source)
+                    .and_then(|edges| {
+                        edges
+                            .iter()
+                            .find(|e| e.targets.contains(target))
+                            .map(|e| e.import_path.clone())
+                    })
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                let source_rel = source
+                    .strip_prefix(&self.project_root)
+                    .unwrap_or(source)
+                    .display()
+                    .to_string();
+
+                result.push((source_rel, import_path));
+            }
+            result
+        } else {
+            // Fallback: just list remaining files
+            remaining
+                .iter()
+                .map(|f| {
+                    let rel = f
+                        .strip_prefix(&self.project_root)
+                        .unwrap_or(f)
+                        .display()
+                        .to_string();
+                    (rel, "unknown".to_string())
+                })
+                .collect()
+        }
+    }
+
+    /// DFS to find a cycle, returns the index in path where the cycle starts
+    fn dfs_find_cycle<'a>(
+        &'a self,
+        node: &'a PathBuf,
+        remaining: &HashSet<&'a PathBuf>,
+        visited: &mut HashSet<&'a PathBuf>,
+        path: &mut Vec<&'a PathBuf>,
+    ) -> Option<usize> {
+        // Check if we've found a cycle
+        if let Some(idx) = path.iter().position(|&p| p == node) {
+            return Some(idx);
+        }
+
+        // Skip if already fully processed or not in remaining set
+        if visited.contains(&node) || !remaining.contains(&node) {
+            return None;
+        }
+
+        visited.insert(node);
+        path.push(node);
+
+        // Follow dependencies (sorted for deterministic order)
+        if let Some(deps) = self.edges.get(node) {
+            let mut sorted_deps: Vec<_> = deps.iter().filter(|d| remaining.contains(d)).collect();
+            sorted_deps.sort();
+            for dep in sorted_deps {
+                if let Some(idx) = self.dfs_find_cycle(dep, remaining, visited, path) {
+                    return Some(idx);
+                }
+            }
+        }
+
+        path.pop();
+        None
     }
 
     /// Check if a file has any sop: dependencies

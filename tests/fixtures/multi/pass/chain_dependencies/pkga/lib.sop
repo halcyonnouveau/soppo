@@ -1,0 +1,5 @@
+package pkga
+
+func GetA() int {
+    return 1
+}

@@ -47,10 +47,23 @@ pub struct TypeDecl {
 /// Kind of type declaration
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
-    Alias { target: Type },
-    Enum { variants: Vec<EnumVariant> },
-    Struct { fields: Vec<Field> },
-    Interface { methods: Vec<InterfaceMethod> },
+    /// Type alias: type X = Y (X is exactly Y)
+    Alias {
+        target: Type,
+    },
+    /// Type definition: type X Y (X is a new distinct type based on Y)
+    Definition {
+        target: Type,
+    },
+    Enum {
+        variants: Vec<EnumVariant>,
+    },
+    Struct {
+        fields: Vec<Field>,
+    },
+    Interface {
+        methods: Vec<InterfaceMethod>,
+    },
 }
 
 /// Interface method signature

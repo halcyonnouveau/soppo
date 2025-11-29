@@ -1,0 +1,10 @@
+package main
+
+import (
+    "fmt"
+    "github.com/test/chain/pkgb"
+)
+
+func main() {
+    fmt.Println(pkgb.GetB())
+}

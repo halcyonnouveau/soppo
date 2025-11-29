@@ -1,0 +1,2 @@
+module = "github.com/test/deref_nilable"
+expected_error = "Potential nil pointer dereference"

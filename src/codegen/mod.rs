@@ -293,6 +293,9 @@ impl Codegen {
         // Set up comments for emission
         self.set_comments(file.comments.clone());
 
+        // Soppo generated marker - allows re-importing with proper nil safety
+        self.emit_line("//soppo:generated");
+
         // Package declaration
         self.emit_line(&format!("package {}", file.package));
         self.emit_line("");

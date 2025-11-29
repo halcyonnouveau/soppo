@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::Infer;
 use crate::error::{Result, SoppoError};
-use crate::syntax::{BinOp, EnumVariant, Expr, ExprKind, Span, UnaryOp};
+use crate::syntax::{BinOp, EnumVariant, Expr, ExprKind, ModuleId, Span, Symbol, UnaryOp};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
 use crate::types::ty::Nullability;
@@ -878,23 +878,43 @@ impl Infer {
 
                 // Look up the struct type to validate field access
                 // For pointer types like *User, extract the inner type name (User)
-                let struct_name = if let Type::Con { name, args, .. } = &expr_ty {
-                    if name.name.starts_with('*') && args.len() == 1 {
-                        // Pointer type: extract inner type name from args or strip prefix
-                        if let Type::Con { name: inner, .. } = &args[0] {
-                            Some(inner.name.clone())
+                // Also extract the module name if present (for Go package types)
+                let (struct_name, module_name): (Option<String>, Option<String>) =
+                    if let Type::Con { name, args, .. } = &expr_ty {
+                        if name.name.starts_with('*') && args.len() == 1 {
+                            // Pointer type: extract inner type name from args or strip prefix
+                            if let Type::Con { name: inner, .. } = &args[0] {
+                                let mod_name = if inner.module.0.is_empty() {
+                                    None
+                                } else {
+                                    Some(inner.module.0.clone())
+                                };
+                                (Some(inner.name.clone()), mod_name)
+                            } else {
+                                (Some(name.name[1..].to_string()), None)
+                            }
                         } else {
-                            Some(name.name[1..].to_string())
+                            let mod_name = if name.module.0.is_empty() {
+                                None
+                            } else {
+                                Some(name.module.0.clone())
+                            };
+                            (Some(name.name.clone()), mod_name)
                         }
                     } else {
-                        Some(name.name.clone())
-                    }
-                } else {
-                    None
-                };
+                        (None, None)
+                    };
 
-                if let Some(struct_name) = struct_name
-                    && let Some(type_def) = self.global_state.lookup_type(&struct_name)
+                // Check if this is a field access on a Go package type
+                if let (Some(struct_name), Some(module_name)) = (&struct_name, &module_name)
+                    && let Some(field_ty) =
+                        self.lookup_go_struct_field(module_name, struct_name, field)
+                    {
+                        return Ok(field_ty);
+                    }
+
+                if let Some(struct_name) = &struct_name
+                    && let Some(type_def) = self.global_state.lookup_type(struct_name)
                     && let TypeDefKind::Struct { fields } = &type_def.kind
                 {
                     // Check if the field exists
@@ -1000,13 +1020,41 @@ impl Infer {
                     self.infer_expr(value)?;
                 }
 
-                // Check if this is an enum variant (e.g., Shape.Circle)
-                // If so, return the enum type, not the variant
+                // Check if this is a qualified type (e.g., pkg.Type)
                 if ty.name.contains('.') {
                     let parts: Vec<&str> = ty.name.split('.').collect();
                     if parts.len() == 2 {
-                        let enum_name = parts[0];
-                        return Ok(Type::simple(enum_name));
+                        let pkg_name = parts[0];
+                        let type_name = parts[1];
+
+                        // Check if it's an enum variant (e.g., Shape.Circle)
+                        if self.global_state.is_local_enum(pkg_name) {
+                            return Ok(Type::simple(pkg_name));
+                        }
+
+                        // Check if it's a cross-package enum variant
+                        if self.global_state.is_soppo_enum(pkg_name, type_name) {
+                            return Ok(Type::Con {
+                                name: Symbol {
+                                    module: ModuleId::new(pkg_name),
+                                    name: type_name.to_string(),
+                                    span: Span::dummy(),
+                                },
+                                args: vec![],
+                                nullable: false,
+                            });
+                        }
+
+                        // Return qualified type with module info (for Go packages)
+                        return Ok(Type::Con {
+                            name: Symbol {
+                                module: ModuleId::new(pkg_name),
+                                name: type_name.to_string(),
+                                span: Span::dummy(),
+                            },
+                            args: vec![],
+                            nullable: false,
+                        });
                     }
                 }
 
@@ -1068,22 +1116,18 @@ impl Infer {
 
                         // Check for nil pointer dereference
                         if Self::is_pointer_type(&operand_ty) {
-                            // Get the variable name if this is a simple identifier
-                            let var_name = if let ExprKind::Ident(name) = &operand.kind {
-                                Some(name.clone())
-                            } else {
-                                None
-                            };
+                            // Get a key for the expression (works for identifiers and field chains)
+                            let expr_key = super::stmt::expr_to_key(operand);
 
-                            // Check nil state for the variable, or assume nullable for complex expressions
-                            let is_nullable = match &var_name {
-                                Some(name) => self.get_nil_state(name) == Nullability::Nullable,
+                            // Check nil state for the expression, or assume nullable for complex expressions
+                            let is_nullable = match &expr_key {
+                                Some(key) => self.get_nil_state(key) == Nullability::Nullable,
                                 None => true, // Complex expressions are conservatively nullable
                             };
 
                             if is_nullable {
                                 let name_for_error =
-                                    var_name.unwrap_or_else(|| "expression".to_string());
+                                    expr_key.unwrap_or_else(|| "expression".to_string());
                                 return Err(SoppoError::NilPointer {
                                     name: name_for_error,
                                     span: operand.span,

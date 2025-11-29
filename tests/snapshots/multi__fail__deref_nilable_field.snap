@@ -1,0 +1,15 @@
+---
+source: tests/multi.rs
+expression: sanitise_error(& err)
+---
+[31msoppo::nil_pointer[0m
+
+  [31m×[0m Potential nil pointer dereference
+    ╭─[[36;1;4mmain.sop:11:18[0m]
+ [2m10[0m │     // This should fail - Email is nilable, can't deref without nil check
+ [2m11[0m │     fmt.Println(*user.Email)
+    · [35;1m                 ─────┬────[0m
+    ·                       [35;1m╰── [35;1mthis pointer may be nil[0m[0m
+ [2m12[0m │ }
+    ╰────
+[36m  help: [0mcheck for nil first, or use `.(!nil)` to assert non-nil

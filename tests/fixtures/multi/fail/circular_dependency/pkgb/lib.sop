@@ -1,0 +1,7 @@
+package pkgb
+
+import "github.com/test/circular/pkga"
+
+func GetB() int {
+    return pkga.GetA()
+}

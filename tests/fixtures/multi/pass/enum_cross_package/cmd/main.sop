@@ -1,0 +1,24 @@
+package main
+
+import (
+    "fmt"
+    "github.com/test/enum_cross/types"
+)
+
+func describeStatus(s types.Status) string {
+    result := ""
+    match s {
+    case types.Status.Pending:
+        result = "waiting"
+    case types.Status.Active:
+        result = "in progress"
+    case types.Status.Complete:
+        result = "done"
+    }
+    return result
+}
+
+func main() {
+    status := types.Status.Active
+    fmt.Println(describeStatus(status))
+}

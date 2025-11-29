@@ -1,0 +1,11 @@
+package main
+
+import (
+    "fmt"
+    "github.com/test/multiret/helpers"
+)
+
+func main() {
+    num, str := helpers.GetPair()
+    fmt.Println(num, str)
+}

@@ -1,0 +1,28 @@
+---
+source: tests/multi.rs
+expression: format_results(& results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/import_gen_enum/generated"
+
+func describe(s generated.Status) string {
+    result := ""
+    switch s.(type) {
+    case generated.Status_Pending:
+        result = "waiting"
+    case generated.Status_Active:
+        result = "in progress"
+    case generated.Status_Complete:
+        result = "done"
+    }
+    return result
+}
+
+func main() {
+    status := generated.StatusActive
+    fmt.Println(describe(status))
+}

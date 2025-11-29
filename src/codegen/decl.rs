@@ -25,11 +25,20 @@ impl Codegen {
     pub(crate) fn gen_type_decl(&mut self, type_decl: &TypeDecl) {
         match &type_decl.kind {
             TypeKind::Alias { target } => {
-                // Type alias: type Foo = Bar or type Foo int
+                // Type alias: type Foo = Bar (Foo is exactly Bar)
+                self.emit_line(&format!(
+                    "type {} = {}",
+                    type_decl.name,
+                    self.go_type_from_ast(target)
+                ));
+            }
+
+            TypeKind::Definition { target } => {
+                // Type definition: type Foo Bar (Foo is a new distinct type)
                 self.emit_line(&format!(
                     "type {} {}",
                     type_decl.name,
-                    self.go_type(&target.name)
+                    self.go_type_from_ast(target)
                 ));
             }
 
@@ -398,9 +407,10 @@ impl Codegen {
     pub(crate) fn gen_pattern(&mut self, pattern: &Pattern) {
         match &pattern.kind {
             PatternKind::Variant(name) => {
-                // Convert qualified name (Colour.Red) to namespaced (Colour_Red)
-                let full_name = name.replace('.', "_");
-                self.emit(&full_name);
+                // Convert qualified name to Go type name
+                // Colour.Red → Colour_Red
+                // pkg.Status.Active → pkg.Status_Active
+                self.emit(&Self::convert_enum_pattern(name));
             }
             PatternKind::Literal(lit) => match lit {
                 Literal::Integer(n) => self.emit(&n.to_string()),
@@ -408,14 +418,12 @@ impl Codegen {
                 Literal::Bool(b) => self.emit(&b.to_string()),
             },
             PatternKind::Destructor { name, .. } => {
-                // Convert qualified name (MyResult.Ok) to namespaced (MyResult_Ok)
-                let full_name = name.replace('.', "_");
-                self.emit(&full_name);
+                // Convert qualified name to Go type name
+                self.emit(&Self::convert_enum_pattern(name));
             }
             PatternKind::StructDestructor { name, .. } => {
-                // Convert qualified name (Shape.Circle) to namespaced (Shape_Circle)
-                let full_name = name.replace('.', "_");
-                self.emit(&full_name);
+                // Convert qualified name to Go type name
+                self.emit(&Self::convert_enum_pattern(name));
             }
             PatternKind::Guard(expr) => {
                 // For expression-less match, emit the boolean expression
@@ -424,6 +432,30 @@ impl Codegen {
             PatternKind::Default => {
                 // Default is handled separately, shouldn't reach here
                 self.emit("default");
+            }
+        }
+    }
+
+    /// Convert a qualified enum pattern name to Go type name
+    /// - `Colour.Red` → `Colour_Red`
+    /// - `pkg.Status.Active` → `pkg.Status_Active`
+    fn convert_enum_pattern(name: &str) -> String {
+        let parts: Vec<&str> = name.split('.').collect();
+        match parts.len() {
+            0 => name.to_string(),
+            1 => name.to_string(),
+            2 => {
+                // Type.Variant → Type_Variant
+                format!("{}_{}", parts[0], parts[1])
+            }
+            _ => {
+                // pkg.Type.Variant or pkg.subpkg.Type.Variant
+                // Keep all but last two as package prefix with dots
+                // Join last two with underscore
+                let prefix = parts[..parts.len() - 2].join(".");
+                let type_name = parts[parts.len() - 2];
+                let variant = parts[parts.len() - 1];
+                format!("{}.{}_{}", prefix, type_name, variant)
             }
         }
     }
@@ -469,5 +501,35 @@ mod tests {
         assert!(output.contains("package main"));
         assert!(output.contains("func add(x int, y int) int"));
         assert!(output.contains("func main() int"));
+    }
+
+    #[test]
+    fn test_convert_enum_pattern() {
+        // Simple Type.Variant
+        assert_eq!(Codegen::convert_enum_pattern("Colour.Red"), "Colour_Red");
+        assert_eq!(
+            Codegen::convert_enum_pattern("Status.Active"),
+            "Status_Active"
+        );
+
+        // Package-qualified pkg.Type.Variant
+        assert_eq!(
+            Codegen::convert_enum_pattern("types.Status.Pending"),
+            "types.Status_Pending"
+        );
+        assert_eq!(
+            Codegen::convert_enum_pattern("pkg.MyEnum.Variant"),
+            "pkg.MyEnum_Variant"
+        );
+
+        // Nested package pkg.subpkg.Type.Variant
+        assert_eq!(
+            Codegen::convert_enum_pattern("foo.bar.Status.Active"),
+            "foo.bar.Status_Active"
+        );
+
+        // Edge cases
+        assert_eq!(Codegen::convert_enum_pattern("Single"), "Single");
+        assert_eq!(Codegen::convert_enum_pattern(""), "");
     }
 }

@@ -206,8 +206,13 @@ impl Infer {
 
                 // Track the Soppo import with its ModuleId for cross-package lookups
                 // The local_path is the module ID (e.g., "helpers" or "util/helpers")
+                let module_id = ModuleId::new(local_path);
                 self.soppo_imports
-                    .insert(package_name.to_string(), ModuleId::new(local_path));
+                    .insert(package_name.to_string(), module_id.clone());
+
+                // Also register in GlobalCtxt for codegen to access
+                self.global_state
+                    .register_soppo_import(package_name.to_string(), module_id);
 
                 // Also track in imported_packages for `is_imported_package` checks
                 self.imported_packages
@@ -226,6 +231,22 @@ impl Infer {
                 // Track the import for later lookup
                 self.imported_packages
                     .insert(package_name.to_string(), import_path.to_string());
+
+                // Check if Go package has soppo type markers and register them
+                if let Ok(pkg) = self
+                    .go_cache
+                    .get_or_parse(import_path, self.project.as_ref())
+                {
+                    for (type_name, soppo_type) in &pkg.soppo_types {
+                        let kind = match soppo_type.kind.as_str() {
+                            "enum" => crate::types::ctx::GoSoppoKind::Enum,
+                            "nilable" => crate::types::ctx::GoSoppoKind::Nilable,
+                            _ => continue,
+                        };
+                        self.global_state
+                            .register_go_soppo_type(package_name, type_name, kind);
+                    }
+                }
 
                 // Add package name to scope with a special "package" type
                 // This allows field access like fmt.Printf to work
@@ -345,8 +366,21 @@ impl Infer {
             .get_or_parse(&import_path, self.project.as_ref())
             .ok()?;
 
-        // Check if it's a type
+        // Check if it's a regular Go type
         if pkg.types.contains_key(type_name) {
+            return Some(Type::Con {
+                name: Symbol {
+                    module: ModuleId::new(package_name),
+                    name: type_name.to_string(),
+                    span: Span::dummy(),
+                },
+                args: vec![],
+                nullable: false,
+            });
+        }
+
+        // Check if it's a Soppo type (from //soppo:enum markers)
+        if pkg.soppo_types.contains_key(type_name) {
             return Some(Type::Con {
                 name: Symbol {
                     module: ModuleId::new(package_name),
@@ -378,6 +412,53 @@ impl Infer {
         }
 
         None
+    }
+
+    /// Look up a field in a Go struct type
+    /// Returns the field type with nullable set based on //soppo:nilable marker
+    pub(super) fn lookup_go_struct_field(
+        &mut self,
+        package_name: &str,
+        type_name: &str,
+        field_name: &str,
+    ) -> Option<Type> {
+        let import_path = self.imported_packages.get(package_name)?.clone();
+
+        let pkg = self
+            .go_cache
+            .get_or_parse(&import_path, self.project.as_ref())
+            .ok()?;
+
+        // Get the type definition
+        let type_def = pkg.types.get(type_name)?;
+
+        // Only works for structs
+        if type_def.kind != "struct" {
+            return None;
+        }
+
+        // Find the field
+        let field = type_def.fields.iter().find(|f| f.name == field_name)?;
+
+        // Parse the Go type
+        let mut field_ty = parse_go_type(&field.ty);
+
+        // If this is a soppo-generated package, apply nullable info
+        // In soppo-generated code:
+        // - Fields WITH //soppo:nilable are nullable
+        // - Fields WITHOUT the marker are NOT nullable (even if pointer type)
+        // In regular Go code:
+        // - All pointer types are considered nullable
+        if pkg.soppo_generated {
+            // Only mark as nullable if the field has the marker
+            if let Type::Con { nullable, .. } = &mut field_ty {
+                *nullable = field.nullable;
+            }
+        }
+        // For non-soppo-generated Go code, parse_go_type already handles
+        // pointer types as nullable
+
+        Some(field_ty)
     }
 
     /// Check if a name refers to an imported Go package
