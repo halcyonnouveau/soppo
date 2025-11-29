@@ -432,6 +432,12 @@ impl Codegen {
                 self.emit_indent();
                 self.emit("}\n");
             }
+
+            StmtKind::LocalTypeDecl(type_decl) => {
+                // Generate local type declaration
+                // Reuse the top-level type declaration generator
+                self.gen_type_decl(type_decl);
+            }
         }
     }
 

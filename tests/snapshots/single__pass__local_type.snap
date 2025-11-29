@@ -1,0 +1,21 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+func main() {
+    type Point struct {
+        X int
+        Y int
+    }
+    p := Point{X: 10, Y: 20}
+    fmt.Println(p.X, p.Y)
+    // Type alias
+    type MyInt = int
+    var n MyInt = 42
+    fmt.Println(n)
+}

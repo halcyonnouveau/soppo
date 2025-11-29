@@ -264,6 +264,29 @@ impl Codegen {
                 self.emit("}");
             }
 
+            ExprKind::AnonStructLit { field_defs, fields } => {
+                // Generate struct { Name Type; ... }{Name: value, ...}
+                self.emit("struct { ");
+                for (i, field) in field_defs.iter().enumerate() {
+                    if i > 0 {
+                        self.emit("; ");
+                    }
+                    self.emit(&field.name);
+                    self.emit(" ");
+                    self.emit(self.go_type(&field.ty.name));
+                }
+                self.emit(" }{");
+                for (i, (field_name, value)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit(field_name);
+                    self.emit(": ");
+                    self.gen_expr(value);
+                }
+                self.emit("}");
+            }
+
             ExprKind::MapLit { ty, entries } => {
                 // Generate map[K]V{key: value, ...}
                 self.emit(&ty.name);

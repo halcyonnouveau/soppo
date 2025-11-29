@@ -1,0 +1,17 @@
+package main
+
+import "fmt"
+
+func main() {
+    // Anonymous struct literal with grouped names
+    point := struct { X, Y int }{X: 10, Y: 20}
+    fmt.Println(point.X, point.Y)
+
+    // Anonymous struct with mixed fields
+    person := struct { Name string; Age int }{Name: "Alice", Age: 30}
+    fmt.Println(person.Name, person.Age)
+
+    // Multiple grouped fields
+    rect := struct { X, Y, Width, Height int }{X: 0, Y: 0, Width: 100, Height: 50}
+    fmt.Println(rect.X, rect.Y, rect.Width, rect.Height)
+}

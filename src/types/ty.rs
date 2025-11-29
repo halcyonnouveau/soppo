@@ -113,6 +113,26 @@ impl Type {
         }
     }
 
+    /// Create an anonymous struct type
+    /// The name encodes the struct definition for codegen: "struct { Name1 Type1; Name2 Type2; ... }"
+    pub fn anon_struct(fields: Vec<(String, Type)>) -> Self {
+        let fields_str = fields
+            .iter()
+            .map(|(name, ty)| format!("{} {}", name, ty))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let name = format!("struct {{ {} }}", fields_str);
+        Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name,
+                span: Span::dummy(),
+            },
+            args: vec![],
+            nullable: false,
+        }
+    }
+
     /// Create a pointer type (non-nullable by default)
     pub fn ptr(inner: Type) -> Self {
         Self::ptr_nullable(inner, false)

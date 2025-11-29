@@ -321,6 +321,40 @@ impl Infer {
                 Ok(Type::fun(param_types, ret_ty))
             }
 
+            ExprKind::AnonStructLit { field_defs, fields } => {
+                // Build a map of field names to types from the definition
+                let field_types: std::collections::HashMap<String, Type> = field_defs
+                    .iter()
+                    .map(|f| (f.name.clone(), self.resolve_type(&f.ty)))
+                    .collect();
+
+                // Type check each field value against its declared type
+                for (field_name, value) in fields {
+                    let value_ty = self.infer_expr(value)?;
+                    if let Some(expected_ty) = field_types.get(field_name) {
+                        self.unify(expected_ty, &value_ty, &value.span)?;
+                    } else {
+                        return Err(SoppoError::Type {
+                            message: format!(
+                                "Anonymous struct has no field named `{}`",
+                                field_name
+                            ),
+                            span: value.span,
+                        });
+                    }
+                }
+
+                // Build a unique type name for this anonymous struct
+                // We'll use a hash or just generate inline in codegen
+                // For type checking, we use a structural anonymous type
+                let field_type_list: Vec<(String, Type)> = field_defs
+                    .iter()
+                    .map(|f| (f.name.clone(), self.resolve_type(&f.ty)))
+                    .collect();
+
+                Ok(Type::anon_struct(field_type_list))
+            }
+
             ExprKind::Block(block) => self.infer_block(block),
 
             ExprKind::Slice {

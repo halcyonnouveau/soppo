@@ -20,6 +20,7 @@ mod pass {
     }
 
     single_pass_tests!(
+        anon_struct,
         basic_go,
         builtins,
         comma_ok,
@@ -33,7 +34,9 @@ mod pass {
         go_methods,
         go_variables,
         if_init,
+        interface_satisfaction,
         iota,
+        local_type,
         named_args,
         nil_safety,
         nullable_types,
@@ -72,6 +75,7 @@ mod fail {
         go_unknown_function,
         go_wrong_arg_count,
         go_wrong_arg_type,
+        interface_not_satisfied,
         named_arg_duplicate,
         named_arg_missing,
         named_arg_unknown,

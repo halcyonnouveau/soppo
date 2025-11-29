@@ -616,6 +616,23 @@ impl Parser {
                 }
             }
 
+            Some(Token::Type) => {
+                // Local type declaration: type Name = ExistingType or type Name struct { ... }
+                // Reuse the item parser's type declaration parsing
+                let type_decl = self.parse_type_decl()?;
+                let end_span = type_decl.span;
+                Ok(Stmt {
+                    span: Span::with_bytes(
+                        start_span.start,
+                        end_span.end,
+                        self.file,
+                        start_span.byte_start,
+                        end_span.byte_end,
+                    ),
+                    kind: StmtKind::LocalTypeDecl(type_decl),
+                })
+            }
+
             Some(Token::LBrace) => {
                 // Block as statement (creates new scope)
                 let block = self.parse_block()?;

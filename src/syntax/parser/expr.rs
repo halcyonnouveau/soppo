@@ -923,6 +923,83 @@ impl Parser {
                 }
             }
 
+            Token::Struct => {
+                // Anonymous struct literal: struct { X int; Y int }{X: 1, Y: 2}
+                // Also supports grouped names: struct { X, Y int }{X: 1, Y: 2}
+                self.expect(Token::LBrace)?;
+                self.skip_terminators();
+
+                // Parse field definitions using parse_fields (supports grouped names)
+                let mut field_defs = Vec::new();
+                while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                    let parsed_fields = self.parse_fields()?;
+                    field_defs.extend(parsed_fields);
+
+                    // Allow semicolon or newline as separator
+                    if !self.consume(&Token::Semicolon) {
+                        self.skip_terminators();
+                    }
+                }
+
+                self.expect(Token::RBrace)?;
+
+                // Now parse the field values: {Name: value, ...}
+                self.expect(Token::LBrace)?;
+                self.skip_terminators();
+
+                let mut fields = Vec::new();
+                if !matches!(self.peek(), Some(Token::RBrace)) {
+                    loop {
+                        // Parse field name
+                        let field_name = match self.advance() {
+                            Some((Token::Ident(name), _)) => name,
+                            Some((tok, field_span)) => {
+                                return Err(SoppoError::Parse {
+                                    message: format!("Expected field name, found {:?}", tok),
+                                    span: field_span,
+                                });
+                            }
+                            None => {
+                                return Err(SoppoError::Parse {
+                                    message: "Expected field name".to_string(),
+                                    span: Span::dummy(),
+                                });
+                            }
+                        };
+
+                        self.expect(Token::Colon)?;
+                        let value = self.parse_expr()?;
+
+                        fields.push((field_name, value));
+
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
+
+                        // Skip terminators after comma
+                        self.skip_terminators();
+
+                        // Allow trailing comma
+                        if matches!(self.peek(), Some(Token::RBrace)) {
+                            break;
+                        }
+                    }
+                }
+
+                let end_span = self.expect(Token::RBrace)?;
+
+                Ok(Expr {
+                    kind: ExprKind::AnonStructLit { field_defs, fields },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
             Token::Func => {
                 // Anonymous function: func(params) returnTypes { body }
                 self.expect(Token::LParen)?;

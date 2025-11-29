@@ -263,6 +263,8 @@ pub enum StmtKind {
         /// For `f() ?` where f returns just `error`, this is 0
         discard_count: Cell<usize>,
     },
+    // type Name struct { ... } or type Name = ExistingType (local type declaration)
+    LocalTypeDecl(TypeDecl),
 }
 
 /// Expression
@@ -334,6 +336,11 @@ pub enum ExprKind {
     },
     StructLit {
         ty: Type,                    // The struct type name
+        fields: Vec<(String, Expr)>, // field_name: value pairs
+    },
+    // Anonymous struct literal: struct { X int; Y int }{X: 1, Y: 2}
+    AnonStructLit {
+        field_defs: Vec<Field>,      // The inline field definitions
         fields: Vec<(String, Expr)>, // field_name: value pairs
     },
     MapLit {

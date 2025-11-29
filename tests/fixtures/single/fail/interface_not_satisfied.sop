@@ -1,0 +1,14 @@
+package main
+
+type Stringer interface {
+    String() string
+}
+
+type MyInt int
+
+// MyInt does NOT implement String() method
+
+func main() {
+    var s Stringer = MyInt(42)
+    _ = s
+}

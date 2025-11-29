@@ -295,8 +295,8 @@ impl Parser {
             let mut fields = Vec::new();
 
             while !matches!(self.peek(), Some(Token::RBrace) | None) {
-                let field = self.parse_field()?;
-                fields.push(field);
+                let parsed_fields = self.parse_fields()?;
+                fields.extend(parsed_fields);
 
                 // Terminators as separator (like Go struct fields)
                 self.skip_terminators();
@@ -381,8 +381,8 @@ impl Parser {
             let mut fields = Vec::new();
 
             while !matches!(self.peek(), Some(Token::RBrace) | None) {
-                let field = self.parse_field()?;
-                fields.push(field);
+                let parsed_fields = self.parse_fields()?;
+                fields.extend(parsed_fields);
 
                 // Terminators as separator (like Go struct fields)
                 self.skip_terminators();
@@ -428,9 +428,14 @@ impl Parser {
         }
     }
 
-    /// Parse struct field
-    fn parse_field(&mut self) -> Result<Field> {
-        let (name, name_span) = match self.advance() {
+    /// Parse struct fields (supports grouped names like `X, Y int`)
+    /// Returns a Vec because `X, Y int` produces multiple Field entries
+    pub fn parse_fields(&mut self) -> Result<Vec<Field>> {
+        // Collect all field names (comma-separated)
+        let mut names: Vec<(String, Span)> = Vec::new();
+
+        // Parse first name
+        let (first_name, first_span) = match self.advance() {
             Some((Token::Ident(name), span)) => (name, span),
             Some((tok, span)) => {
                 return Err(SoppoError::Parse {
@@ -445,10 +450,33 @@ impl Parser {
                 });
             }
         };
+        names.push((first_name, first_span));
 
+        // Parse additional comma-separated names
+        while self.consume(&Token::Comma) {
+            let (name, span) = match self.advance() {
+                Some((Token::Ident(name), span)) => (name, span),
+                Some((tok, span)) => {
+                    return Err(SoppoError::Parse {
+                        message: format!("Expected field name after comma, found {:?}", tok),
+                        span,
+                    });
+                }
+                None => {
+                    return Err(SoppoError::Parse {
+                        message: "Expected field name after comma".to_string(),
+                        span: Span::dummy(),
+                    });
+                }
+            };
+            names.push((name, span));
+        }
+
+        // Parse the type (shared by all names)
         let ty = self.parse_type()?;
 
-        // Parse optional struct tag (backtick string)
+        // Parse optional struct tag (backtick string) - only applies to last field in Go
+        // but we'll apply it to all for simplicity
         let tag = match self.peek() {
             Some(Token::RawString(_)) => {
                 if let Some((Token::RawString(s), _)) = self.advance() {
@@ -460,12 +488,18 @@ impl Parser {
             _ => None,
         };
 
-        Ok(Field {
-            name,
-            ty,
-            tag,
-            span: name_span,
-        })
+        // Create a Field for each name
+        let fields = names
+            .into_iter()
+            .map(|(name, span)| Field {
+                name,
+                ty: ty.clone(),
+                tag: tag.clone(),
+                span,
+            })
+            .collect();
+
+        Ok(fields)
     }
 
     /// Parse interface method signature: MethodName(params) returns

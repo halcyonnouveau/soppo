@@ -980,6 +980,13 @@ impl Infer {
 
                 Ok(Type::unit())
             }
+
+            StmtKind::LocalTypeDecl(type_decl) => {
+                // Register the local type in the current module
+                // This reuses the same type inference as top-level type declarations
+                self.infer_type_decl(type_decl)?;
+                Ok(Type::unit())
+            }
         }
     }
 }

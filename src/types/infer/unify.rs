@@ -56,6 +56,15 @@ impl Infer {
             return Ok(());
         }
 
+        // Check if expected type is a user-defined interface in the current module
+        if self.is_soppo_interface_type(&t1) {
+            // Check if the concrete type satisfies the interface
+            if self.type_satisfies_interface(&t2, &t1) {
+                return Ok(());
+            }
+            // If not, fall through to produce a type mismatch error
+        }
+
         match (&t1, &t2) {
             // Never type unifies with anything (it's bottom type)
             (Type::Never, _) | (_, Type::Never) => Ok(()),

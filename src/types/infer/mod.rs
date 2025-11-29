@@ -615,6 +615,105 @@ impl Infer {
         false
     }
 
+    /// Check if a type is a user-defined interface in the current module
+    pub(super) fn is_soppo_interface_type(&self, ty: &Type) -> bool {
+        let type_name = match ty {
+            Type::Con { name, .. } => {
+                // Strip nullable prefix if present
+                name.name
+                    .strip_prefix('?')
+                    .unwrap_or(&name.name)
+                    .to_string()
+            }
+            _ => return false,
+        };
+
+        // Look up in current module's types
+        if let Some(type_def) = self.global_state.current_module().types.get(&type_name) {
+            return matches!(
+                type_def.kind,
+                crate::types::ctx::TypeDefKind::Interface { .. }
+            );
+        }
+
+        false
+    }
+
+    /// Get the interface methods for a type if it's an interface
+    pub(super) fn get_interface_methods(
+        &self,
+        ty: &Type,
+    ) -> Option<Vec<crate::types::ctx::MethodSig>> {
+        let type_name = match ty {
+            Type::Con { name, .. } => {
+                // Strip nullable prefix if present
+                name.name
+                    .strip_prefix('?')
+                    .unwrap_or(&name.name)
+                    .to_string()
+            }
+            _ => return None,
+        };
+
+        // Look up in current module's types
+        if let Some(type_def) = self.global_state.current_module().types.get(&type_name)
+            && let crate::types::ctx::TypeDefKind::Interface { methods } = &type_def.kind
+        {
+            return Some(methods.clone());
+        }
+
+        None
+    }
+
+    /// Check if a concrete type satisfies an interface (has all required methods)
+    pub(super) fn type_satisfies_interface(&self, concrete_ty: &Type, interface_ty: &Type) -> bool {
+        // Get the interface methods
+        let interface_methods = match self.get_interface_methods(interface_ty) {
+            Some(methods) => methods,
+            None => return false,
+        };
+
+        // Get the concrete type name
+        let concrete_name = match concrete_ty {
+            Type::Con { name, .. } => {
+                // Strip nullable and pointer prefix if present
+                let type_name = name.name.strip_prefix('?').unwrap_or(&name.name);
+                type_name.strip_prefix('*').unwrap_or(type_name).to_string()
+            }
+            _ => return false,
+        };
+
+        // Get methods defined on the concrete type
+        let module = self.global_state.current_module();
+        let type_methods = match module.methods.get(&concrete_name) {
+            Some(methods) => methods,
+            None => return interface_methods.is_empty(), // No methods, only satisfies empty interface
+        };
+
+        // Check each interface method is implemented
+        for required_method in &interface_methods {
+            match type_methods.get(&required_method.name) {
+                Some(impl_method) => {
+                    // Check parameter count matches (excluding receiver)
+                    if impl_method.params.len() != required_method.params.len() {
+                        return false;
+                    }
+
+                    // Check return type count matches
+                    if impl_method.return_types.len() != required_method.returns.len() {
+                        return false;
+                    }
+
+                    // Note: We do a basic check here. A full implementation would
+                    // unify parameter and return types for exact matching.
+                }
+                None => return false, // Required method not found
+            }
+        }
+
+        true
+    }
+
     /// Get the ultimate underlying type for a type alias chain.
     /// For example, if we have:
     ///   type Duration int64
