@@ -214,6 +214,13 @@ pub enum StmtKind {
         condition: Expr,
         body: Block,
     },
+    // C-style for loop: for init; condition; post { body }
+    ForCStyle {
+        init: Option<Box<Stmt>>, // init statement (e.g., i := 0)
+        condition: Option<Expr>, // condition (e.g., i < 10), None = infinite loop
+        post: Option<Box<Stmt>>, // post statement (e.g., i++)
+        body: Block,
+    },
     // for key := range collection or for key, value := range collection
     ForRange {
         key: String,           // First variable (index/key)

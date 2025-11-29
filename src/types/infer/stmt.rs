@@ -410,6 +410,39 @@ impl Infer {
                 Ok(Type::unit())
             }
 
+            StmtKind::ForCStyle {
+                init,
+                condition,
+                post,
+                body,
+            } => {
+                // Create a new scope for the loop (init vars are scoped to the loop)
+                self.push_scope();
+
+                // Type check init statement if present
+                if let Some(init_stmt) = init {
+                    self.infer_stmt(init_stmt)?;
+                }
+
+                // Check condition is bool if present
+                if let Some(cond) = condition {
+                    let cond_ty = self.infer_expr(cond)?;
+                    self.unify(&Type::simple("bool"), &cond_ty, &cond.span)?;
+                }
+
+                // Type check body
+                self.infer_block(body)?;
+
+                // Type check post statement if present
+                if let Some(post_stmt) = post {
+                    self.infer_stmt(post_stmt)?;
+                }
+
+                self.pop_scope();
+
+                Ok(Type::unit())
+            }
+
             StmtKind::ForRange {
                 key,
                 value,

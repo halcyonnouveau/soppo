@@ -4,6 +4,8 @@
 
 A language that compiles to Go, adding ergonomic and type safety features that Go lacks. Soppo uses Go syntax wherever possible - if you know Go, you know most of Soppo.
 
+**[Try it in the playground](https://play.soppolang.dev)**
+
 See [docs/DESIGN.md](docs/DESIGN.md) for language design.
 
 Soppo is not production ready.

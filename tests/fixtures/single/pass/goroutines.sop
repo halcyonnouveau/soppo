@@ -1,0 +1,58 @@
+package main
+
+import "fmt"
+import "time"
+
+type Result enum {
+    Ok int
+    Err string
+}
+
+func worker(id int, jobs chan int, results chan Result) {
+    for j := range jobs {
+        fmt.Println("worker {id} processing job {j}")
+
+        // Simulate some work
+        time.Sleep(time.Millisecond * 100)
+
+        match {
+        case j % 3 == 0:
+            results <- Result.Err("job {j} failed")
+        default:
+            results <- Result.Ok(j * 2)
+        }
+    }
+}
+
+func main() {
+    const numJobs = 5
+    const numWorkers = 2
+
+    jobs := make(chan int, numJobs)
+    results := make(chan Result, numJobs)
+
+    // Start workers using grouped field names in anonymous struct
+    config := struct { Workers, Jobs int }{Workers: numWorkers, Jobs: numJobs}
+    fmt.Println("Starting {config.Workers} workers for {config.Jobs} jobs")
+
+    for w := 1; w <= config.Workers; w++ {
+        go worker(id: w, jobs: jobs, results: results)
+    }
+
+    // Send jobs
+    for j := 1; j <= config.Jobs; j++ {
+        jobs <- j
+    }
+    close(jobs)
+
+    // Collect and match on results
+    for i := 1; i <= config.Jobs; i++ {
+        result := <-results
+        match result {
+        case Result.Ok(value):
+            fmt.Println("success: {value}")
+        case Result.Err(msg):
+            fmt.Println("error: {msg}")
+        }
+    }
+}

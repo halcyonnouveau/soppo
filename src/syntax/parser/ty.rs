@@ -76,6 +76,39 @@ impl Parser {
             });
         }
 
+        // Anonymous struct type: struct { fields } - cannot be nullable on its own
+        if self.consume(&Token::Struct) {
+            if nullable {
+                return Err(SoppoError::Parse {
+                    message: "Struct types cannot be nullable directly, use a pointer (*struct{...}) with ? prefix".to_string(),
+                    span: start_span,
+                });
+            }
+            self.expect(Token::LBrace)?;
+            self.skip_terminators();
+
+            let mut field_strs = Vec::new();
+            while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                // Parse field: name type or grouped names: name1, name2 type
+                let parsed_fields = self.parse_fields()?;
+                for field in parsed_fields {
+                    field_strs.push(format!("{} {}", field.name, field.ty.name));
+                }
+
+                // Skip terminators between fields
+                self.skip_terminators();
+            }
+            self.expect(Token::RBrace)?;
+
+            let struct_name = format!("struct {{ {} }}", field_strs.join("; "));
+            return Ok(Type {
+                name: struct_name,
+                args: vec![],
+                span: start_span,
+                nullable: false,
+            });
+        }
+
         // Function type: func(params) returns - can be nullable
         if self.consume(&Token::Func) {
             // Parse parameter types

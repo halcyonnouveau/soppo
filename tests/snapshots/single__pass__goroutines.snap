@@ -1,0 +1,82 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+import "time"
+
+/*soppo:enum
+Result {
+    Ok int
+    Err string
+}
+*/
+type Result interface {
+    isResult()
+}
+
+type Result_Ok struct {
+    Value int
+}
+func (Result_Ok) isResult() {}
+
+type Result_Err struct {
+    Value string
+}
+func (Result_Err) isResult() {}
+
+func ResultOk(value int) Result {
+    return Result_Ok{Value: value}
+}
+func ResultErr(value string) Result {
+    return Result_Err{Value: value}
+}
+
+func worker(id int, jobs chan int, results chan Result) {
+    for j := range jobs {
+        fmt.Println(fmt.Sprintf("worker %v processing job %v", id, j))
+        // Simulate some work
+        time.Sleep((time.Millisecond * 100))
+        switch {
+        case ((j % 3) == 0):
+            results <- ResultErr(fmt.Sprintf("job %v failed", j))
+        default:
+            results <- ResultOk((j * 2))
+        }
+    }
+}
+
+func main() {
+    const numJobs = 5
+    const numWorkers = 2
+    jobs := make(chan int, numJobs)
+    results := make(chan Result, numJobs)
+    // Start workers using grouped field names in anonymous struct
+    config := struct { Workers int; Jobs int }{Workers: numWorkers, Jobs: numJobs}
+    fmt.Println(fmt.Sprintf("Starting %v workers for %v jobs", config.Workers, config.Jobs))
+    for w := 1; (w <= config.Workers); w++ {
+        go worker(w, jobs, results)
+    }
+    // Send jobs
+    for j := 1; (j <= config.Jobs); j++ {
+        jobs <- j
+    }
+    close(jobs)
+    // Collect and match on results
+    for i := 1; (i <= config.Jobs); i++ {
+        result := (<-results)
+        switch __v := result.(type) {
+        case Result_Ok:
+            value := __v.Value
+            _ = value
+            fmt.Println(fmt.Sprintf("success: %v", value))
+        case Result_Err:
+            msg := __v.Value
+            _ = msg
+            fmt.Println(fmt.Sprintf("error: %v", msg))
+        }
+    }
+}

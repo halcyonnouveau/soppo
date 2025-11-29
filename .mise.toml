@@ -1,3 +1,4 @@
 [tools]
 go = "1.25"
+bun = "latest"
 "cargo:cargo-insta" = "latest"

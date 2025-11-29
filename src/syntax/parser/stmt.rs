@@ -710,16 +710,73 @@ impl Parser {
                     self.pos = saved_pos;
                 }
 
-                // Regular for loop with condition, or infinite loop (for { })
-                let condition = if matches!(self.peek(), Some(Token::LBrace)) {
-                    // Infinite loop: for { } - use true as condition
-                    Expr {
-                        span: start_span,
-                        kind: ExprKind::Bool(true),
-                    }
-                } else {
-                    self.parse_expr()?
-                };
+                // Check for infinite loop: for { }
+                if matches!(self.peek(), Some(Token::LBrace)) {
+                    let body = self.parse_block()?;
+                    return Ok(Stmt {
+                        span: Span::with_bytes(
+                            start_span.start,
+                            body.span.end,
+                            self.file,
+                            start_span.byte_start,
+                            body.span.byte_end,
+                        ),
+                        kind: StmtKind::ForCStyle {
+                            init: None,
+                            condition: None,
+                            post: None,
+                            body,
+                        },
+                    });
+                }
+
+                // Try to parse first part - could be init statement or condition
+                let first_part_pos = self.pos;
+                let first_stmt = self.parse_stmt_inner()?;
+
+                // Check if this is C-style for loop (has semicolon after first part)
+                if self.consume(&Token::Semicolon) {
+                    // C-style for loop: for init; condition; post { }
+                    let init = Some(Box::new(first_stmt));
+
+                    // Parse condition (optional - empty means infinite)
+                    let condition = if matches!(self.peek(), Some(Token::Semicolon)) {
+                        None
+                    } else {
+                        Some(self.parse_expr()?)
+                    };
+
+                    self.expect(Token::Semicolon)?;
+
+                    // Parse post statement (optional)
+                    let post = if matches!(self.peek(), Some(Token::LBrace)) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_stmt_inner()?))
+                    };
+
+                    let body = self.parse_block()?;
+
+                    return Ok(Stmt {
+                        span: Span::with_bytes(
+                            start_span.start,
+                            body.span.end,
+                            self.file,
+                            start_span.byte_start,
+                            body.span.byte_end,
+                        ),
+                        kind: StmtKind::ForCStyle {
+                            init,
+                            condition,
+                            post,
+                            body,
+                        },
+                    });
+                }
+
+                // Not C-style - backtrack and parse as while-style: for condition { }
+                self.pos = first_part_pos;
+                let condition = self.parse_expr()?;
                 let body = self.parse_block()?;
 
                 Ok(Stmt {

@@ -10,6 +10,38 @@ impl Codegen {
         self.emit("\n");
     }
 
+    /// Generate a statement inline (no indent, no newline) - for C-style for loop parts
+    pub(crate) fn gen_stmt_inline(&mut self, stmt: &Stmt) {
+        match &stmt.kind {
+            StmtKind::Decl { name, value } => {
+                self.emit(&format!("{} := ", name));
+                self.gen_expr(value);
+            }
+            StmtKind::Assign { target, value } => {
+                self.gen_expr(target);
+                self.emit(" = ");
+                self.gen_expr(value);
+            }
+            StmtKind::IncDec { target, is_inc } => {
+                self.gen_expr(target);
+                self.emit(if *is_inc { "++" } else { "--" });
+            }
+            StmtKind::CompoundAssign { target, op, value } => {
+                let op_str = self.go_assign_op(op).to_string();
+                self.gen_expr(target);
+                self.emit(" ");
+                self.emit(&op_str);
+                self.emit(" ");
+                self.gen_expr(value);
+            }
+            StmtKind::Expr(expr) => {
+                self.gen_expr(expr);
+            }
+            // For other statement types, fall back to full generation (shouldn't happen in for loop)
+            _ => self.gen_stmt(stmt),
+        }
+    }
+
     /// Generate a statement
     pub(crate) fn gen_stmt(&mut self, stmt: &Stmt) {
         // Emit any comments that appear before this statement
@@ -194,6 +226,37 @@ impl Codegen {
                 self.emit_indent();
                 self.emit("for ");
                 self.gen_expr(condition);
+                self.emit(" ");
+                self.gen_block(body);
+                self.output.push('\n');
+            }
+
+            StmtKind::ForCStyle {
+                init,
+                condition,
+                post,
+                body,
+            } => {
+                self.emit_indent();
+                self.emit("for ");
+
+                // Generate init statement (without newline/indent)
+                if let Some(init_stmt) = init {
+                    self.gen_stmt_inline(init_stmt);
+                }
+                self.emit("; ");
+
+                // Generate condition
+                if let Some(cond) = condition {
+                    self.gen_expr(cond);
+                }
+                self.emit("; ");
+
+                // Generate post statement (without newline/indent)
+                if let Some(post_stmt) = post {
+                    self.gen_stmt_inline(post_stmt);
+                }
+
                 self.emit(" ");
                 self.gen_block(body);
                 self.output.push('\n');
