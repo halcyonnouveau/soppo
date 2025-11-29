@@ -76,10 +76,77 @@ impl Parser {
             });
         }
 
-        // Function type: func(...) ... - can be nullable
-        if matches!(self.peek(), Some(Token::Func)) {
-            // For now, don't parse inline function types - they come from FuncLit
-            // Fall through to identifier handling
+        // Function type: func(params) returns - can be nullable
+        if self.consume(&Token::Func) {
+            // Parse parameter types
+            self.expect(Token::LParen)?;
+            let mut param_types = Vec::new();
+            if !matches!(self.peek(), Some(Token::RParen)) {
+                loop {
+                    let param_ty = self.parse_type()?;
+                    param_types.push(param_ty);
+                    if !self.consume(&Token::Comma) {
+                        break;
+                    }
+                }
+            }
+            self.expect(Token::RParen)?;
+
+            // Parse return type(s)
+            let mut return_types = Vec::new();
+            if self.consume(&Token::LParen) {
+                // Multiple return types: func(A) (B, C)
+                if !matches!(self.peek(), Some(Token::RParen)) {
+                    loop {
+                        let ret_ty = self.parse_type()?;
+                        return_types.push(ret_ty);
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Token::RParen)?;
+            } else if !matches!(
+                self.peek(),
+                Some(Token::Comma)
+                    | Some(Token::RParen)
+                    | Some(Token::RBrace)
+                    | Some(Token::Semicolon)
+                    | None
+            ) {
+                // Single return type: func(A) B
+                let ret_ty = self.parse_type()?;
+                return_types.push(ret_ty);
+            }
+
+            // Build function type name: func(A, B) C
+            let params_str = param_types
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let returns_str = if return_types.is_empty() {
+                String::new()
+            } else if return_types.len() == 1 {
+                format!(" {}", return_types[0].name)
+            } else {
+                let rets = return_types
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(" ({})", rets)
+            };
+
+            let mut all_types = param_types;
+            all_types.extend(return_types);
+
+            return Ok(Type {
+                name: format!("func({}){}", params_str, returns_str),
+                args: all_types,
+                span: start_span,
+                nullable,
+            });
         }
 
         // Now we need an identifier

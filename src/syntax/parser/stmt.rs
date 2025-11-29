@@ -633,14 +633,22 @@ impl Parser {
                 // We need to look ahead to see if we have: ident [, ident] := range
                 let saved_pos = self.pos;
 
-                // Try to parse range loop
-                if let Some(Token::Ident(first_name)) = self.peek().cloned() {
-                    self.advance();
-                    let first_name = first_name.clone();
+                // Helper to get identifier or underscore as a name
+                let get_name = |token: &Token| -> Option<String> {
+                    match token {
+                        Token::Ident(name) => Some(name.clone()),
+                        Token::Underscore => Some("_".to_string()),
+                        _ => None,
+                    }
+                };
 
-                    // Check for second variable: for x, y := range
+                // Try to parse range loop
+                if let Some(first_name) = self.peek().and_then(&get_name) {
+                    self.advance();
+
+                    // Check for second variable: for x, y := range or for _, y := range
                     let second_name = if self.consume(&Token::Comma) {
-                        if let Some(Token::Ident(second)) = self.peek().cloned() {
+                        if let Some(second) = self.peek().and_then(get_name) {
                             self.advance();
                             Some(second)
                         } else {

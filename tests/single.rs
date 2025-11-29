@@ -26,6 +26,7 @@ mod pass {
         enum_match,
         enum_variant_methods,
         error_type,
+        func_reference,
         generics,
         go_interface,
         go_methods,

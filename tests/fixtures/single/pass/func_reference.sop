@@ -1,0 +1,47 @@
+// Test passing function references as arguments to other functions
+package main
+
+import "fmt"
+import "sort"
+
+// A simple callback function
+func double(x int) int {
+    return x * 2
+}
+
+// Another callback
+func triple(x int) int {
+    return x * 3
+}
+
+// Higher-order function that takes a function reference
+func applyToAll(nums []int, f func(int) int) []int {
+    result := make([]int, len(nums))
+    for i, n := range nums {
+        result[i] = f(n)
+    }
+    return result
+}
+
+// Comparator for sort.Slice
+func compareDesc(a int, b int) bool {
+    return a > b
+}
+
+func main() {
+    nums := []int{1, 2, 3, 4, 5}
+
+    // Pass function reference to our own higher-order function
+    doubled := applyToAll(nums, double)
+    fmt.Println(doubled)
+
+    tripled := applyToAll(nums, triple)
+    fmt.Println(tripled)
+
+    // Pass function reference to Go stdlib (sort.Slice uses func(i, j int) bool)
+    data := []int{3, 1, 4, 1, 5, 9, 2, 6}
+    sort.Slice(data, func(i int, j int) bool {
+        return data[i] < data[j]
+    })
+    fmt.Println(data)
+}

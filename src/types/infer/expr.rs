@@ -279,15 +279,15 @@ impl Infer {
                 // Create a new scope for the function body
                 self.push_scope();
 
-                // Add parameters to scope
+                // Add parameters to scope - use resolve_type for proper qualified type handling
                 for param in params {
-                    let param_ty = Type::simple(&param.ty.name);
+                    let param_ty = self.resolve_type(&param.ty);
                     self.insert_var(param.name.clone(), param_ty);
                 }
 
                 // Set expected return types for this function
                 let expected_ret_types: Vec<Type> =
-                    return_types.iter().map(|t| Type::simple(&t.name)).collect();
+                    return_types.iter().map(|t| self.resolve_type(t)).collect();
                 if !expected_ret_types.is_empty() {
                     self.expected_return_types = Some(expected_ret_types.clone());
                 }
@@ -300,17 +300,17 @@ impl Infer {
                 // Restore previous expected return types
                 self.expected_return_types = prev_expected;
 
-                // Build function type
+                // Build function type - use resolve_type for proper qualified type handling
                 let param_types: Vec<Type> =
-                    params.iter().map(|p| Type::simple(&p.ty.name)).collect();
+                    params.iter().map(|p| self.resolve_type(&p.ty)).collect();
                 let ret_ty = if return_types.is_empty() {
                     Type::unit()
                 } else if return_types.len() == 1 {
-                    Type::simple(&return_types[0].name)
+                    self.resolve_type(&return_types[0])
                 } else {
                     // Multiple return types - use a tuple type
                     let ret_types: Vec<Type> =
-                        return_types.iter().map(|t| Type::simple(&t.name)).collect();
+                        return_types.iter().map(|t| self.resolve_type(t)).collect();
                     Type::generic("tuple", ret_types)
                 };
 

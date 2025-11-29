@@ -124,6 +124,13 @@ pub fn compile(source: &str, filename: &str) -> Result<String> {
     let mut infer = Infer::new()?;
     infer.process_imports(&file.imports);
 
+    // Two-pass type checking:
+    // Pass 1: Register all type definitions and function signatures
+    for decl in &file.decls {
+        register_decl(&mut infer, decl, source, filename)?;
+    }
+
+    // Pass 2: Infer and check function bodies
     for decl in &file.decls {
         infer_decl(&mut infer, decl, source, filename)?;
     }
@@ -163,6 +170,13 @@ pub fn compile_with_context(
     let mut infer = Infer::with_global_state_and_project(global_ctxt, project)?;
     infer.process_imports(&file.imports);
 
+    // Two-pass type checking:
+    // Pass 1: Register all type definitions and function signatures
+    for decl in &file.decls {
+        register_decl(&mut infer, decl, source, filename)?;
+    }
+
+    // Pass 2: Infer and check function bodies
     for decl in &file.decls {
         infer_decl(&mut infer, decl, source, filename)?;
     }
@@ -191,6 +205,13 @@ pub fn typecheck(source: &str, filename: &str) -> Result<()> {
     let mut infer = Infer::new()?;
     infer.process_imports(&file.imports);
 
+    // Two-pass type checking:
+    // Pass 1: Register all type definitions and function signatures
+    for decl in &file.decls {
+        register_decl(&mut infer, decl, source, filename)?;
+    }
+
+    // Pass 2: Infer and check function bodies
     for decl in &file.decls {
         infer_decl(&mut infer, decl, source, filename)?;
     }
@@ -198,19 +219,39 @@ pub fn typecheck(source: &str, filename: &str) -> Result<()> {
     Ok(())
 }
 
-fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
-    // Create NamedSource once, only clone if an error occurs
+/// Pass 1: Register type definitions and function signatures (no body checking)
+fn register_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
     let add_source = |e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
     };
 
     match decl {
         Decl::Const(const_decl) => {
+            // Consts are fully processed in pass 1 since they don't have bodies
             infer.infer_const_decl(const_decl).map_err(add_source)?;
         }
         Decl::Type(type_decl) => {
+            // Types are fully processed in pass 1
             infer.infer_type_decl(type_decl).map_err(add_source)?;
         }
+        Decl::Func(func) => {
+            // Only register the signature, don't check the body yet
+            infer.register_func_signature(func).map_err(add_source)?;
+        }
+    }
+    Ok(())
+}
+
+/// Pass 2: Infer and check function bodies (consts and types already processed in pass 1)
+fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
+    let add_source = |e| {
+        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
+    };
+
+    match decl {
+        // Consts and types were fully processed in pass 1
+        Decl::Const(_) | Decl::Type(_) => {}
+        // Only functions need body checking in pass 2
         Decl::Func(func) => {
             infer.infer_func_decl(func).map_err(add_source)?;
         }

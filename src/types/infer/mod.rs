@@ -313,10 +313,11 @@ impl Infer {
         let func_def = pkg.functions.get(func_name)?;
 
         // Convert Go signature to Soppo Type
+        // Apply module to parameter types as well for proper unification
         let param_types: Vec<Type> = func_def
             .params
             .iter()
-            .map(|p| parse_go_type(&p.ty))
+            .map(|p| Self::parse_go_type_with_module(&p.ty, package_name))
             .collect();
 
         let return_type = if func_def.return_type.is_empty() {
@@ -370,11 +371,18 @@ impl Infer {
                         | "any"
                 );
 
+                // Don't set module on:
+                // - Builtin types (int, string, etc.)
+                // - Slice types ([]T)
+                // - Map types (map[K]V)
+                // - Channel types (chan T)
+                // - Pointer types (*T) - module goes on inner type via args recursion
                 let new_module = if name.module.0.is_empty()
                     && !is_builtin
                     && !name.name.starts_with("[]")
                     && !name.name.starts_with("map[")
                     && !name.name.starts_with("chan ")
+                    && !name.name.starts_with('*')
                 {
                     ModuleId::new(package_name)
                 } else {
@@ -787,6 +795,140 @@ impl Infer {
         // Check if the type name is a generic parameter
         if let Some(ty_var) = self.generic_params.get(&ast_ty.name) {
             return ty_var.clone();
+        }
+
+        // Handle variadic types: ...T -> variadic[T]
+        if let Some(inner_name) = ast_ty.name.strip_prefix("...") {
+            let inner_ty = if let Some(dot_idx) = inner_name.find('.') {
+                // Qualified variadic type: ...pkg.Type
+                let pkg = &inner_name[..dot_idx];
+                let type_name = &inner_name[dot_idx + 1..];
+                Type::Con {
+                    name: Symbol {
+                        module: ModuleId::new(pkg),
+                        name: type_name.to_string(),
+                        span: ast_ty.span,
+                    },
+                    args: vec![],
+                    nullable: false,
+                }
+            } else {
+                Type::simple(inner_name)
+            };
+            return Type::generic("variadic", vec![inner_ty]);
+        }
+
+        // Handle function types: func(A, B) C -> Type::Fun
+        if ast_ty.name.starts_with("func(") {
+            // The args contain param types followed by return types
+            // Parse the name to figure out how many are params vs returns
+            // Format: "func(A, B) C" or "func(A, B) (C, D)" or "func(A, B)"
+            let after_func = &ast_ty.name[4..]; // Skip "func"
+
+            // Find matching paren for params
+            let mut paren_depth = 0;
+            let mut params_end = 0;
+            for (i, c) in after_func.chars().enumerate() {
+                match c {
+                    '(' => paren_depth += 1,
+                    ')' => {
+                        paren_depth -= 1;
+                        if paren_depth == 0 {
+                            params_end = i;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Count params by counting commas + 1 (if non-empty)
+            let params_str = &after_func[1..params_end];
+            let num_params = if params_str.trim().is_empty() {
+                0
+            } else {
+                params_str.matches(',').count() + 1
+            };
+
+            // Split args into params and returns
+            let resolved_args: Vec<Type> =
+                ast_ty.args.iter().map(|a| self.resolve_type(a)).collect();
+            let (param_types, return_types): (Vec<_>, Vec<_>) = resolved_args
+                .into_iter()
+                .enumerate()
+                .partition(|(i, _)| *i < num_params);
+            let param_types: Vec<Type> = param_types.into_iter().map(|(_, t)| t).collect();
+            let return_types: Vec<Type> = return_types.into_iter().map(|(_, t)| t).collect();
+
+            let ret_ty = if return_types.is_empty() {
+                Type::unit()
+            } else if return_types.len() == 1 {
+                return_types.into_iter().next().unwrap()
+            } else {
+                Type::generic("tuple", return_types)
+            };
+
+            return Type::Fun {
+                args: param_types,
+                ret: Box::new(ret_ty),
+                nullable: ast_ty.nullable,
+            };
+        }
+
+        // Handle pointer types with qualified inner types: *pkg.Type -> pointer to pkg.Type
+        if let Some(inner_name) = ast_ty.name.strip_prefix('*') {
+            // Parse the inner type
+            if let Some(dot_idx) = inner_name.find('.') {
+                // Qualified pointer type: *pkg.Type
+                let pkg = &inner_name[..dot_idx];
+                let type_name = &inner_name[dot_idx + 1..];
+
+                // Create inner type with module
+                let inner_ty = Type::Con {
+                    name: Symbol {
+                        module: ModuleId::new(pkg),
+                        name: type_name.to_string(),
+                        span: ast_ty.span,
+                    },
+                    args: vec![],
+                    nullable: false,
+                };
+
+                // Create pointer type
+                return Type::Con {
+                    name: Symbol {
+                        module: ModuleId::empty(),
+                        name: format!("*{}", type_name),
+                        span: ast_ty.span,
+                    },
+                    args: vec![inner_ty],
+                    nullable: ast_ty.nullable,
+                };
+            }
+        }
+
+        // Handle non-pointer qualified types: pkg.Type
+        if !ast_ty.name.starts_with('*')
+            && !ast_ty.name.starts_with("[]")
+            && !ast_ty.name.starts_with("map[")
+            && let Some(dot_idx) = ast_ty.name.find('.')
+        {
+            let pkg = &ast_ty.name[..dot_idx];
+            let type_name = &ast_ty.name[dot_idx + 1..];
+
+            return Type::Con {
+                name: Symbol {
+                    module: ModuleId::new(pkg),
+                    name: type_name.to_string(),
+                    span: ast_ty.span,
+                },
+                args: ast_ty
+                    .args
+                    .iter()
+                    .map(|arg| self.resolve_type(arg))
+                    .collect(),
+                nullable: ast_ty.nullable,
+            };
         }
 
         // Not a generic param - create a concrete type

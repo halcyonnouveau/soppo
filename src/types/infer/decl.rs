@@ -1,5 +1,5 @@
 use super::Infer;
-use crate::error::Result;
+use crate::error::{Result, SoppoError};
 use crate::syntax::{Block, ConstDecl, EnumVariant, FuncDecl, TypeDecl, TypeKind};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
@@ -21,7 +21,72 @@ impl Infer {
         Ok(last_ty)
     }
 
-    /// Infer and check a function declaration
+    /// Register a function's signature without checking the body.
+    /// This allows functions to be called before their bodies are checked,
+    /// enabling Go-style forward references.
+    pub fn register_func_signature(&mut self, func: &FuncDecl) -> Result<()> {
+        // Check for methods on enum types (not variants) - this is an error
+        if let Some(receiver) = &func.receiver {
+            let receiver_type_name = &receiver.ty.name;
+
+            if !receiver_type_name.contains('.') {
+                let base_name = receiver_type_name
+                    .strip_prefix('*')
+                    .unwrap_or(receiver_type_name);
+
+                if let Some(type_def) = self.global_state.lookup_type(base_name)
+                    && matches!(type_def.kind, TypeDefKind::Enum { .. })
+                {
+                    return Err(SoppoError::Type {
+                        message: format!(
+                            "Cannot define method on enum type `{}`. \
+                                 Define methods on enum variants instead: \
+                                 `func (v {}.VariantName) {}(...)`",
+                            base_name, base_name, func.name
+                        ),
+                        span: receiver.ty.span,
+                    });
+                }
+            }
+        }
+
+        // Build function type from signature
+        // Use resolve_type to properly handle qualified types like *http.Request
+        let func_ty = {
+            let param_tys: Vec<Type> = func
+                .params
+                .iter()
+                .map(|p| self.resolve_type(&p.ty))
+                .collect();
+            let ret_ty = if func.return_types.is_empty() {
+                Type::unit()
+            } else if func.return_types.len() == 1 {
+                self.resolve_type(&func.return_types[0])
+            } else {
+                Type::generic(
+                    "tuple",
+                    func.return_types
+                        .iter()
+                        .map(|t| self.resolve_type(t))
+                        .collect(),
+                )
+            };
+            Type::fun(param_tys, ret_ty)
+        };
+
+        // Store function type in outermost scope so it can be called
+        if let Some(scope) = self.scopes.first_mut() {
+            scope.insert(func.name.clone(), func_ty);
+        }
+
+        // Register function in global state so it can be looked up for method calls
+        self.global_state.register_function(func);
+
+        Ok(())
+    }
+
+    /// Infer and check a function declaration's body.
+    /// The function signature should already be registered via `register_func_signature`.
     pub fn infer_func_decl(&mut self, func: &FuncDecl) -> Result<()> {
         self.push_scope();
 
@@ -46,6 +111,7 @@ impl Infer {
         }
 
         // Add receiver parameter to scope (for methods)
+        // Note: enum method validation is done in register_func_signature
         if let Some(receiver) = &func.receiver {
             let receiver_ty = self.resolve_type(&receiver.ty);
             self.insert_var(receiver.name.clone(), receiver_ty.clone());
@@ -87,31 +153,7 @@ impl Infer {
         self.expected_return_types = old_expected_return;
         self.generic_params = old_generic_params;
 
-        // Register function in global state
-        // For multi-value returns, we use a tuple type representation
-        let func_ty = {
-            let param_tys: Vec<Type> = func.params.iter().map(|p| Type::from_ast(&p.ty)).collect();
-            let ret_ty = if func.return_types.is_empty() {
-                Type::unit()
-            } else if func.return_types.len() == 1 {
-                Type::from_ast(&func.return_types[0])
-            } else {
-                // Multi-value return: create a tuple type
-                Type::generic(
-                    "tuple",
-                    func.return_types.iter().map(Type::from_ast).collect(),
-                )
-            };
-            Type::fun(param_tys, ret_ty)
-        };
-
-        // Store function type in outermost scope so it can be called
-        if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(func.name.clone(), func_ty);
-        }
-
-        // Register function in global state so it can be looked up for method calls
-        self.global_state.register_function(func);
+        // Note: Function registration is done in register_func_signature
 
         Ok(())
     }
@@ -304,6 +346,14 @@ mod tests {
         let file = parser.parse_file().unwrap();
         let mut infer = Infer::new().unwrap();
 
+        // Pass 1: Register function signatures
+        for decl in &file.decls {
+            if let Decl::Func(func) = decl {
+                assert!(infer.register_func_signature(func).is_ok());
+            }
+        }
+
+        // Pass 2: Check function bodies
         for decl in &file.decls {
             if let Decl::Func(func) = decl {
                 assert!(infer.infer_func_decl(func).is_ok());

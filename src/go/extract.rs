@@ -856,7 +856,7 @@ fn extract_type_string(node: tree_sitter::Node, source: &str) -> String {
                 .unwrap_or_default();
             format!("{}[{}]", type_name, args.join(", "))
         }
-        "function_type" => "func".to_string(),
+        "function_type" => extract_function_type(node, source),
         "interface_type" => "interface{}".to_string(),
         "struct_type" => "struct{}".to_string(),
         "parameter_list" => {
@@ -899,6 +899,70 @@ fn extract_type_args(node: tree_sitter::Node, source: &str) -> Vec<String> {
         }
     }
     args
+}
+
+/// Extract a function type like `func(A, B) C` into a string representation
+fn extract_function_type(node: tree_sitter::Node, source: &str) -> String {
+    let mut params = Vec::new();
+    let mut result = String::new();
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "parameter_list" => {
+                // This is the parameters of the function type
+                let mut param_cursor = child.walk();
+                for param_child in child.children(&mut param_cursor) {
+                    if param_child.kind() == "parameter_declaration" {
+                        // Get the type from the parameter (may have multiple names with same type)
+                        let mut names_count = 0;
+                        let mut ty = String::new();
+
+                        let mut inner_cursor = param_child.walk();
+                        for inner_child in param_child.children(&mut inner_cursor) {
+                            if inner_child.kind() == "identifier" {
+                                names_count += 1;
+                            } else if is_type_node(inner_child.kind()) {
+                                ty = extract_type_string(inner_child, source);
+                            }
+                        }
+
+                        // If we have names, add that many parameters with this type
+                        // If no names, just add the type once
+                        let count = if names_count > 0 { names_count } else { 1 };
+                        for _ in 0..count {
+                            if !ty.is_empty() {
+                                params.push(ty.clone());
+                            }
+                        }
+                    } else if param_child.kind() == "variadic_parameter_declaration" {
+                        let mut ty = String::new();
+                        let mut inner_cursor = param_child.walk();
+                        for inner_child in param_child.children(&mut inner_cursor) {
+                            if is_type_node(inner_child.kind()) {
+                                ty = format!("...{}", extract_type_string(inner_child, source));
+                            }
+                        }
+                        if !ty.is_empty() {
+                            params.push(ty);
+                        }
+                    }
+                }
+            }
+            _ if is_type_node(child.kind()) => {
+                // This is the result type (return type)
+                result = extract_type_string(child, source);
+            }
+            _ => {}
+        }
+    }
+
+    // Build the function type string: func(A, B) C
+    if result.is_empty() {
+        format!("func({})", params.join(", "))
+    } else {
+        format!("func({}) {}", params.join(", "), result)
+    }
 }
 
 fn is_type_node(kind: &str) -> bool {
