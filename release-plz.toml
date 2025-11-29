@@ -1,0 +1,16 @@
+[workspace]
+git_tag_name = "v{{ version }}"
+git_release_name = "v{{ version }}"
+
+[changelog]
+commit_parsers = [
+    { message = "^feat", group = "added" },
+    { message = "^changed", group = "changed" },
+    { message = "^deprecated", group = "deprecated" },
+    { message = "^fix", group = "fixed" },
+    { message = "^perf", group = "performance" },
+    { message = "^refactor", group = "refactor" },
+    { message = "^security", group = "security" },
+    { message = "^chore|^build|^ci|^style|^test", skip = true },
+    { message = "^.*", group = "other" },
+]

@@ -2,6 +2,11 @@
 name = "soppo"
 version = "0.1.0"
 edition = "2024"
+license = "BSD-3-Clause"
+repository = "https://github.com/halcyonnouveau/soppo"
+description = "Compiler for Soppo, a Go superset with enums, pattern matching, and nil safety"
+keywords = ["compiler", "go", "golang", "language"]
+categories = ["compilers", "development-tools"]
 
 [[bin]]
 name = "sop"
