@@ -10,6 +10,15 @@ See [docs/DESIGN.md](docs/DESIGN.md) for language design.
 
 Soppo is not production ready.
 
+## Installation
+
+Download a pre-built binary from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases).
+
+Or with Cargo:
+```sh
+cargo install soppo
+```
+
 ## Features
 
 - **Enums:** Tagged unions with struct variants
