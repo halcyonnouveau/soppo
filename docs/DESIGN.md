@@ -54,7 +54,7 @@ type Option[T any] enum {
 
 // Methods on variants use EnumName.Variant as receiver
 func (v Result.Ok) MarshalJSON() ([]byte, error) {
-    return json.Marshal(map[string]any{"Ok": v.Value})
+	return json.Marshal(map[string]any{"Ok": v.Value})
 }
 ```
 
@@ -65,25 +65,25 @@ Go's `switch` lacks destructuring and exhaustiveness checking. `match` replaces 
 ```go
 match colour {
 case Colour.Red:
-    action = "stop"
+	action = "stop"
 case Colour.Green:
-    action = "go"
+	action = "go"
 }
 
 // Data extraction
 match opt {
 case Option.Some(value):
-    result = value * 2
+	result = value * 2
 case Option.None:
-    result = 0
+	result = 0
 }
 
 // Struct destructuring
 match shape {
 case Shape.Circle{radius: r}:
-    area = 3.14 * r * r
+	area = 3.14 * r * r
 case Shape.Rectangle{width: w, ...}:
-    area = width * 1
+	area = width * 1
 }
 
 // Multiple patterns (bindings must match)
@@ -94,23 +94,23 @@ case Shape.Circle{radius: r}, Shape.Ellipse{radius: r, ...}:
 // Expression-less match (like if/else chain)
 match {
 case x > 0:
-    pos()
+	pos()
 case x < 0:
-    neg()
+	neg()
 case x == 0 || y == 0:
-    zero()
+	zero()
 }
 
 // Struct matching with literal field values
 match point {
 case Point{x: 0, y: 0}:
-    origin()
+	origin()
 case Point{x: 0, y}:
-    onYAxis(y)
+	onYAxis(y)
 case Point{x, y: 0}:
-    onXAxis(x)
+	onXAxis(x)
 default:
-    other(point.x, point.y)
+	other(point.x, point.y)
 }
 ```
 
@@ -153,31 +153,31 @@ When you only care about one variant, full `match` is verbose. Combining `if` wi
 // Instead of:
 match opt {
 case Option.Some(x):
-    use(x)
+	use(x)
 case Option.None:
-    // nothing
+	// nothing
 }
 
 // Write:
 if x := opt.(Option.Some) {
-    use(x)
+	use(x)
 }
 
 // With else block:
 if x := opt.(Option.Some) {
-    use(x)
+	use(x)
 } else {
-    handleNone()
+	handleNone()
 }
 
 // For struct variants, binding gets the full struct:
 if c := shape.(Shape.Circle) {
-    area = 3.14 * c.radius * c.radius
+	area = 3.14 * c.radius * c.radius
 }
 
 // Unit variants work too (binding is the zero struct):
 if _ := colour.(Colour.Red) {
-    stop()
+	stop()
 }
 ```
 
@@ -224,10 +224,10 @@ var user *User              // non-nilable - must be initialised
 var maybeUser ?*User = nil  // nilable - can hold nil
 
 func findUser(id int) ?*User {
-    if id == 0 {
-        return nil          // OK: return type is nilable
-    }
-    return &User{name: "Alice"}
+	if id == 0 {
+		return nil          // OK: return type is nilable
+	}
+	return &User{name: "Alice"}
 }
 ```
 
@@ -250,19 +250,19 @@ var user *User = &User{}    // OK
 After a nil check, nilable types are automatically narrowed to non-nilable:
 
 ```go
-result := findUser(1)           // ?*User
+result := findUser(1)    // ?*User
 
 if result != nil {
-    fmt.Println(result.name)    // OK: result is *User here
-    printUser(result)           // OK: can pass to func expecting *User
+	fmt.Println(result.name)    // OK: result is *User here
+	printUser(result)           // OK: can pass to func expecting *User
 }
 
 // Early return also works
 if result == nil {
-    return
+	return
 }
 
-fmt.Println(result.name)        // OK: result is non-nil after guard
+fmt.Println(result.name)    // OK: result is non-nil after guard
 ```
 
 Some expressions are guaranteed non-nil:
