@@ -99,6 +99,7 @@ pub struct Type {
     pub name: String,
     pub args: Vec<Type>,
     pub span: Span,
+    pub nullable: bool, // true for ?*T, ?[]T, ?Interface
 }
 
 /// Function declaration

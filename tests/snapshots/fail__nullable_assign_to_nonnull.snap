@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nilable_to_non_nilable
+
+  × Cannot assign nilable `?*User` to non-nilable `*User`
+    ╭─[nullable_assign_to_nonnull.sop:19:15]
+ 18 │     // ERROR: Cannot pass nullable to non-nullable parameter
+ 19 │     printUser(maybeUser)
+    ·               ────┬────
+    ·                   ╰── expected non-nilable
+ 20 │ }
+    ╰────
+  help: use a nil check or `.(!nil)` to assert non-nil

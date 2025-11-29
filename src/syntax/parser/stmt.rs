@@ -392,7 +392,10 @@ impl Parser {
                         (None, Some(expr), span)
                     } else if matches!(
                         self.peek(),
-                        Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+                        Some(Token::Ident(_))
+                            | Some(Token::LBracket)
+                            | Some(Token::Star)
+                            | Some(Token::Question) // ?*T nullable types
                     ) {
                         // var name type ... (explicit type)
                         let ty = self.parse_type()?;

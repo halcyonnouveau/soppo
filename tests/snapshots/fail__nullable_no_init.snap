@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::non_nilable_no_init
+
+  × Non-nilable type `*User` requires initialisation
+    ╭─[nullable_no_init.sop:10:5]
+  9 │     // (zero value would be nil, violating non-nullable constraint)
+ 10 │     var user *User
+    ·     ─────┬────
+    ·          ╰── zero value would be nil
+ 11 │ }
+    ╰────
+  help: provide an initial value, or use `?*User` for a nilable type

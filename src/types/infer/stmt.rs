@@ -97,6 +97,7 @@ impl Infer {
                     if let Type::Con {
                         name: type_name,
                         args,
+                        ..
                     } = &value_ty
                         && type_name.name == "tuple"
                         && args.len() == names.len()
@@ -131,14 +132,36 @@ impl Infer {
                     (Some(t), Some(expr)) => {
                         // var x type = value: unify declared with inferred
                         let declared_ty = Type::from_ast(t);
+
+                        // Check: assigning nil to a non-nilable type is an error
+                        if matches!(expr.kind, ExprKind::Nil)
+                            && declared_ty.is_nilable_kind()
+                            && !declared_ty.is_nullable()
+                        {
+                            return Err(SoppoError::NilToNonNilable {
+                                ty: declared_ty.to_string(),
+                                span: t.span, // Point to the type annotation
+                            });
+                        }
+
                         let value_ty = self.infer_expr(expr)?;
                         self.unify(&declared_ty, &value_ty, &expr.span)?;
                         (declared_ty, Some(expr))
                     }
                     (Some(t), None) => {
                         // var x type: use declared type (zero value)
-                        // Zero value for pointer is nil, so it's nullable
-                        (Type::from_ast(t), None)
+                        let declared_ty = Type::from_ast(t);
+
+                        // Check: non-nilable types require initialisation
+                        // Zero value for pointer/slice/map/etc is nil, which violates non-nilable
+                        if declared_ty.is_nilable_kind() && !declared_ty.is_nullable() {
+                            return Err(SoppoError::NonNilableNoInit {
+                                ty: declared_ty.to_string(),
+                                span: stmt.span,
+                            });
+                        }
+
+                        (declared_ty, None)
                     }
                     (None, Some(expr)) => {
                         // var x = value: infer from value
@@ -192,6 +215,7 @@ impl Infer {
                     if let Type::Con {
                         name: type_name,
                         args,
+                        ..
                     } = &value_ty
                         && type_name.name == "tuple"
                         && args.len() == names.len()
@@ -279,6 +303,19 @@ impl Infer {
                     return Ok(Type::unit());
                 }
                 let target_ty = self.infer_expr(target)?;
+                let target_ty_sub = self.substitute(target_ty.clone());
+
+                // Check: assigning nil to a non-nilable type is an error
+                if matches!(value.kind, ExprKind::Nil)
+                    && target_ty_sub.is_nilable_kind()
+                    && !target_ty_sub.is_nullable()
+                {
+                    return Err(SoppoError::NilToNonNilable {
+                        ty: target_ty_sub.to_string(),
+                        span: value.span,
+                    });
+                }
+
                 let value_ty = self.infer_expr(value)?;
                 let value_ty_sub = self.substitute(value_ty.clone());
                 self.unify(&target_ty, &value_ty, &stmt.span)?;
@@ -300,6 +337,7 @@ impl Infer {
                     if let Type::Con {
                         name: type_name,
                         args,
+                        ..
                     } = &value_ty
                         && type_name.name == "tuple"
                         && args.len() == targets.len()
@@ -353,7 +391,7 @@ impl Infer {
                 let coll_ty = self.substitute(coll_ty);
 
                 // Determine key and value types based on collection type
-                let (key_ty, value_ty) = if let Type::Con { name, args } = &coll_ty {
+                let (key_ty, value_ty) = if let Type::Con { name, args, .. } = &coll_ty {
                     if name.name.starts_with("[]") {
                         // Slice: key is int, value is element type
                         let elem_ty = if args.len() == 1 {
@@ -651,7 +689,7 @@ impl Infer {
                 let value_ty = self.infer_expr(value)?;
 
                 // Extract element type from channel
-                if let Type::Con { name, args } = &channel_ty {
+                if let Type::Con { name, args, .. } = &channel_ty {
                     if name.name.starts_with("chan ") && args.len() == 1 {
                         self.unify(&args[0], &value_ty, &value.span)?;
                     } else if name.name.starts_with("chan ") {
@@ -679,7 +717,7 @@ impl Infer {
                             let channel_ty = self.substitute(channel_ty);
 
                             // Extract element type from channel
-                            let elem_ty = if let Type::Con { name, args } = &channel_ty {
+                            let elem_ty = if let Type::Con { name, args, .. } = &channel_ty {
                                 if name.name.starts_with("chan ") && args.len() == 1 {
                                     args[0].clone()
                                 } else if name.name.starts_with("chan ") {
@@ -704,7 +742,7 @@ impl Infer {
                             let channel_ty = self.substitute(channel_ty);
 
                             // Extract element type from channel
-                            let elem_ty = if let Type::Con { name, args } = &channel_ty {
+                            let elem_ty = if let Type::Con { name, args, .. } = &channel_ty {
                                 if name.name.starts_with("chan ") && args.len() == 1 {
                                     args[0].clone()
                                 } else if name.name.starts_with("chan ") {
@@ -726,7 +764,7 @@ impl Infer {
                             let channel_ty = self.substitute(channel_ty);
                             let value_ty = self.infer_expr(value)?;
 
-                            if let Type::Con { name, args } = &channel_ty {
+                            if let Type::Con { name, args, .. } = &channel_ty {
                                 if name.name.starts_with("chan ") && args.len() == 1 {
                                     self.unify(&args[0], &value_ty, &value.span)?;
                                 } else if name.name.starts_with("chan ") {
@@ -828,7 +866,9 @@ impl Infer {
 
                         // For multi-return, the type is a tuple
                         // Unpack and assign to each name, excluding the error
-                        if let Type::Con { name: tname, args } = &value_ty_sub
+                        if let Type::Con {
+                            name: tname, args, ..
+                        } = &value_ty_sub
                             && tname.name == "tuple"
                         {
                             // Exclude the last element (error) when assigning

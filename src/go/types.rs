@@ -21,19 +21,39 @@ pub fn parse_go_type(s: &str) -> Type {
         return Type::unit();
     }
 
-    // Pointer type: *T
+    // Pointer type: *T - nullable by default for external Go
     if let Some(inner) = s.strip_prefix('*') {
-        return Type::generic("ptr", vec![parse_go_type(inner)]);
+        return Type::ptr_nullable(parse_go_type(inner), true);
     }
 
-    // Slice type: []T
+    // Slice type: []T - nullable by default for external Go
     if let Some(inner) = s.strip_prefix("[]") {
-        return Type::generic("slice", vec![parse_go_type(inner)]);
+        let inner_ty = parse_go_type(inner);
+        let inner_name = inner_ty.to_string();
+        return Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: format!("[]{}", inner_name),
+                span: Span::dummy(),
+            },
+            args: vec![inner_ty],
+            nullable: true, // External Go slices are nullable
+        };
     }
 
-    // Variadic type: ...T (use special variadic type marker)
+    // Variadic type: ...T (use type name with ... prefix)
     if let Some(inner) = s.strip_prefix("...") {
-        return Type::generic("variadic", vec![parse_go_type(inner)]);
+        let inner_ty = parse_go_type(inner);
+        let inner_name = inner_ty.to_string();
+        return Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: format!("...{}", inner_name),
+                span: Span::dummy(),
+            },
+            args: vec![inner_ty],
+            nullable: false, // Variadic is not nullable
+        };
     }
 
     // Array type: [N]T or [...]T
@@ -41,30 +61,49 @@ pub fn parse_go_type(s: &str) -> Type {
         && let Some(bracket_end) = s.find(']')
     {
         let inner = &s[bracket_end + 1..];
-        // We treat arrays as slices for simplicity
+        // Arrays are value types - not nullable
         return Type::generic("array", vec![parse_go_type(inner)]);
     }
 
-    // Map type: map[K]V
+    // Map type: map[K]V - nullable by default for external Go
     if let Some(rest) = s.strip_prefix("map[")
         && let Some((key, value)) = parse_map_types(rest)
     {
-        return Type::generic("map", vec![parse_go_type(key), parse_go_type(value)]);
+        let key_ty = parse_go_type(key);
+        let val_ty = parse_go_type(value);
+        return Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: format!("map[{}]{}", key_ty, val_ty),
+                span: Span::dummy(),
+            },
+            args: vec![key_ty, val_ty],
+            nullable: true, // External Go maps are nullable
+        };
     }
 
-    // Channel type: chan T
+    // Channel type: chan T - nullable by default for external Go
     if let Some(inner) = s.strip_prefix("chan ") {
-        return Type::generic("chan", vec![parse_go_type(inner)]);
+        let inner_ty = parse_go_type(inner);
+        return Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: format!("chan {}", inner_ty),
+                span: Span::dummy(),
+            },
+            args: vec![inner_ty],
+            nullable: true, // External Go channels are nullable
+        };
     }
 
-    // Function type: func(A, B) C or func(A, B) (C, D)
+    // Function type: func(A, B) C or func(A, B) (C, D) - nullable by default for external Go
     if let Some(rest) = s.strip_prefix("func") {
-        return parse_func_type(rest);
+        return parse_func_type(rest).as_nullable();
     }
 
-    // Interface type
+    // Interface type - nullable by default for external Go
     if s == "interface{}" || s == "any" {
-        return Type::simple("any");
+        return Type::simple("any").as_nullable();
     }
 
     // Struct type (anonymous)
@@ -106,6 +145,7 @@ pub fn parse_go_type(s: &str) -> Type {
                 span: Span::dummy(),
             },
             args: vec![],
+            nullable: false, // Named types - may be interfaces (handled by type checker)
         };
     }
 
@@ -256,6 +296,7 @@ fn make_type_with_module(name: &str, args: Vec<Type>) -> Type {
                 span: Span::dummy(),
             },
             args,
+            nullable: false, // Named types - may be interfaces (handled by type checker)
         }
     } else {
         Type::Con {
@@ -265,6 +306,7 @@ fn make_type_with_module(name: &str, args: Vec<Type>) -> Type {
                 span: Span::dummy(),
             },
             args,
+            nullable: false, // Named types - may be interfaces (handled by type checker)
         }
     }
 }
@@ -288,58 +330,70 @@ mod tests {
 
     #[test]
     fn test_pointer() {
-        assert_eq!(parse_go_type("*int").to_string(), "ptr[int]");
-        assert_eq!(parse_go_type("*string").to_string(), "ptr[string]");
-        assert_eq!(parse_go_type("**int").to_string(), "ptr[ptr[int]]");
+        // External Go pointers are nullable by default
+        assert_eq!(parse_go_type("*int").to_string(), "?*int");
+        assert_eq!(parse_go_type("*string").to_string(), "?*string");
+        // Nested pointer: outer is nullable, inner type stored in args is also nullable
+        assert_eq!(parse_go_type("**int").to_string(), "?**int");
+        // Verify inner type is also nullable
+        if let Type::Con { args, .. } = parse_go_type("**int") {
+            assert!(args[0].is_nullable());
+        }
     }
 
     #[test]
     fn test_slice() {
-        assert_eq!(parse_go_type("[]int").to_string(), "slice[int]");
-        assert_eq!(parse_go_type("[]string").to_string(), "slice[string]");
-        assert_eq!(parse_go_type("[][]int").to_string(), "slice[slice[int]]");
+        // External Go slices are nullable by default
+        assert_eq!(parse_go_type("[]int").to_string(), "?[]int");
+        assert_eq!(parse_go_type("[]string").to_string(), "?[]string");
+        assert_eq!(parse_go_type("[][]int").to_string(), "?[]?[]int");
     }
 
     #[test]
     fn test_array() {
+        // Arrays are not nullable (they're value types in Go)
         assert_eq!(parse_go_type("[10]int").to_string(), "array[int]");
         assert_eq!(parse_go_type("[...]string").to_string(), "array[string]");
     }
 
     #[test]
     fn test_map() {
+        // External Go maps are nullable by default
         assert_eq!(
             parse_go_type("map[string]int").to_string(),
-            "map[string, int]"
+            "?map[string]int"
         );
         assert_eq!(
             parse_go_type("map[string][]int").to_string(),
-            "map[string, slice[int]]"
+            "?map[string]?[]int"
         );
     }
 
     #[test]
     fn test_channel() {
-        assert_eq!(parse_go_type("chan int").to_string(), "chan[int]");
+        // External Go channels are nullable by default
+        assert_eq!(parse_go_type("chan int").to_string(), "?chan int");
     }
 
     #[test]
     fn test_interface() {
-        assert_eq!(parse_go_type("interface{}").to_string(), "any");
-        assert_eq!(parse_go_type("any").to_string(), "any");
+        // External Go interfaces are nullable by default
+        assert_eq!(parse_go_type("interface{}").to_string(), "?any");
+        assert_eq!(parse_go_type("any").to_string(), "?any");
     }
 
     #[test]
     fn test_function() {
-        assert_eq!(parse_go_type("func()").to_string(), "fn() -> ()");
-        assert_eq!(parse_go_type("func(int)").to_string(), "fn(int) -> ()");
+        // External Go function types are nullable by default
+        assert_eq!(parse_go_type("func()").to_string(), "?fn() -> ()");
+        assert_eq!(parse_go_type("func(int)").to_string(), "?fn(int) -> ()");
         assert_eq!(
             parse_go_type("func(int) string").to_string(),
-            "fn(int) -> string"
+            "?fn(int) -> string"
         );
         assert_eq!(
             parse_go_type("func(a int, b string) bool").to_string(),
-            "fn(int, string) -> bool"
+            "?fn(int, string) -> bool"
         );
     }
 
@@ -347,7 +401,7 @@ mod tests {
     fn test_qualified() {
         let ty = parse_go_type("fmt.Stringer");
         match ty {
-            Type::Con { name, args } => {
+            Type::Con { name, args, .. } => {
                 assert_eq!(name.module.0, "fmt");
                 assert_eq!(name.name, "Stringer");
                 assert!(args.is_empty());
@@ -362,17 +416,14 @@ mod tests {
             parse_go_type("Result[int, string]").to_string(),
             "Result[int, string]"
         );
-        assert_eq!(
-            parse_go_type("Option[*int]").to_string(),
-            "Option[ptr[int]]"
-        );
+        assert_eq!(parse_go_type("Option[*int]").to_string(), "Option[?*int]");
     }
 
     #[test]
     fn test_variadic() {
-        // Variadic uses special marker type
-        assert_eq!(parse_go_type("...int").to_string(), "variadic[int]");
-        assert_eq!(parse_go_type("...any").to_string(), "variadic[any]");
+        // Variadic uses special marker type (not nullable - variadics are always present)
+        assert_eq!(parse_go_type("...int").to_string(), "...int");
+        assert_eq!(parse_go_type("...any").to_string(), "...?any");
     }
 
     #[test]

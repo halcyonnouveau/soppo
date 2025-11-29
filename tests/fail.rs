@@ -177,3 +177,33 @@ fn test_named_arg_wrong_order() {
     );
     insta::assert_snapshot!(result.unwrap_err());
 }
+
+#[test]
+fn test_nullable_nil_to_nonnull() {
+    let result = compile_soppo_file("tests/fixtures/fail/nullable_nil_to_nonnull.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for assigning nil to non-nullable type"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_nullable_no_init() {
+    let result = compile_soppo_file("tests/fixtures/fail/nullable_no_init.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for non-nullable type without initialization"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_nullable_assign_to_nonnull() {
+    let result = compile_soppo_file("tests/fixtures/fail/nullable_assign_to_nonnull.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for assigning nullable to non-nullable"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}

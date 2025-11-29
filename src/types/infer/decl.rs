@@ -54,7 +54,13 @@ impl Infer {
         // Add parameters to scope
         for param in &func.params {
             let param_ty = self.resolve_type(&param.ty);
-            self.insert_var(param.name.clone(), param_ty);
+            self.insert_var(param.name.clone(), param_ty.clone());
+
+            // Set nil state for pointer parameters based on nullability
+            // Non-nullable pointer params are trusted to be non-nil
+            if Self::is_pointer_type(&param_ty) && !param_ty.is_nullable() {
+                self.set_nil_state(param.name.clone(), crate::types::ty::Nullability::NonNull);
+            }
         }
 
         // Infer body type

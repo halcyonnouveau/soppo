@@ -217,7 +217,9 @@ impl Codegen {
                 ));
                 self.indent();
                 for field in fields {
-                    self.emit_line(&format!("{} {}", field.name, self.go_type(&field.ty.name)));
+                    let go_type = self.go_type_from_ast(&field.ty);
+                    let nilable_comment = self.nilable_comment(&field.ty);
+                    self.emit_line(&format!("{} {}{}", field.name, go_type, nilable_comment));
                 }
                 self.dedent();
                 self.emit_line("}");
@@ -272,6 +274,35 @@ impl Codegen {
 
     /// Generate a function declaration
     pub(crate) fn gen_func_decl(&mut self, func: &FuncDecl) {
+        // Emit //soppo:nilable comment if any parameters or return types are nullable
+        // Format: //soppo:nilable p q : 0 1
+        //         (params before :, return indices after :)
+        let nilable_params: Vec<&str> = func
+            .params
+            .iter()
+            .filter(|p| p.ty.nullable)
+            .map(|p| p.name.as_str())
+            .collect();
+        let nilable_returns: Vec<String> = func
+            .return_types
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.nullable)
+            .map(|(i, _)| i.to_string())
+            .collect();
+
+        if !nilable_params.is_empty() || !nilable_returns.is_empty() {
+            let params_part = nilable_params.join(" ");
+            let returns_part = nilable_returns.join(" ");
+            let annotation = match (nilable_params.is_empty(), nilable_returns.is_empty()) {
+                (false, true) => params_part,                   // only params
+                (true, false) => format!(": {}", returns_part), // only returns
+                (false, false) => format!("{} : {}", params_part, returns_part), // both
+                (true, true) => unreachable!(),
+            };
+            self.emit_line(&format!("//soppo:nilable {}", annotation));
+        }
+
         // Function signature with optional receiver
         self.emit("func ");
 
@@ -294,26 +325,30 @@ impl Codegen {
         self.emit("(");
 
         // Parameters
+        // Note: //soppo:nilable comments on params would make Go syntax invalid
+        // Instead, we just strip the ? prefix and rely on type checking having validated nullability
         for (i, param) in func.params.iter().enumerate() {
             if i > 0 {
                 self.emit(", ");
             }
-            self.emit(&format!("{} {}", param.name, self.go_type(&param.ty.name)));
+            let go_type = self.go_type_from_ast(&param.ty);
+            self.emit(&format!("{} {}", param.name, go_type));
         }
 
         self.emit(")");
 
         // Return type(s)
+        // Use go_type_from_ast to strip ? prefix from nullable types
         self.current_return_types = func
             .return_types
             .iter()
-            .map(|t| self.go_type(&t.name).to_string())
+            .map(|t| self.go_type_from_ast(t))
             .collect();
 
         if !func.return_types.is_empty() {
             if func.return_types.len() == 1 {
                 // Single return type
-                let go_type = self.go_type(&func.return_types[0].name).to_string();
+                let go_type = self.go_type_from_ast(&func.return_types[0]);
                 self.emit(&format!(" {}", go_type));
                 self.current_func_return_type = Some(go_type);
             } else {
@@ -321,7 +356,7 @@ impl Codegen {
                 let types: Vec<String> = func
                     .return_types
                     .iter()
-                    .map(|t| self.go_type(&t.name).to_string())
+                    .map(|t| self.go_type_from_ast(t))
                     .collect();
                 self.emit(&format!(" ({})", types.join(", ")));
                 self.current_func_return_type = Some(types.join(", "));

@@ -1,0 +1,11 @@
+package main
+
+type User struct {
+    name string
+}
+
+func main() {
+    // ERROR: Non-nullable pointer type requires initialization
+    // (zero value would be nil, violating non-nullable constraint)
+    var user *User
+}

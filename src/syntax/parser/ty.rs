@@ -7,20 +7,31 @@ use crate::syntax::source::Span;
 impl Parser {
     /// Parse a type annotation
     /// Supports: T, []T, [N]T, *T, map[K]V, chan T, T[A, B], ...T (variadic)
+    /// Also supports nullable prefix: ?*T, ?[]T, ?Interface
     pub(super) fn parse_type(&mut self) -> Result<Type> {
         let start_span = self.peek_span();
 
-        // Variadic type: ...T
+        // Check for nullable prefix: ?
+        let nullable = self.consume(&Token::Question);
+
+        // Variadic type: ...T (cannot be nullable)
         if self.consume(&Token::DotDotDot) {
+            if nullable {
+                return Err(SoppoError::Parse {
+                    message: "Variadic types cannot be nullable".to_string(),
+                    span: start_span,
+                });
+            }
             let elem_ty = self.parse_type()?;
             return Ok(Type {
                 name: format!("...{}", elem_ty.name),
                 args: vec![elem_ty],
                 span: start_span,
+                nullable: false,
             });
         }
 
-        // Slice type: []T
+        // Slice type: []T or ?[]T
         if self.consume(&Token::LBracket) {
             if self.consume(&Token::RBracket) {
                 // []T - slice
@@ -29,10 +40,17 @@ impl Parser {
                     name: format!("[]{}", elem_ty.name),
                     args: vec![elem_ty],
                     span: start_span,
+                    nullable,
                 });
             } else {
                 // [N]T - array (consume the size, we don't validate it)
-                // Could be a number or ...
+                // Arrays cannot be nullable (only slices can)
+                if nullable {
+                    return Err(SoppoError::Parse {
+                        message: "Array types cannot be nullable, only slices can".to_string(),
+                        span: start_span,
+                    });
+                }
                 while !matches!(self.peek(), Some(Token::RBracket) | None) {
                     self.advance();
                 }
@@ -42,18 +60,26 @@ impl Parser {
                     name: format!("[]{}", elem_ty.name), // Treat arrays as slices for simplicity
                     args: vec![elem_ty],
                     span: start_span,
+                    nullable: false,
                 });
             }
         }
 
-        // Pointer type: *T
+        // Pointer type: *T or ?*T
         if self.consume(&Token::Star) {
             let pointee_ty = self.parse_type()?;
             return Ok(Type {
                 name: format!("*{}", pointee_ty.name),
                 args: vec![pointee_ty],
                 span: start_span,
+                nullable,
             });
+        }
+
+        // Function type: func(...) ... - can be nullable
+        if matches!(self.peek(), Some(Token::Func)) {
+            // For now, don't parse inline function types - they come from FuncLit
+            // Fall through to identifier handling
         }
 
         // Now we need an identifier
@@ -100,7 +126,7 @@ impl Parser {
             );
         }
 
-        // Map type: map[K]V
+        // Map type: map[K]V - can be nullable
         if name == "map" {
             self.expect(Token::LBracket)?;
             let key_ty = self.parse_type()?;
@@ -110,16 +136,18 @@ impl Parser {
                 name: format!("map[{}]{}", key_ty.name, val_ty.name),
                 args: vec![key_ty, val_ty],
                 span,
+                nullable,
             });
         }
 
-        // Channel type: chan T, <-chan T, chan<- T
+        // Channel type: chan T - can be nullable
         if name == "chan" {
             let elem_ty = self.parse_type()?;
             return Ok(Type {
                 name: format!("chan {}", elem_ty.name),
                 args: vec![elem_ty],
                 span,
+                nullable,
             });
         }
 
@@ -143,6 +171,16 @@ impl Parser {
             Vec::new()
         };
 
-        Ok(Type { name, args, span })
+        // For simple types (not pointers, slices, maps, channels), validate nullable usage
+        // Only interface types and func types can be nullable as simple names
+        // We'll validate this in the type checker since we don't know if a name is an interface here
+        // For now, allow ? on any named type (type checker will validate)
+
+        Ok(Type {
+            name,
+            args,
+            span,
+            nullable,
+        })
     }
 }

@@ -85,3 +85,10 @@ fn test_string_interpolation() {
         .expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_nullable_types() {
+    let output = compile_soppo_file("tests/fixtures/pass/nullable_types.sop")
+        .expect("Compilation should succeed");
+    insta::assert_snapshot!(output);
+}

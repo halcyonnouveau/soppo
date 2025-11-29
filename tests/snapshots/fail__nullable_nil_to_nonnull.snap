@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_to_non_nilable
+
+  × Cannot assign `nil` to non-nilable type `*User`
+    ╭─[nullable_nil_to_nonnull.sop:9:14]
+  8 │     // ERROR: Cannot assign nil to non-nullable pointer type
+  9 │     var user *User = nil
+    ·              ┬
+    ·              ╰── cannot be nil
+ 10 │ }
+    ╰────
+  help: use `?*User` for a nilable type

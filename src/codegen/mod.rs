@@ -379,6 +379,24 @@ impl Codegen {
         }
     }
 
+    /// Convert Soppo type to Go type, stripping the ? prefix for nullable types
+    /// Go doesn't have nullable syntax - nullability is tracked by Soppo's type checker
+    pub(crate) fn go_type_from_ast(&self, ty: &crate::syntax::Type) -> String {
+        let name = &ty.name;
+        // Strip ? prefix if present (nullable marker in Soppo syntax)
+        let go_name = name.strip_prefix('?').unwrap_or(name);
+        match go_name {
+            "()" => String::new(), // Unit type
+            _ => go_name.to_string(),
+        }
+    }
+
+    /// Generate nilable comment if the type is nullable
+    /// Returns " //soppo:nilable" if nullable, empty string otherwise
+    pub(crate) fn nilable_comment(&self, ty: &crate::syntax::Type) -> &'static str {
+        if ty.nullable { " //soppo:nilable" } else { "" }
+    }
+
     /// Convert binary operator to Go operator
     pub(crate) fn go_binop(&self, op: &BinOp) -> &str {
         match op {

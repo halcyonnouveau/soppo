@@ -30,16 +30,50 @@ impl Infer {
             }
 
             // Compatible numeric types: allow int/int8/int16/etc. to unify
-            (Type::Con { name: n1, args: a1 }, Type::Con { name: n2, args: a2 })
-                if a1.is_empty() && a2.is_empty() && are_compatible_numeric(&n1.name, &n2.name) =>
-            {
+            (
+                Type::Con {
+                    name: n1,
+                    args: a1,
+                    nullable: nullable1,
+                },
+                Type::Con {
+                    name: n2,
+                    args: a2,
+                    nullable: nullable2,
+                },
+            ) if a1.is_empty() && a2.is_empty() && are_compatible_numeric(&n1.name, &n2.name) => {
+                // Check nullability: non-nilable cannot receive nilable
+                if !nullable1 && *nullable2 {
+                    return Err(SoppoError::NilableToNonNilable {
+                        expected: n1.name.clone(),
+                        found: format!("?{}", n2.name),
+                        span: *span,
+                    });
+                }
                 Ok(())
             }
 
             // Same constructor: unify arguments
-            (Type::Con { name: n1, args: a1 }, Type::Con { name: n2, args: a2 })
-                if n1.name == n2.name =>
-            {
+            (
+                Type::Con {
+                    name: n1,
+                    args: a1,
+                    nullable: nullable1,
+                },
+                Type::Con {
+                    name: n2,
+                    args: a2,
+                    nullable: nullable2,
+                },
+            ) if n1.name == n2.name => {
+                // Check nullability: non-nilable cannot receive nilable
+                if !nullable1 && *nullable2 {
+                    return Err(SoppoError::NilableToNonNilable {
+                        expected: n1.name.clone(),
+                        found: format!("?{}", n2.name),
+                        span: *span,
+                    });
+                }
                 if a1.len() != a2.len() {
                     return Err(SoppoError::Type {
                         message: format!(
@@ -56,11 +90,30 @@ impl Infer {
             }
 
             // Functions: unify args and return
-            (Type::Fun { args: a1, ret: r1 }, Type::Fun { args: a2, ret: r2 }) => {
+            (
+                Type::Fun {
+                    args: a1,
+                    ret: r1,
+                    nullable: nullable1,
+                },
+                Type::Fun {
+                    args: a2,
+                    ret: r2,
+                    nullable: nullable2,
+                },
+            ) => {
+                // Check nullability: non-nilable cannot receive nilable
+                if !nullable1 && *nullable2 {
+                    return Err(SoppoError::NilableToNonNilable {
+                        expected: "func".to_string(),
+                        found: "?func".to_string(),
+                        span: *span,
+                    });
+                }
                 // Check if a1 (expected) has a variadic last parameter
-                let has_variadic = a1.last().is_some_and(
-                    |last| matches!(last, Type::Con { name, .. } if name.name == "variadic"),
-                );
+                let has_variadic = a1.last().is_some_and(|last| {
+                    matches!(last, Type::Con { name, .. } if name.name == "variadic" || name.name.starts_with("..."))
+                });
 
                 if has_variadic {
                     // Variadic function: check non-variadic params match, then variadic can consume 0+
@@ -93,8 +146,12 @@ impl Infer {
 
                     // Unify remaining args against variadic element type
                     for arg2 in a2.iter().skip(fixed_params.len()) {
-                        // For "any" type, any argument is valid
-                        if variadic_elem != Type::simple("any") {
+                        // For "any" type (or nullable any), any argument is valid
+                        let is_any = match &variadic_elem {
+                            Type::Con { name, .. } => name.name == "any",
+                            _ => false,
+                        };
+                        if !is_any {
                             self.unify(&variadic_elem, arg2, span)?;
                         }
                     }
@@ -138,13 +195,23 @@ impl Infer {
                     Type::Var(v)
                 }
             }
-            Type::Con { name, args } => Type::Con {
+            Type::Con {
+                name,
+                args,
+                nullable,
+            } => Type::Con {
                 name,
                 args: args.into_iter().map(|a| self.substitute(a)).collect(),
+                nullable,
             },
-            Type::Fun { args, ret } => Type::Fun {
+            Type::Fun {
+                args,
+                ret,
+                nullable,
+            } => Type::Fun {
                 args: args.into_iter().map(|a| self.substitute(a)).collect(),
                 ret: Box::new(self.substitute(*ret)),
+                nullable,
             },
             Type::Never => Type::Never,
         }
@@ -178,7 +245,7 @@ pub fn occurs(var: i32, ty: &Type) -> bool {
     match ty {
         Type::Var(v) => *v == var,
         Type::Con { args, .. } => args.iter().any(|arg| occurs(var, arg)),
-        Type::Fun { args, ret } => args.iter().any(|arg| occurs(var, arg)) || occurs(var, ret),
+        Type::Fun { args, ret, .. } => args.iter().any(|arg| occurs(var, arg)) || occurs(var, ret),
         Type::Never => false,
     }
 }
@@ -214,6 +281,7 @@ mod tests {
                 span: Span::dummy(),
             },
             args: vec![Type::var(0)],
+            nullable: false,
         };
         assert!(occurs(0, &nested));
         assert!(!occurs(1, &nested));

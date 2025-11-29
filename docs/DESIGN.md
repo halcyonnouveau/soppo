@@ -210,48 +210,105 @@ Works with `error` and `(T, error)` returns. On non-nil error, returns early wit
 
 ## Nil Safety
 
-Nil pointer dereferences are a common source of runtime panics in Go. Soppo tracks nil state through control flow and catches unsafe access at compile time.
+Nil pointer dereferences are a common source of runtime panics in Go. Soppo uses explicit nilability annotations and flow-sensitive tracking to catch unsafe access at compile time.
+
+### Nilable Types
+
+Use `?` prefix to mark types that can be nil:
 
 ```go
-user := findUser(1)         // *User, may be nil
-fmt.Println(user.Name)      // ERROR: user may be nil
+var user *User              // non-nilable - must be initialised
+var maybeUser ?*User = nil  // nilable - can hold nil
 
-if user != nil {
-    fmt.Println(user.Name)  // OK: user is proven non-nil here
+func findUser(id int) ?*User {
+    if id == 0 {
+        return nil          // OK: return type is nilable
+    }
+    return &User{name: "Alice"}
+}
+```
+
+Nilable types include:
+- `?*T` - nilable pointer
+- `?[]T` - nilable slice
+- `?map[K]V` - nilable map
+- `?chan T` - nilable channel
+- `?func(...)` - nilable function
+- `?Interface` - nilable interface
+
+Non-nilable types with nil zero values require initialisation:
+
+```go
+var user *User              // ERROR: non-nilable type requires initialisation
+var user *User = nil        // ERROR: cannot assign nil to non-nilable type
+var user *User = &User{}    // OK
+```
+
+### Type Narrowing
+
+After a nil check, nilable types are automatically narrowed to non-nilable:
+
+```go
+result := findUser(1)       // ?*User
+
+if result != nil {
+    fmt.Println(result.name)    // OK: result is *User here
+    printUser(result)           // OK: can pass to func expecting *User
 }
 
 // Early return also works
-if user == nil {
+if result == nil {
     return
 }
-
-fmt.Println(user.Name)      // OK: user is non-nil after the guard
+fmt.Println(result.name)    // OK: result is non-nil after guard
 ```
 
-Some expressions are automatically non-nil:
+### Automatically Non-Nil Expressions
+
+Some expressions are guaranteed non-nil:
 - `&expr` (address-of) - always points to a valid value
 - `new(T)` - allocates and returns a valid pointer
-- Pointer results after `?` succeeds:
+- Pointer results after `?` succeeds
 
 ```go
-func getUser(id int) (*User, error)
+ptr := &User{}              // *User (non-nilable)
+newUser := new(User)        // *User (non-nilable)
 
 func process() error {
-    user := getUser(1) ?      // If we get here, error was nil
-    fmt.Println(user.name)    // OK: user is non-null after ?
+    user := getUser(1) ?    // If we get here, error was nil
+    fmt.Println(user.name)  // OK: user is non-nil after ?
     return nil
 }
 ```
 
-When you know a pointer is non-nil from external context (e.g., API guarantees), use `.(!nil)` to assert it:
+### Nil Assertion
+
+When you know a value is non-nil from external context (e.g., API guarantees), use `.(!nil)` to assert it:
 
 ```go
-// External API guarantees non-nil return in production
-user := getUser().(!nil)
-fmt.Println(user.Name)  // OK
+user := findUser(1).(!nil)
+fmt.Println(user.name)  // OK: user is *User
 ```
 
 This generates no runtime code - it's purely a compile-time assertion.
+
+### External Go Types
+
+Types from external Go packages default to nilable since Go has no nilability annotations. Use nil checks or `.(!nil)` when passing to Soppo functions expecting non-nilable types.
+
+### Codegen Annotations
+
+Generated Go code includes `//soppo:nilable` annotations to preserve nilability information:
+
+```go
+//soppo:nilable user : 0
+func findUser(user *User) *User     // user param and return 0 are nilable
+
+type Container struct {
+    required *User
+    optional *User //soppo:nilable
+}
+```
 
 **Note**: Flow-sensitive nil tracking is complex, and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees. Interface nil is a known limitation.
 

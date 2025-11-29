@@ -529,6 +529,7 @@ impl Parser {
                                     name: type_name,
                                     args: Vec::new(),
                                     span: expr.span,
+                                    nullable: false,
                                 },
                                 fields,
                             },
@@ -555,8 +556,8 @@ impl Parser {
         match tok {
             // Unary operators
             Token::Ampersand => {
-                // &x - address of
-                let operand = self.parse_primary()?;
+                // &x - address of (parse_postfix to allow &Type{...})
+                let operand = self.parse_postfix()?;
                 let end_span = operand.span;
                 Ok(Expr {
                     kind: ExprKind::Unary {
@@ -710,6 +711,7 @@ impl Parser {
                     name: format!("map[{}]{}", key_ty.name, val_ty.name),
                     args: vec![key_ty, val_ty],
                     span,
+                    nullable: false,
                 };
 
                 self.expect(Token::LBrace)?;
@@ -837,6 +839,7 @@ impl Parser {
                         name: format!("[]{}", elem_ty.name),
                         args: elem_ty.args.clone(),
                         span: elem_ty.span,
+                        nullable: false,
                     };
                     self.expect(Token::LBrace)?;
 

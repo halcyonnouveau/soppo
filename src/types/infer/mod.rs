@@ -354,6 +354,7 @@ impl Infer {
                     span: Span::dummy(),
                 },
                 args: vec![],
+                nullable: false,
             });
         }
 
@@ -369,6 +370,7 @@ impl Infer {
                         span: Span::dummy(),
                     },
                     args: vec![],
+                    nullable: false,
                 });
             }
             // Otherwise parse it as a Go type (for primitive types, etc.)
@@ -580,6 +582,7 @@ impl Infer {
                 span: ast_ty.span,
             },
             args,
+            nullable: ast_ty.nullable,
         }
     }
 
@@ -655,7 +658,7 @@ impl Infer {
     /// Check if a type is a pointer type
     pub(super) fn is_pointer_type(ty: &Type) -> bool {
         match ty {
-            Type::Con { name, args } => {
+            Type::Con { name, args, .. } => {
                 // Check for ptr[T] or *T patterns
                 let ty_name = &name.name;
                 (ty_name == "ptr" || ty_name.starts_with('*')) && args.len() == 1
@@ -703,8 +706,32 @@ impl Infer {
             // Variable reference: look up its tracked nil state
             ExprKind::Ident(name) => self.get_nil_state(name),
 
+            // Field access: look up the full path in nil state
+            ExprKind::Field { .. } => {
+                if let Some(key) = stmt::expr_to_key(expr) {
+                    self.get_nil_state(&key)
+                } else {
+                    Nullability::Nullable
+                }
+            }
+
             // All other expressions producing pointers are conservatively nullable
             _ => Nullability::Nullable,
+        }
+    }
+
+    /// Infer an expression's type with nil-state narrowing applied.
+    /// If the expression is known to be non-nil (from flow analysis), a nullable type
+    /// will be converted to non-nullable.
+    pub(super) fn infer_expr_narrowed(&mut self, expr: &Expr) -> crate::error::Result<Type> {
+        let ty = self.infer_expr(expr)?;
+
+        // Check if this expression is known to be non-nil
+        let nullability = self.get_expr_nullability(expr, &ty);
+        if nullability == Nullability::NonNull && ty.is_nullable() {
+            Ok(ty.as_non_nullable())
+        } else {
+            Ok(ty)
         }
     }
 
@@ -738,7 +765,7 @@ impl Infer {
         }
 
         // Tuple type with error as last element
-        if let Type::Con { name, args } = ty
+        if let Type::Con { name, args, .. } = ty
             && name.name == "tuple"
             && !args.is_empty()
             && let Some(last) = args.last()
@@ -759,7 +786,7 @@ impl Infer {
             return Type::unit();
         }
 
-        if let Type::Con { name, args } = ty
+        if let Type::Con { name, args, .. } = ty
             && name.name == "tuple"
             && !args.is_empty()
         {

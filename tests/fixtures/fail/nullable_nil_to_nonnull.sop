@@ -1,0 +1,10 @@
+package main
+
+type User struct {
+    name string
+}
+
+func main() {
+    // ERROR: Cannot assign nil to non-nullable pointer type
+    var user *User = nil
+}

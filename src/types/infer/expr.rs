@@ -212,7 +212,7 @@ impl Infer {
                         let slice_ty = self.substitute(slice_ty);
                         // Verify first arg is a slice
                         let elem_ty = match &slice_ty {
-                            Type::Con { name, args } if name.name.starts_with("[]") => {
+                            Type::Con { name, args, .. } if name.name.starts_with("[]") => {
                                 if args.is_empty() {
                                     // Extract element type from name like "[]int"
                                     Type::simple(&name.name[2..])
@@ -288,7 +288,7 @@ impl Infer {
                         let map_ty = self.substitute(map_ty);
                         // Verify first arg is a map
                         let key_ty = match &map_ty {
-                            Type::Con { name, args } if name.name.starts_with("map") => {
+                            Type::Con { name, args, .. } if name.name.starts_with("map") => {
                                 if !args.is_empty() {
                                     args[0].clone()
                                 } else {
@@ -439,13 +439,14 @@ impl Infer {
                             // Found the function - infer args and check against signature
                             let mut arg_tys = Vec::new();
                             for (_, arg) in args {
-                                arg_tys.push((self.infer_expr(arg)?, arg.span));
+                                arg_tys.push((self.infer_expr_narrowed(arg)?, arg.span));
                             }
 
                             // Extract param types and return type from func_ty
                             if let Type::Fun {
                                 args: param_tys,
                                 ret,
+                                ..
                             } = &func_ty
                             {
                                 // Check argument count
@@ -520,18 +521,20 @@ impl Infer {
                 let func_ty = self.substitute(func_ty);
 
                 // Look up parameter info if this is a known function
-                // Exclude variadic params (type name starts with "variadic")
+                // Exclude variadic params (type name starts with "variadic" or "...")
                 let (param_names, is_variadic): (Option<Vec<String>>, bool) =
                     if let ExprKind::Ident(func_name) = &func.kind {
                         if let Some(f) = self.global_state.lookup_function(func_name) {
-                            let has_variadic = f
-                                .params
-                                .last()
-                                .is_some_and(|(_, ty)| ty.to_string().starts_with("variadic"));
+                            let is_variadic_type = |ty: &Type| {
+                                let s = ty.to_string();
+                                s.starts_with("variadic") || s.starts_with("...")
+                            };
+                            let has_variadic =
+                                f.params.last().is_some_and(|(_, ty)| is_variadic_type(ty));
                             let names = f
                                 .params
                                 .iter()
-                                .filter(|(_, ty)| !ty.to_string().starts_with("variadic"))
+                                .filter(|(_, ty)| !is_variadic_type(ty))
                                 .map(|(name, _)| name.clone())
                                 .collect();
                             (Some(names), has_variadic)
@@ -637,9 +640,10 @@ impl Infer {
                 };
 
                 // Infer argument types with their spans
+                // Use infer_expr_narrowed to apply nil-state narrowing
                 let mut arg_tys = Vec::new();
                 for (arg, span) in &ordered_args {
-                    arg_tys.push((self.infer_expr(arg)?, *span));
+                    arg_tys.push((self.infer_expr_narrowed(arg)?, *span));
                 }
 
                 // Check function call with detailed error spans
@@ -647,10 +651,11 @@ impl Infer {
                     Type::Fun {
                         args: param_tys,
                         ret,
+                        ..
                     } => {
                         // Check if last param is variadic
                         let has_variadic = param_tys.last().is_some_and(|last| {
-                            matches!(last, Type::Con { name, .. } if name.name == "variadic")
+                            matches!(last, Type::Con { name, .. } if name.name == "variadic" || name.name.starts_with("..."))
                         });
 
                         if has_variadic {
@@ -683,7 +688,12 @@ impl Infer {
 
                             // Check variadic args
                             for (arg_ty, arg_span) in arg_tys.iter().skip(fixed_params.len()) {
-                                if variadic_elem != Type::simple("any") {
+                                // For "any" type (or nullable any), any argument is valid
+                                let is_any = match &variadic_elem {
+                                    Type::Con { name, .. } => name.name == "any",
+                                    _ => false,
+                                };
+                                if !is_any {
                                     self.unify(&variadic_elem, arg_ty, arg_span)?;
                                 }
                             }
@@ -868,7 +878,7 @@ impl Infer {
 
                 // Look up the struct type to validate field access
                 // For pointer types like *User, extract the inner type name (User)
-                let struct_name = if let Type::Con { name, args } = &expr_ty {
+                let struct_name = if let Type::Con { name, args, .. } = &expr_ty {
                     if name.name.starts_with('*') && args.len() == 1 {
                         // Pointer type: extract inner type name from args or strip prefix
                         if let Type::Con { name: inner, .. } = &args[0] {
@@ -918,7 +928,7 @@ impl Infer {
                 let container_ty = self.substitute(container_ty);
                 let index_ty = self.infer_expr(index)?;
 
-                if let Type::Con { name, args } = &container_ty {
+                if let Type::Con { name, args, .. } = &container_ty {
                     // Map indexing: map[K]V - index is K, result is V
                     if (name.name == "map" || name.name.starts_with("map[")) && args.len() == 2 {
                         self.unify(&index_ty, &args[0], &index.span)?;
@@ -1082,7 +1092,7 @@ impl Infer {
                         }
 
                         // Extract the pointee type from *T
-                        if let Type::Con { name, args } = &operand_ty {
+                        if let Type::Con { name, args, .. } = &operand_ty {
                             if name.name.starts_with('*') && args.len() == 1 {
                                 return Ok(args[0].clone());
                             }
@@ -1099,7 +1109,7 @@ impl Infer {
                         // <-ch: operand must be chan T, result is T
                         let operand_ty = self.substitute(operand_ty);
                         // Extract the element type from chan T
-                        if let Type::Con { name, args } = &operand_ty {
+                        if let Type::Con { name, args, .. } = &operand_ty {
                             // Handle "chan T" type with args
                             if name.name.starts_with("chan ") && args.len() == 1 {
                                 return Ok(args[0].clone());
@@ -1214,9 +1224,9 @@ impl Infer {
                     self.set_nil_state(name.clone(), Nullability::NonNull);
                 }
 
-                // Return the same type - the assertion doesn't change the type,
-                // only the nullability state
-                Ok(ty)
+                // Return the non-nullable version of the type
+                // x.(!nil) converts ?*T -> *T
+                Ok(ty.as_non_nullable())
             }
         }
     }
@@ -1289,7 +1299,7 @@ mod tests {
         let ty = infer.infer_expr(&expr).unwrap();
 
         // Should be array[int]
-        if let Type::Con { name, args } = ty {
+        if let Type::Con { name, args, .. } = ty {
             assert_eq!(name.name, "array");
             assert_eq!(args.len(), 1);
             assert_eq!(args[0], Type::simple("int"));

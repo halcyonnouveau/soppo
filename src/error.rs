@@ -97,6 +97,40 @@ pub enum SoppoError {
         #[label("this expression doesn't return error")]
         span: Span,
     },
+
+    #[error("Cannot assign `nil` to non-nilable type `{ty}`")]
+    #[diagnostic(
+        code(soppo::nil_to_non_nilable),
+        help("use `?{ty}` for a nilable type")
+    )]
+    NilToNonNilable {
+        ty: String,
+        #[label("cannot be nil")]
+        span: Span,
+    },
+
+    #[error("Non-nilable type `{ty}` requires initialisation")]
+    #[diagnostic(
+        code(soppo::non_nilable_no_init),
+        help("provide an initial value, or use `?{ty}` for a nilable type")
+    )]
+    NonNilableNoInit {
+        ty: String,
+        #[label("zero value would be nil")]
+        span: Span,
+    },
+
+    #[error("Cannot assign nilable `{found}` to non-nilable `{expected}`")]
+    #[diagnostic(
+        code(soppo::nilable_to_non_nilable),
+        help("use a nil check or `.(!nil)` to assert non-nil")
+    )]
+    NilableToNonNilable {
+        expected: String,
+        found: String,
+        #[label("expected non-nilable")]
+        span: Span,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, SoppoError>;
