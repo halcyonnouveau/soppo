@@ -1,0 +1,86 @@
+package main
+
+import "fmt"
+import "encoding/json"
+
+// Simple enum with data variants
+type Result enum {
+    Ok int
+    Err string
+}
+
+// Enum with struct variant
+type Shape enum {
+    Circle struct {
+        radius float64
+    }
+    Rectangle struct {
+        width float64
+        height float64
+    }
+}
+
+// MarshalJSON for Result.Ok variant
+// Use .(!nil) to assert json.Marshal returns non-nil data
+func (v Result.Ok) MarshalJSON() ([]byte, error) {
+    data, err := json.Marshal(map[string]any{"Ok": v.Value})
+    return data.(!nil), err
+}
+
+// MarshalJSON for Result.Err variant
+func (v Result.Err) MarshalJSON() ([]byte, error) {
+    data, err := json.Marshal(map[string]any{"Err": v.Value})
+    return data.(!nil), err
+}
+
+// MarshalJSON for Shape.Circle variant
+func (v Shape.Circle) MarshalJSON() ([]byte, error) {
+    inner := map[string]any{"radius": v.radius}
+    data, err := json.Marshal(map[string]any{"Circle": inner})
+    return data.(!nil), err
+}
+
+// MarshalJSON for Shape.Rectangle variant
+func (v Shape.Rectangle) MarshalJSON() ([]byte, error) {
+    inner := map[string]any{"width": v.width, "height": v.height}
+    data, err := json.Marshal(map[string]any{"Rectangle": inner})
+    return data.(!nil), err
+}
+
+// Custom method on variant
+func (v Result.Ok) Double() int {
+    return v.Value * 2
+}
+
+// Pointer receiver - v is non-null because it's *T not ?*T
+func (v *Shape.Circle) Scale(factor float64) {
+    v.radius = v.radius * factor
+}
+
+func main() {
+    // Test Result marshaling
+    ok := Result_Ok{Value: 42}
+    okJson, _ := ok.MarshalJSON()
+    fmt.Println(string(okJson))
+
+    err := Result_Err{Value: "something went wrong"}
+    errJson, _ := err.MarshalJSON()
+    fmt.Println(string(errJson))
+
+    // Test Shape marshaling
+    circle := Shape_Circle{radius: 5.0}
+    circleJson, _ := circle.MarshalJSON()
+    fmt.Println(string(circleJson))
+
+    rect := Shape_Rectangle{width: 10.0, height: 20.0}
+    rectJson, _ := rect.MarshalJSON()
+    fmt.Println(string(rectJson))
+
+    // Test custom method
+    doubled := ok.Double()
+    fmt.Println(doubled)
+
+    // Test pointer receiver
+    circle.Scale(2.0)
+    fmt.Println(circle.radius)
+}

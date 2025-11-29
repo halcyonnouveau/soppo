@@ -150,12 +150,7 @@ pub fn parse_go_type(s: &str) -> Type {
     }
 
     // Primitive types - pass through as Type::simple
-    // Aliases map to their underlying types
-    match s {
-        "byte" => Type::simple("uint8"),
-        "rune" => Type::simple("int32"),
-        _ => Type::simple(s),
-    }
+    Type::simple(s)
 }
 
 /// Parse map[K]V, returning (K, V)
@@ -321,7 +316,7 @@ mod tests {
         assert_eq!(parse_go_type("string").to_string(), "string");
         assert_eq!(parse_go_type("bool").to_string(), "bool");
         assert_eq!(parse_go_type("float64").to_string(), "float64");
-        assert_eq!(parse_go_type("byte").to_string(), "uint8");
+        assert_eq!(parse_go_type("byte").to_string(), "byte");
         assert_eq!(parse_go_type("uint").to_string(), "uint");
         assert_eq!(parse_go_type("uint32").to_string(), "uint32");
         assert_eq!(parse_go_type("uintptr").to_string(), "uintptr");

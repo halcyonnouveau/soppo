@@ -51,6 +51,11 @@ type Option[T any] enum {
 	Some T
 	None
 }
+
+// Methods on variants use EnumName.Variant as receiver
+func (v Result.Ok) MarshalJSON() ([]byte, error) {
+    return json.Marshal(map[string]any{"Ok": v.Value})
+}
 ```
 
 ## Pattern Matching

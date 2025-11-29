@@ -1,0 +1,125 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+import "encoding/json"
+
+// Simple enum with data variants
+/*soppo:enum
+Result {
+    Ok int
+    Err string
+}
+*/
+type Result interface {
+    isResult()
+}
+
+type Result_Ok struct {
+    Value int
+}
+func (Result_Ok) isResult() {}
+
+type Result_Err struct {
+    Value string
+}
+func (Result_Err) isResult() {}
+
+func ResultOk(value int) Result {
+    return Result_Ok{Value: value}
+}
+func ResultErr(value string) Result {
+    return Result_Err{Value: value}
+}
+
+// Enum with struct variant
+/*soppo:enum
+Shape {
+    Circle {
+        radius float64
+    }
+    Rectangle {
+        width float64
+        height float64
+    }
+}
+*/
+type Shape interface {
+    isShape()
+}
+
+type Shape_Circle struct {
+    radius float64
+}
+func (Shape_Circle) isShape() {}
+
+type Shape_Rectangle struct {
+    width float64
+    height float64
+}
+func (Shape_Rectangle) isShape() {}
+
+
+// MarshalJSON for Result.Ok variant
+// Use .(!nil) to assert json.Marshal returns non-nil data
+func (v Result_Ok) MarshalJSON() ([]byte, error) {
+    data, err := json.Marshal(map[string]any{"Ok": v.Value})
+    return data, err
+}
+
+// MarshalJSON for Result.Err variant
+func (v Result_Err) MarshalJSON() ([]byte, error) {
+    data, err := json.Marshal(map[string]any{"Err": v.Value})
+    return data, err
+}
+
+// MarshalJSON for Shape.Circle variant
+func (v Shape_Circle) MarshalJSON() ([]byte, error) {
+    inner := map[string]any{"radius": v.radius}
+    data, err := json.Marshal(map[string]any{"Circle": inner})
+    return data, err
+}
+
+// MarshalJSON for Shape.Rectangle variant
+func (v Shape_Rectangle) MarshalJSON() ([]byte, error) {
+    inner := map[string]any{"width": v.width, "height": v.height}
+    data, err := json.Marshal(map[string]any{"Rectangle": inner})
+    return data, err
+}
+
+// Custom method on variant
+func (v Result_Ok) Double() int {
+    return (v.Value * 2)
+}
+
+// Pointer receiver - v is non-null because it's *T not ?*T
+func (v *Shape_Circle) Scale(factor float64) {
+    v.radius = (v.radius * factor)
+}
+
+func main() {
+    // Test Result marshaling
+    ok := Result_Ok{Value: 42}
+    okJson, _ := ok.MarshalJSON()
+    fmt.Println(string(okJson))
+    err := Result_Err{Value: "something went wrong"}
+    errJson, _ := err.MarshalJSON()
+    fmt.Println(string(errJson))
+    // Test Shape marshaling
+    circle := Shape_Circle{radius: 5.0}
+    circleJson, _ := circle.MarshalJSON()
+    fmt.Println(string(circleJson))
+    rect := Shape_Rectangle{width: 10.0, height: 20.0}
+    rectJson, _ := rect.MarshalJSON()
+    fmt.Println(string(rectJson))
+    // Test custom method
+    doubled := ok.Double()
+    fmt.Println(doubled)
+    // Test pointer receiver
+    circle.Scale(2.0)
+    fmt.Println(circle.radius)
+}

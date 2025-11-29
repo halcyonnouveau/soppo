@@ -1,0 +1,69 @@
+package main
+
+import "fmt"
+import "encoding/json"
+
+// Basic struct with JSON tags
+type User struct {
+    Name  string `json:"name"`
+    Email string `json:"email,omitempty"`
+    Age   int    `json:"age"`
+}
+
+// Struct with multiple tag types
+type Config struct {
+    Host     string `json:"host" yaml:"host" env:"HOST"`
+    Port     int    `json:"port" yaml:"port" env:"PORT"`
+    Debug    bool   `json:"debug,omitempty" yaml:"debug"`
+}
+
+// Struct with complex tags
+type ApiResponse struct {
+    ID        int    `json:"id" db:"id"`
+    CreatedAt string `json:"created_at,omitempty" db:"created_at"`
+    Data      string `json:"-"`
+}
+
+// Mix of tagged and untagged fields
+type Mixed struct {
+    Tagged   string `json:"tagged"`
+    Untagged string
+    Another  int    `json:"another"`
+}
+
+func main() {
+    user := User{
+        Name:  "Alice",
+        Email: "alice@example.com",
+        Age:   30,
+    }
+
+    // Test json.Marshal with struct tags
+    data, err := json.Marshal(user)
+    if err != nil {
+        fmt.Println("error:", err)
+        return
+    }
+    fmt.Println(string(data))
+
+    config := Config{
+        Host:  "localhost",
+        Port:  8080,
+        Debug: true,
+    }
+    fmt.Println(config.Host, config.Port, config.Debug)
+
+    mixed := Mixed{
+        Tagged:   "hello",
+        Untagged: "world",
+        Another:  42,
+    }
+    fmt.Println(mixed.Tagged, mixed.Untagged, mixed.Another)
+
+    api := ApiResponse{
+        ID:        123,
+        CreatedAt: "2024-01-01",
+        Data:      "secret",
+    }
+    fmt.Println(api.ID, api.CreatedAt, api.Data)
+}

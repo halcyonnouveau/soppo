@@ -384,6 +384,22 @@ impl Codegen {
         }
     }
 
+    /// Convert enum variant type syntax (EnumName.Variant) to Go struct name (EnumName_Variant)
+    /// Handles pointer types like *EnumName.Variant -> *EnumName_Variant
+    pub(crate) fn go_receiver_type(&self, ty: &str) -> String {
+        // Handle pointer prefix
+        let (prefix, base) = if let Some(rest) = ty.strip_prefix('*') {
+            ("*", rest)
+        } else {
+            ("", ty)
+        };
+
+        // Convert EnumName.Variant to EnumName_Variant
+        let converted = base.replace('.', "_");
+
+        format!("{}{}", prefix, converted)
+    }
+
     /// Generate nilable comment if the type is nullable
     /// Returns " //soppo:nilable" if nullable, empty string otherwise
     pub(crate) fn nilable_comment(&self, ty: &crate::syntax::Type) -> &'static str {

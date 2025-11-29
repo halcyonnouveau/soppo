@@ -475,7 +475,9 @@ impl Infer {
 
         // Check for nil dereference on field access
         // If the expression is a nilable type, verify it's not nullable
-        if Self::is_nilable_type(&expr_ty) {
+        // Skip check if expression is a NilAssert - that explicitly makes it non-null
+        if Self::is_nilable_type(&expr_ty) && !matches!(field_expr.kind, ExprKind::NilAssert { .. })
+        {
             // Convert expression to a trackable key (supports identifiers and field chains)
             let expr_key = super::stmt::expr_to_key(field_expr);
 
@@ -539,25 +541,97 @@ impl Infer {
             return Ok(field_ty);
         }
 
-        if let Some(struct_name) = &struct_name
-            && let Some(type_def) = self.global_state.lookup_type(struct_name)
-            && let TypeDefKind::Struct { fields } = &type_def.kind
-        {
-            // Check if the field exists
-            if let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field) {
-                return Ok(field_ty.clone());
-            } else {
-                // Field not found - check if it might be a method
-                // If we can find a function with this name, return a type variable
-                // and let the Call handler deal with it
-                if self.global_state.lookup_function(field).is_some() {
-                    return Ok(self.fresh_ty_var());
-                }
+        if let Some(struct_name) = &struct_name {
+            // Check if this is an enum variant type (EnumName.VariantName)
+            if let Some(dot_idx) = struct_name.find('.') {
+                let enum_name = &struct_name[..dot_idx];
+                let variant_name = &struct_name[dot_idx + 1..];
 
-                return Err(SoppoError::Type {
-                    message: format!("Struct `{}` has no field named `{}`", struct_name, field),
-                    span: field_expr.span,
-                });
+                if let Some(type_def) = self.global_state.lookup_type(enum_name)
+                    && let TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    // Find the variant
+                    for variant in variants {
+                        let (v_name, v_fields) = match variant {
+                            EnumVariant::Unit { name, .. } => (name.as_str(), None),
+                            EnumVariant::Single { name, ty, .. } => {
+                                // Single variants have a "Value" field
+                                (
+                                    name.as_str(),
+                                    Some(vec![("Value".to_string(), Type::from_ast(ty))]),
+                                )
+                            }
+                            EnumVariant::Struct { name, fields, .. } => {
+                                let fs: Vec<_> = fields
+                                    .iter()
+                                    .map(|f| (f.name.clone(), Type::from_ast(&f.ty)))
+                                    .collect();
+                                (name.as_str(), Some(fs))
+                            }
+                        };
+
+                        if v_name == variant_name {
+                            if let Some(fields) = v_fields
+                                && let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field)
+                            {
+                                return Ok(field_ty.clone());
+                            }
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "Enum variant `{}` has no field named `{}`",
+                                    struct_name, field
+                                ),
+                                span: field_expr.span,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Regular struct lookup
+            if let Some(type_def) = self.global_state.lookup_type(struct_name)
+                && let TypeDefKind::Struct { fields } = &type_def.kind
+            {
+                // Check if the field exists
+                if let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field) {
+                    return Ok(field_ty.clone());
+                } else {
+                    // Field not found - check if it might be a method
+                    // If we can find a function with this name, return a type variable
+                    // and let the Call handler deal with it
+                    if self.global_state.lookup_function(field).is_some() {
+                        return Ok(self.fresh_ty_var());
+                    }
+
+                    // Field not found in struct - check if it's a method
+                    if let Some(method) = self.global_state.lookup_method(struct_name, field) {
+                        // Build function type from method signature
+                        let param_tys: Vec<Type> =
+                            method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                        let ret_ty = match method.return_types.len() {
+                            0 => Type::unit(),
+                            1 => method.return_types[0].clone(),
+                            _ => Type::generic("tuple", method.return_types.clone()),
+                        };
+                        return Ok(Type::fun(param_tys, ret_ty));
+                    }
+
+                    return Err(SoppoError::Type {
+                        message: format!("Struct `{}` has no field named `{}`", struct_name, field),
+                        span: field_expr.span,
+                    });
+                }
+            }
+
+            // If no TypeDef found, still check for methods on this type
+            if let Some(method) = self.global_state.lookup_method(struct_name, field) {
+                let param_tys: Vec<Type> = method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                let ret_ty = match method.return_types.len() {
+                    0 => Type::unit(),
+                    1 => method.return_types[0].clone(),
+                    _ => Type::generic("tuple", method.return_types.clone()),
+                };
+                return Ok(Type::fun(param_tys, ret_ty));
             }
         }
 

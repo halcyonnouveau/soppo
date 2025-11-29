@@ -44,6 +44,10 @@ pub struct Module {
 
     /// Constant definitions
     pub constants: HashMap<String, ConstDef>,
+
+    /// Methods by receiver type: receiver_type_name -> (method_name -> FuncDef)
+    /// Receiver types are stored with both Soppo form (Result.Ok) and Go form (Result_Ok)
+    pub methods: HashMap<String, HashMap<String, FuncDef>>,
 }
 
 /// Type definition in a module
@@ -117,6 +121,7 @@ impl GlobalCtxt {
                 types: HashMap::new(),
                 functions: HashMap::new(),
                 constants: HashMap::new(),
+                methods: HashMap::new(),
             },
         );
 
@@ -131,6 +136,7 @@ impl GlobalCtxt {
             types: HashMap::new(),
             functions: HashMap::new(),
             constants: HashMap::new(),
+            methods: HashMap::new(),
         })
     }
 
@@ -213,6 +219,34 @@ impl GlobalCtxt {
             return_types: func_decl.return_types.iter().map(Type::from_ast).collect(),
         };
 
+        // If this is a method (has receiver), register it by receiver type
+        if let Some(receiver) = &func_decl.receiver {
+            let receiver_type = &receiver.ty.name;
+            // Strip pointer prefix if present
+            let base_type = receiver_type.strip_prefix('*').unwrap_or(receiver_type);
+
+            let module = self.current_module_mut();
+
+            // Register under both Soppo form (Result.Ok) and Go form (Result_Ok)
+            let go_form = base_type.replace('.', "_");
+
+            // Insert for Soppo form
+            module
+                .methods
+                .entry(base_type.to_string())
+                .or_default()
+                .insert(func_decl.name.clone(), func_def.clone());
+
+            // Insert for Go form if different
+            if go_form != base_type {
+                module
+                    .methods
+                    .entry(go_form)
+                    .or_default()
+                    .insert(func_decl.name.clone(), func_def.clone());
+            }
+        }
+
         self.current_module_mut()
             .functions
             .insert(func_decl.name.clone(), func_def);
@@ -258,6 +292,21 @@ impl GlobalCtxt {
     /// Lookup a constant definition in a specific module
     pub fn lookup_constant_in(&self, module: &ModuleId, name: &str) -> Option<&ConstDef> {
         self.modules.get(module)?.constants.get(name)
+    }
+
+    /// Lookup a method by receiver type and method name in current module
+    /// Receiver type can be in either Soppo form (Result.Ok) or Go form (Result_Ok)
+    pub fn lookup_method(&self, receiver_type: &str, method_name: &str) -> Option<&FuncDef> {
+        // Strip pointer prefix if present
+        let base_type = receiver_type
+            .strip_prefix('*')
+            .or_else(|| receiver_type.strip_prefix("?*"))
+            .unwrap_or(receiver_type);
+
+        self.current_module()
+            .methods
+            .get(base_type)?
+            .get(method_name)
     }
 
     /// Check if a type is registered in current module

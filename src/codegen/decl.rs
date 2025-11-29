@@ -333,11 +333,9 @@ impl Codegen {
         self.emit("func ");
 
         if let Some(receiver) = &func.receiver {
-            self.emit(&format!(
-                "({} {}) ",
-                receiver.name,
-                self.go_type(&receiver.ty.name)
-            ));
+            // Use go_receiver_type to convert EnumName.Variant -> EnumName_Variant
+            let receiver_type = self.go_receiver_type(&receiver.ty.name);
+            self.emit(&format!("({} {}) ", receiver.name, receiver_type));
         }
 
         self.emit(&func.name);

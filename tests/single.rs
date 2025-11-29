@@ -24,6 +24,7 @@ mod pass {
         builtins,
         const_grouped_block,
         enum_match,
+        enum_variant_methods,
         error_type,
         generics,
         if_init,

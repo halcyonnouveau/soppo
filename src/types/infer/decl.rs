@@ -48,7 +48,16 @@ impl Infer {
         // Add receiver parameter to scope (for methods)
         if let Some(receiver) = &func.receiver {
             let receiver_ty = self.resolve_type(&receiver.ty);
-            self.insert_var(receiver.name.clone(), receiver_ty);
+            self.insert_var(receiver.name.clone(), receiver_ty.clone());
+
+            // Set nil state for nilable receivers based on nullability
+            // Non-nullable nilable receivers (e.g., *T not ?*T) are trusted to be non-nil
+            if Self::is_nilable_type(&receiver_ty) && !receiver_ty.is_nullable() {
+                self.set_nil_state(
+                    receiver.name.clone(),
+                    crate::types::ty::Nullability::NonNull,
+                );
+            }
         }
 
         // Add parameters to scope
