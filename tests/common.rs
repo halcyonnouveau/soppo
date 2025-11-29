@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -207,9 +209,13 @@ pub fn format_results(results: &[(String, String)]) -> String {
         .join("\n\n")
 }
 
-/// Sanitise error messages by replacing temp paths with a placeholder
+/// Sanitise error messages by replacing temp paths and stripping ANSI codes
 pub fn sanitise_error(err: &str) -> String {
+    // Strip ANSI escape codes
+    let ansi_re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    let stripped = ansi_re.replace_all(err, "");
+
     // Replace temp paths like /tmp/.tmpXXXXXX/ with [TEMP]/
-    let re = regex::Regex::new(r"/tmp/\.tmp[A-Za-z0-9]+/").unwrap();
-    re.replace_all(err, "[TEMP]/").to_string()
+    let path_re = regex::Regex::new(r"/tmp/\.tmp[A-Za-z0-9]+/").unwrap();
+    path_re.replace_all(&stripped, "[TEMP]/").to_string()
 }

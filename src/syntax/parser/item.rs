@@ -817,7 +817,7 @@ mod tests {
     fn test_parse_function() {
         let source = "func add(x int, y int) int { return x + y }";
         let mut parser = Parser::new(source, FileId(0));
-        let func = parser.parse_func_decl().unwrap();
+        let func = parser.parse_func_decl().expect("failed to parse function");
 
         assert_eq!(func.name, "add");
         assert_eq!(func.params.len(), 2);
@@ -833,7 +833,9 @@ mod tests {
     fn test_parse_generic_function() {
         let source = "func identity[T any](x T) T { return x }";
         let mut parser = Parser::new(source, FileId(0));
-        let func = parser.parse_func_decl().unwrap();
+        let func = parser
+            .parse_func_decl()
+            .expect("failed to parse generic function");
 
         assert_eq!(func.name, "identity");
         assert_eq!(func.generics.len(), 1);
@@ -849,7 +851,7 @@ mod tests {
             Err E
         }"#;
         let mut parser = Parser::new(source, FileId(0));
-        let type_decl = parser.parse_type_decl().unwrap();
+        let type_decl = parser.parse_type_decl().expect("failed to parse enum type");
 
         assert_eq!(type_decl.name, "Result");
         assert_eq!(type_decl.generics.len(), 2);
@@ -897,7 +899,7 @@ mod tests {
             }
         "#;
         let mut parser = Parser::new(source, FileId(0));
-        let file = parser.parse_file().unwrap();
+        let file = parser.parse_file().expect("failed to parse complete file");
 
         assert_eq!(file.decls.len(), 2);
         assert!(matches!(file.decls[0], Decl::Type(_)));
@@ -908,7 +910,9 @@ mod tests {
     fn test_parse_function_with_semicolons() {
         let source = "func add(x int, y int) int { c := x + y; return c }";
         let mut parser = Parser::new(source, FileId(0));
-        let func = parser.parse_func_decl().unwrap();
+        let func = parser
+            .parse_func_decl()
+            .expect("failed to parse function with semicolons");
 
         assert_eq!(func.name, "add");
         assert_eq!(func.body.stmts.len(), 2);
@@ -924,7 +928,9 @@ mod tests {
             func main() {}
         "#;
         let mut parser = Parser::new(source, FileId(0));
-        let file = parser.parse_file().unwrap();
+        let file = parser
+            .parse_file()
+            .expect("failed to parse grouped imports");
 
         assert_eq!(file.imports.len(), 2);
         assert_eq!(file.imports[0].path, "fmt");
@@ -945,7 +951,9 @@ mod tests {
             func main() {}
         "#;
         let mut parser = Parser::new(source, FileId(0));
-        let file = parser.parse_file().unwrap();
+        let file = parser
+            .parse_file()
+            .expect("failed to parse aliased imports");
 
         assert_eq!(file.imports.len(), 4);
 
@@ -969,7 +977,9 @@ mod tests {
             func main() {}
         "#;
         let mut parser = Parser::new(source, FileId(0));
-        let file = parser.parse_file().unwrap();
+        let file = parser
+            .parse_file()
+            .expect("failed to parse single aliased import");
 
         assert_eq!(file.imports.len(), 1);
         assert_eq!(file.imports[0].path, "fmt");

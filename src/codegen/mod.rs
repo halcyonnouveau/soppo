@@ -29,23 +29,8 @@ pub struct Codegen {
 }
 
 impl Codegen {
-    pub fn new() -> Self {
-        Self {
-            output: String::new(),
-            indent_level: 0,
-            global_state: GlobalCtxt::new(),
-            current_func_return_type: None,
-            current_return_types: Vec::new(),
-            error_var_counter: 0,
-            comments: Vec::new(),
-            comment_idx: 0,
-            module_path: None,
-            output_dir: None,
-            project_root: None,
-        }
-    }
-
-    pub fn with_global_state(global_state: GlobalCtxt) -> Self {
+    /// Create base Codegen with given global state
+    fn base(global_state: GlobalCtxt) -> Self {
         Self {
             output: String::new(),
             indent_level: 0,
@@ -59,6 +44,14 @@ impl Codegen {
             output_dir: None,
             project_root: None,
         }
+    }
+
+    pub fn new() -> Self {
+        Self::base(GlobalCtxt::new())
+    }
+
+    pub fn with_global_state(global_state: GlobalCtxt) -> Self {
+        Self::base(global_state)
     }
 
     /// Create codegen with module info for resolving local Soppo imports
@@ -69,17 +62,10 @@ impl Codegen {
         project_root: PathBuf,
     ) -> Self {
         Self {
-            output: String::new(),
-            indent_level: 0,
-            global_state,
-            current_func_return_type: None,
-            current_return_types: Vec::new(),
-            error_var_counter: 0,
-            comments: Vec::new(),
-            comment_idx: 0,
             module_path: Some(module_path),
             output_dir,
             project_root: Some(project_root),
+            ..Self::base(global_state)
         }
     }
 
@@ -152,9 +138,8 @@ impl Codegen {
     /// Emit all remaining comments
     pub(crate) fn emit_remaining_comments(&mut self) {
         while self.comment_idx < self.comments.len() {
-            let text = self.comments[self.comment_idx].text.clone();
             self.emit_indent();
-            self.output.push_str(&text);
+            self.output.push_str(&self.comments[self.comment_idx].text);
             self.output.push('\n');
             self.comment_idx += 1;
         }
@@ -166,9 +151,8 @@ impl Codegen {
             let comment = &self.comments[self.comment_idx];
             // Check if comment is on the same line (trailing comment)
             if comment.span.start.line == line && !comment.is_block {
-                let text = comment.text.clone();
                 self.output.push(' ');
-                self.output.push_str(&text);
+                self.output.push_str(&comment.text);
                 self.comment_idx += 1;
                 return true;
             }

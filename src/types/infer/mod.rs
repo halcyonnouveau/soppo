@@ -100,58 +100,43 @@ pub struct Infer {
 }
 
 impl Infer {
-    /// Create a new type inference engine
-    ///
-    /// Go stdlib resolution is always enabled.
-    /// For external module resolution, use `with_project`.
-    pub fn new() -> miette::Result<Self> {
-        Ok(Self {
-            global_state: GlobalCtxt::new(),
-            scopes: vec![HashMap::new()],
-            substitutions: HashMap::new(),
-            next_var: 0,
-            expected_return_types: None,
-            generic_params: HashMap::new(),
-            go_cache: GoCache::new()?,
-            project: None,
-            imported_packages: HashMap::new(),
-            soppo_imports: HashMap::new(),
-            nil_state: vec![HashMap::new()],
-        })
-    }
-
-    /// Create an Infer with project context for external module resolution
-    pub fn with_project(project: Project) -> miette::Result<Self> {
-        Ok(Self {
-            global_state: GlobalCtxt::new(),
-            scopes: vec![HashMap::new()],
-            substitutions: HashMap::new(),
-            next_var: 0,
-            expected_return_types: None,
-            generic_params: HashMap::new(),
-            go_cache: GoCache::new()?,
-            project: Some(project),
-            imported_packages: HashMap::new(),
-            soppo_imports: HashMap::new(),
-            nil_state: vec![HashMap::new()],
-        })
-    }
-
-    /// Create an Infer with existing GlobalCtxt for multi-file compilation
-    pub fn with_global_state(global_state: GlobalCtxt) -> miette::Result<Self> {
-        Ok(Self {
+    /// Create base Infer with given global state, project, and cache
+    fn base(global_state: GlobalCtxt, project: Option<Project>, go_cache: GoCache) -> Self {
+        Self {
             global_state,
             scopes: vec![HashMap::new()],
             substitutions: HashMap::new(),
             next_var: 0,
             expected_return_types: None,
             generic_params: HashMap::new(),
-            go_cache: GoCache::new()?,
-            project: None,
+            go_cache,
+            project,
             imported_packages: HashMap::new(),
             soppo_imports: HashMap::new(),
             nil_state: vec![HashMap::new()],
-        })
+        }
+    }
+
+    /// Create a new type inference engine
+    ///
+    /// Go stdlib resolution is always enabled.
+    /// For external module resolution, use `with_project`.
+    pub fn new() -> miette::Result<Self> {
+        Ok(Self::base(GlobalCtxt::new(), None, GoCache::new()?))
+    }
+
+    /// Create an Infer with project context for external module resolution
+    pub fn with_project(project: Project) -> miette::Result<Self> {
+        Ok(Self::base(
+            GlobalCtxt::new(),
+            Some(project),
+            GoCache::new()?,
+        ))
+    }
+
+    /// Create an Infer with existing GlobalCtxt for multi-file compilation
+    pub fn with_global_state(global_state: GlobalCtxt) -> miette::Result<Self> {
+        Ok(Self::base(global_state, None, GoCache::new()?))
     }
 
     /// Create an Infer with existing GlobalCtxt and project context
@@ -159,22 +144,11 @@ impl Infer {
         global_state: GlobalCtxt,
         project: Project,
     ) -> miette::Result<Self> {
-        Ok(Self {
-            global_state,
-            scopes: vec![HashMap::new()],
-            substitutions: HashMap::new(),
-            next_var: 0,
-            expected_return_types: None,
-            generic_params: HashMap::new(),
-            go_cache: GoCache::new()?,
-            project: Some(project),
-            imported_packages: HashMap::new(),
-            soppo_imports: HashMap::new(),
-            nil_state: vec![HashMap::new()],
-        })
+        Ok(Self::base(global_state, Some(project), GoCache::new()?))
     }
 
-    pub fn global_state(self) -> GlobalCtxt {
+    /// Consume the Infer and return the global context
+    pub fn into_global_state(self) -> GlobalCtxt {
         self.global_state
     }
 
@@ -187,17 +161,16 @@ impl Infer {
         for import in imports {
             let import_path = import.path.trim_matches('"');
 
-            // Check if this is a local Soppo package
-            let is_soppo = self.project.as_ref().is_some_and(|project| {
-                crate::deps::is_soppo_import(import_path, &project.module_path, &project.root)
+            // Check if this is a local Soppo package and get the local path if so
+            let soppo_local_path = self.project.as_ref().and_then(|project| {
+                if crate::deps::is_soppo_import(import_path, &project.module_path, &project.root) {
+                    crate::deps::get_local_package_path(import_path, &project.module_path)
+                } else {
+                    None
+                }
             });
 
-            if is_soppo {
-                let project = self.project.as_ref().unwrap();
-                // Get the local path portion (e.g., "helpers" from "github.com/user/project/helpers")
-                let local_path =
-                    crate::deps::get_local_package_path(import_path, &project.module_path).unwrap();
-
+            if let Some(local_path) = soppo_local_path {
                 // Use alias if provided, otherwise derive from path
                 let package_name = import
                     .alias

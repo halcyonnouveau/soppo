@@ -24,7 +24,12 @@ impl Parser {
                 // ? errName { block } form
                 let name = match self.advance() {
                     Some((Token::Ident(name), _)) => name,
-                    _ => unreachable!(),
+                    _ => {
+                        return Err(SoppoError::Parse {
+                            message: "expected identifier after `?`".to_string(),
+                            span: self.previous_span(),
+                        });
+                    }
                 };
                 let block = self.parse_block()?;
                 (Some(name), Some(block))

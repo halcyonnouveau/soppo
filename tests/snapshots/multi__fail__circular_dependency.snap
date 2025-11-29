@@ -2,11 +2,11 @@
 source: tests/multi.rs
 expression: sanitise_error(& err)
 ---
-[31msoppo::circular_dependency[0m
+soppo::circular_dependency
 
-  [31m×[0m Circular dependency detected
-  [31m│[0m 
-  [31m│[0m   pkga/lib.sop imports "github.com/test/circular/pkgb"
-  [31m│[0m     ↓
-  [31m│[0m   pkgb/lib.sop imports "github.com/test/circular/pkga"
-[36m  help: [0mbreak the cycle by extracting shared code into a separate package
+  × Circular dependency detected
+  │ 
+  │   pkga/lib.sop imports "github.com/test/circular/pkgb"
+  │     ↓
+  │   pkgb/lib.sop imports "github.com/test/circular/pkga"
+  help: break the cycle by extracting shared code into a separate package

@@ -128,7 +128,7 @@ pub fn compile(source: &str, filename: &str) -> Result<String> {
         infer_decl(&mut infer, decl, source, filename)?;
     }
 
-    let global_state = infer.global_state();
+    let global_state = infer.into_global_state();
     let mut codegen = Codegen::with_global_state(global_state);
     codegen.gen_file(&file).map_err(|e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
@@ -167,7 +167,7 @@ pub fn compile_with_context(
         infer_decl(&mut infer, decl, source, filename)?;
     }
 
-    let global_state = infer.global_state();
+    let global_state = infer.into_global_state();
     let mut codegen = Codegen::with_module_info(
         global_state.clone(),
         module_path.to_string(),
@@ -199,24 +199,20 @@ pub fn typecheck(source: &str, filename: &str) -> Result<()> {
 }
 
 fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
+    // Create NamedSource once, only clone if an error occurs
+    let add_source = |e| {
+        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
+    };
+
     match decl {
         Decl::Const(const_decl) => {
-            infer.infer_const_decl(const_decl).map_err(|e| {
-                miette::Report::from(e)
-                    .with_source_code(NamedSource::new(filename, source.to_string()))
-            })?;
+            infer.infer_const_decl(const_decl).map_err(add_source)?;
         }
         Decl::Type(type_decl) => {
-            infer.infer_type_decl(type_decl).map_err(|e| {
-                miette::Report::from(e)
-                    .with_source_code(NamedSource::new(filename, source.to_string()))
-            })?;
+            infer.infer_type_decl(type_decl).map_err(add_source)?;
         }
         Decl::Func(func) => {
-            infer.infer_func_decl(func).map_err(|e| {
-                miette::Report::from(e)
-                    .with_source_code(NamedSource::new(filename, source.to_string()))
-            })?;
+            infer.infer_func_decl(func).map_err(add_source)?;
         }
     }
     Ok(())

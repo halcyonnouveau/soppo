@@ -141,8 +141,6 @@ func describe(c Colour) string {
 }
 ```
 
-### Partial Matching
-
 When you only care about one variant, full `match` is verbose. Combining `if` with a type assertion provides a concise way to check and destructure a single variant:
 
 ```go
@@ -212,8 +210,6 @@ Works with `error` and `(T, error)` returns. On non-nil error, returns early wit
 
 Nil pointer dereferences are a common source of runtime panics in Go. Soppo uses explicit nilability annotations and flow-sensitive tracking to catch unsafe access at compile time.
 
-### Nilable Types
-
 Use `?` prefix to mark types that can be nil:
 
 ```go
@@ -244,8 +240,6 @@ var user *User = nil        // ERROR: cannot assign nil to non-nilable type
 var user *User = &User{}    // OK
 ```
 
-### Type Narrowing
-
 After a nil check, nilable types are automatically narrowed to non-nilable:
 
 ```go
@@ -263,8 +257,6 @@ if result == nil {
 fmt.Println(result.name)    // OK: result is non-nil after guard
 ```
 
-### Automatically Non-Nil Expressions
-
 Some expressions are guaranteed non-nil:
 - `&expr` (address-of) - always points to a valid value
 - `new(T)` - allocates and returns a valid pointer
@@ -281,8 +273,6 @@ func process() error {
 }
 ```
 
-### Nil Assertion
-
 When you know a value is non-nil from external context (e.g., API guarantees), use `.(!nil)` to assert it:
 
 ```go
@@ -292,23 +282,7 @@ fmt.Println(user.name)  // OK: user is *User
 
 This generates no runtime code - it's purely a compile-time assertion.
 
-### External Go Types
-
 Types from external Go packages default to nilable since Go has no nilability annotations. Use nil checks or `.(!nil)` when passing to Soppo functions expecting non-nilable types.
-
-### Codegen Annotations
-
-Generated Go code includes `//soppo:nilable` annotations to preserve nilability information:
-
-```go
-//soppo:nilable user : 0
-func findUser(user *User) *User     // user param and return 0 are nilable
-
-type Container struct {
-    required *User
-    optional *User //soppo:nilable
-}
-```
 
 **Note**: Flow-sensitive nil tracking is complex, and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees. Interface nil is a known limitation.
 
@@ -344,17 +318,17 @@ msg := "hello {name}, you are {age}"
 
 Variables only, no expressions. Use `{{` to escape literal braces.
 
-## Imports
+## Go Interop and Imports
 
 ```go
 import "fmt"
 import "github.com/user/project/helpers"
 
 import (
-    "fmt"
-    "net/http"
-    "github.com/user/project/util/helpers"
-    myHelpers "github.com/user/project/util/helpers"
+	"fmt"
+	"net/http"
+	"github.com/user/project/util/helpers"
+	myHelpers "github.com/user/project/util/helpers"
 )
 ```
 
@@ -370,8 +344,30 @@ For example, with module `github.com/user/project`:
 - `import "github.com/user/project/helpers"`: Go import if `helpers/` only has `.go` files
 - `import "fmt"`: Go import (external package)
 
-Like Go, Soppo imports are package-based (directory-based). Each directory with `.sop` files forms a package.
+Like Go, Soppo imports are package-based (directory-based). Each directory with `.sop` files forms a package. Types from Go packages are extracted via tree-sitter parsing.
 
-**Note**: You cannot import external Soppo projects directly. To use an external Soppo library, import its generated Go code as a regular Go import.
+Soppo-generated Go code includes special markers that preserve type information when re-imported:
 
-Types from Go packages are extracted via tree-sitter parsing.
+```go
+//soppo:generated             // File marker
+//soppo:nilable user : 0      // Function annotation - param "user" and return 0 are nilable
+//soppo:enum                  // Type annotation - struct is an enum variant
+
+type User struct {
+	Name  string
+	Address *Address //soppo:nilable 
+}
+```
+
+When importing a Go package with `//soppo:generated`:
+- Struct fields with `//soppo:nilable` are treated as nilable
+- Struct fields WITHOUT the marker are non-nilable (even pointer types)
+- Types marked `//soppo:enum` support pattern matching
+
+When importing regular Go packages (no marker):
+- All pointer/slice/map/chan/func/interface types are assumed nilable 
+- No enum support (treated as regular structs)
+
+This allows Soppo projects to depend on generated Go from other Soppo projects while preserving nil safety guarantees.
+
+**Note**: You cannot import external Soppo source directly. To use an external Soppo library, import its generated Go code as a regular Go import.

@@ -304,10 +304,13 @@ impl Codegen {
             let params_part = nilable_params.join(" ");
             let returns_part = nilable_returns.join(" ");
             let annotation = match (nilable_params.is_empty(), nilable_returns.is_empty()) {
-                (false, true) => params_part,                   // only params
-                (true, false) => format!(": {}", returns_part), // only returns
-                (false, false) => format!("{} : {}", params_part, returns_part), // both
-                (true, true) => unreachable!(),
+                (false, true) => params_part,
+                (true, false) => format!(": {}", returns_part),
+                (false, false) => format!("{} : {}", params_part, returns_part),
+                // INVARIANT: outer if ensures at least one is non-empty
+                (true, true) => {
+                    unreachable!("nilable annotation with no nilable params or returns")
+                }
             };
             self.emit_line(&format!("//soppo:nilable {}", annotation));
         }
