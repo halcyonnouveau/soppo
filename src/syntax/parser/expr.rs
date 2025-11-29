@@ -1,6 +1,6 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
-use crate::syntax::ast::{AssignOp, BinOp, Expr, ExprKind, Param, Type, UnaryOp};
+use crate::syntax::ast::{AssignOp, BinOp, Expr, ExprKind, Param, StringPart, Type, UnaryOp};
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
@@ -659,10 +659,30 @@ impl Parser {
                 span,
             }),
 
-            Token::String(s) => Ok(Expr {
-                kind: ExprKind::String(s),
-                span,
-            }),
+            Token::String(s) => {
+                // Check if string contains interpolation markers
+                if s.contains('{') {
+                    let parts = self.parse_string_interpolation(&s, span)?;
+                    if parts.len() == 1 {
+                        // Single literal part - just a plain string
+                        if let StringPart::Literal(lit) = &parts[0] {
+                            return Ok(Expr {
+                                kind: ExprKind::String(lit.clone()),
+                                span,
+                            });
+                        }
+                    }
+                    Ok(Expr {
+                        kind: ExprKind::StringInterpolation(parts),
+                        span,
+                    })
+                } else {
+                    Ok(Expr {
+                        kind: ExprKind::String(s),
+                        span,
+                    })
+                }
+            }
 
             Token::True => Ok(Expr {
                 kind: ExprKind::Bool(true),
@@ -976,6 +996,80 @@ impl Parser {
                 span,
             }),
         }
+    }
+
+    /// Parse a string with interpolation: "Hello, {name}!"
+    /// Returns a vector of StringPart
+    fn parse_string_interpolation(&mut self, s: &str, span: Span) -> Result<Vec<StringPart>> {
+        let mut parts = Vec::new();
+        let mut current_literal = String::new();
+        let mut chars = s.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '{' {
+                // Check for escaped brace: {{
+                if chars.peek() == Some(&'{') {
+                    chars.next();
+                    current_literal.push('{');
+                    continue;
+                }
+
+                // Save any accumulated literal
+                if !current_literal.is_empty() {
+                    parts.push(StringPart::Literal(current_literal.clone()));
+                    current_literal.clear();
+                }
+
+                // Extract the expression inside {}
+                let mut expr_str = String::new();
+                let mut brace_depth = 1;
+
+                for inner_ch in chars.by_ref() {
+                    if inner_ch == '{' {
+                        brace_depth += 1;
+                        expr_str.push(inner_ch);
+                    } else if inner_ch == '}' {
+                        brace_depth -= 1;
+                        if brace_depth == 0 {
+                            break;
+                        }
+                        expr_str.push(inner_ch);
+                    } else {
+                        expr_str.push(inner_ch);
+                    }
+                }
+
+                if brace_depth != 0 {
+                    return Err(SoppoError::Parse {
+                        message: "Unclosed interpolation brace in string".to_string(),
+                        span,
+                    });
+                }
+
+                // Parse the expression
+                let mut expr_parser = Parser::new(&expr_str, self.file);
+                let expr = expr_parser.parse_expr()?;
+                parts.push(StringPart::Expr(Box::new(expr)));
+            } else if ch == '}' {
+                // Check for escaped brace: }}
+                if chars.peek() == Some(&'}') {
+                    chars.next();
+                    current_literal.push('}');
+                    continue;
+                }
+                // Unescaped } without matching { - just include it
+                current_literal.push(ch);
+            } else {
+                current_literal.push(ch);
+            }
+        }
+
+        // Save any remaining literal
+        if !current_literal.is_empty() {
+            parts.push(StringPart::Literal(current_literal));
+        }
+
+        Ok(parts)
     }
 }
 

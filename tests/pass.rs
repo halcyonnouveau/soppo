@@ -78,3 +78,10 @@ fn test_builtins() {
         compile_soppo_file("tests/fixtures/pass/builtins.sop").expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_string_interpolation() {
+    let output = compile_soppo_file("tests/fixtures/pass/string_interpolation.sop")
+        .expect("Compilation should succeed");
+    insta::assert_snapshot!(output);
+}

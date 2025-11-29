@@ -1,0 +1,41 @@
+package main
+
+import "fmt"
+
+func main() {
+    // Basic string interpolation
+    name := "World"
+    fmt.Println("Hello, {name}!")
+
+    // Multiple interpolations
+    x := 10
+    y := 20
+    fmt.Println("x={x}, y={y}, sum={x + y}")
+
+    // Interpolation with method calls
+    nums := []int{1, 2, 3}
+    fmt.Println("Length: {len(nums)}")
+
+    // Nested expressions
+    a := 5
+    b := 3
+    fmt.Println("Result: {a * b + 2}")
+
+    // Escaped braces (double braces)
+    fmt.Println("Use {{name}} for interpolation")
+
+    // No interpolation (plain string)
+    fmt.Println("Just a plain string")
+
+    // Percent signs in format (should be escaped in output)
+    pct := 50
+    fmt.Println("{pct}% complete")
+
+    // Bool interpolation
+    flag := true
+    fmt.Println("Flag is {flag}")
+
+    // Float interpolation
+    pi := 3.14159
+    fmt.Println("Pi is approximately {pi}")
+}

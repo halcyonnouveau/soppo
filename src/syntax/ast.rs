@@ -250,11 +250,22 @@ pub struct Expr {
     pub span: Span,
 }
 
+/// Part of an interpolated string
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringPart {
+    /// Literal text segment
+    Literal(String),
+    /// Interpolated expression: {expr}
+    Expr(Box<Expr>),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Integer(i64),
     Float(f64),
     String(String),
+    /// Interpolated string: "Hello, {name}!"
+    StringInterpolation(Vec<StringPart>),
     Bool(bool),
     Nil,
     Ident(String),

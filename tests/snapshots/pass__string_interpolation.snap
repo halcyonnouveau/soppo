@@ -1,0 +1,37 @@
+---
+source: tests/pass.rs
+expression: output
+---
+package main
+
+import "fmt"
+
+func main() {
+    // Basic string interpolation
+    name := "World"
+    fmt.Println(fmt.Sprintf("Hello, %v!", name))
+    // Multiple interpolations
+    x := 10
+    y := 20
+    fmt.Println(fmt.Sprintf("x=%v, y=%v, sum=%v", x, y, (x + y)))
+    // Interpolation with method calls
+    nums := []int{1, 2, 3}
+    fmt.Println(fmt.Sprintf("Length: %v", len(nums)))
+    // Nested expressions
+    a := 5
+    b := 3
+    fmt.Println(fmt.Sprintf("Result: %v", ((a * b) + 2)))
+    // Escaped braces (double braces)
+    fmt.Println("Use {name} for interpolation")
+    // No interpolation (plain string)
+    fmt.Println("Just a plain string")
+    // Percent signs in format (should be escaped in output)
+    pct := 50
+    fmt.Println(fmt.Sprintf("%v%% complete", pct))
+    // Bool interpolation
+    flag := true
+    fmt.Println(fmt.Sprintf("Flag is %v", flag))
+    // Float interpolation
+    pi := 3.14159
+    fmt.Println(fmt.Sprintf("Pi is approximately %v", pi))
+}

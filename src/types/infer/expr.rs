@@ -17,6 +17,17 @@ impl Infer {
 
             ExprKind::String(_) => Ok(Type::simple("string")),
 
+            ExprKind::StringInterpolation(parts) => {
+                // Type check each interpolated expression
+                for part in parts {
+                    if let crate::syntax::StringPart::Expr(expr) = part {
+                        // Any type can be interpolated - it will be converted to string
+                        self.infer_expr(expr)?;
+                    }
+                }
+                Ok(Type::simple("string"))
+            }
+
             ExprKind::Bool(_) => Ok(Type::simple("bool")),
 
             // nil is a special value that can be any pointer, interface, slice, map, channel, or function type

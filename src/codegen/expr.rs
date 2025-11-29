@@ -23,6 +23,34 @@ impl Codegen {
                 self.emit(&format!("\"{}\"", s));
             }
 
+            ExprKind::StringInterpolation(parts) => {
+                // Generate fmt.Sprintf("format", args...)
+                self.emit("fmt.Sprintf(\"");
+
+                // Build the format string and collect expressions
+                let mut exprs: Vec<&crate::syntax::Expr> = Vec::new();
+                for part in parts {
+                    match part {
+                        crate::syntax::StringPart::Literal(s) => {
+                            // Escape % characters for fmt.Sprintf
+                            self.emit(&s.replace('%', "%%"));
+                        }
+                        crate::syntax::StringPart::Expr(expr) => {
+                            self.emit("%v");
+                            exprs.push(expr);
+                        }
+                    }
+                }
+                self.emit("\"");
+
+                // Add the expressions as arguments
+                for expr in exprs {
+                    self.emit(", ");
+                    self.gen_expr(expr);
+                }
+                self.emit(")");
+            }
+
             ExprKind::Bool(b) => {
                 self.emit(if *b { "true" } else { "false" });
             }
