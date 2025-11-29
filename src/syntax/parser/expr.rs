@@ -663,6 +663,11 @@ impl Parser {
                 span,
             }),
 
+            Token::Rune(r) => Ok(Expr {
+                kind: ExprKind::Rune(r),
+                span,
+            }),
+
             Token::String(s) => {
                 // Check if string contains interpolation markers
                 if s.contains('{') {

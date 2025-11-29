@@ -1,0 +1,12 @@
+// Tests interface type unification - io.Reader accepts *os.File
+package main
+
+import "bufio"
+import "os"
+
+func main() {
+    // os.Stdin is *File, but bufio.NewReader expects io.Reader interface
+    // This tests that interface types accept any implementing type
+    reader := bufio.NewReader(os.Stdin).(!nil)
+    _ = reader
+}

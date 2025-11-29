@@ -90,6 +90,13 @@ pub enum Token {
     })]
     RawString(String),
 
+    // Rune literal (character): 'a', '\n', '\t', etc.
+    #[regex(r"'([^'\\]|\\['\\bnfrt0])'", |lex| {
+        let s = lex.slice();
+        s[1..s.len()-1].to_string()
+    })]
+    Rune(String),
+
     // Operators
     #[token("+")]
     Plus,

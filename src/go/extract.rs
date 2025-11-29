@@ -36,6 +36,10 @@ pub struct GoPackage {
     pub types: HashMap<String, TypeDef>,
     /// Exported constants
     pub constants: HashMap<String, ConstDef>,
+    /// Exported variables
+    pub variables: HashMap<String, VarDef>,
+    /// Methods by receiver type (e.g., "Reader" -> [methods])
+    pub methods: HashMap<String, Vec<MethodDef>>,
     /// Soppo type definitions recovered from marker comments
     pub soppo_types: HashMap<String, SoppoTypeDef>,
 }
@@ -81,6 +85,22 @@ pub struct Field {
 pub struct ConstDef {
     pub name: String,
     pub ty: String,
+}
+
+/// Variable definition
+#[derive(Debug, Clone)]
+pub struct VarDef {
+    pub name: String,
+    pub ty: String,
+}
+
+/// Method definition (function with receiver)
+#[derive(Debug, Clone)]
+pub struct MethodDef {
+    pub name: String,
+    pub receiver_type: String, // e.g., "Reader", "*Reader"
+    pub params: Vec<Param>,
+    pub return_type: String,
 }
 
 /// Soppo type definition recovered from marker comments
@@ -280,6 +300,8 @@ fn parse_soppo_enum(text: &str) -> Option<SoppoTypeDef> {
 fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
     let root = tree.root_node();
 
+    // First pass: extract package name, functions, types, and constants
+    // (needed for variable type inference)
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         match child.kind() {
@@ -299,6 +321,19 @@ fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
                     pkg.functions.insert(func.name.clone(), func);
                 }
             }
+            "method_declaration" => {
+                if let Some(method) = extract_method(child, source)
+                    && is_exported(&method.name)
+                {
+                    // Store methods by receiver type (base type without pointer)
+                    let base_type = method
+                        .receiver_type
+                        .strip_prefix('*')
+                        .unwrap_or(&method.receiver_type)
+                        .to_string();
+                    pkg.methods.entry(base_type).or_default().push(method);
+                }
+            }
             "type_declaration" => {
                 extract_type_specs(child, source, pkg);
             }
@@ -306,6 +341,14 @@ fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
                 extract_const_specs(child, source, pkg);
             }
             _ => {}
+        }
+    }
+
+    // Second pass: extract variables (may need function return types for inference)
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "var_declaration" {
+            extract_var_specs(child, source, pkg);
         }
     }
 }
@@ -337,6 +380,62 @@ fn extract_function(node: tree_sitter::Node, source: &str) -> Option<FuncDef> {
     }
 
     Some(func)
+}
+
+fn extract_method(node: tree_sitter::Node, source: &str) -> Option<MethodDef> {
+    let name_node = node.child_by_field_name("name")?;
+    let name = node_text(name_node, source).to_string();
+
+    // Extract receiver type
+    let receiver = node.child_by_field_name("receiver")?;
+    let receiver_type = extract_receiver_type(receiver, source)?;
+
+    let mut method = MethodDef {
+        name,
+        receiver_type,
+        params: Vec::new(),
+        return_type: String::new(),
+    };
+
+    // Extract parameters
+    if let Some(params) = node.child_by_field_name("parameters") {
+        extract_params(params, source, &mut method.params);
+    }
+
+    // Extract return type
+    if let Some(result) = node.child_by_field_name("result") {
+        method.return_type = extract_type_string(result, source);
+    }
+
+    Some(method)
+}
+
+fn extract_receiver_type(node: tree_sitter::Node, source: &str) -> Option<String> {
+    // Receiver is a parameter_list with one parameter
+    // e.g., (r *Reader) or (r Reader)
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "parameter_declaration" {
+            // Get the type from the parameter (skip the identifier which is the receiver name)
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                // Match actual type nodes, not identifiers (which could be receiver name)
+                let kind = inner_child.kind();
+                if kind != "identifier"
+                    && (kind == "type_identifier"
+                        || kind == "pointer_type"
+                        || kind == "slice_type"
+                        || kind == "array_type"
+                        || kind == "map_type"
+                        || kind == "qualified_type"
+                        || kind == "generic_type")
+                {
+                    return Some(extract_type_string(inner_child, source));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn extract_type_params(node: tree_sitter::Node, source: &str, generics: &mut Vec<String>) {
@@ -607,6 +706,86 @@ fn infer_const_type(node: tree_sitter::Node) -> String {
         }
     }
     "untyped".to_string()
+}
+
+fn extract_var_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "var_spec" => {
+                extract_var_spec(child, source, pkg);
+            }
+            "var_spec_list" => {
+                // For var blocks: var ( ... )
+                let mut inner_cursor = child.walk();
+                for inner_child in child.children(&mut inner_cursor) {
+                    if inner_child.kind() == "var_spec" {
+                        extract_var_spec(inner_child, source, pkg);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_var_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+    let mut names = Vec::new();
+    let mut ty = String::new();
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "identifier" => {
+                names.push(node_text(child, source).to_string());
+            }
+            "expression_list" => {
+                // Try to infer type from expression (e.g., function call)
+                if ty.is_empty() {
+                    ty = infer_var_type_from_expr(child, source, pkg);
+                }
+            }
+            _ if is_type_node(child.kind()) => {
+                ty = extract_type_string(child, source);
+            }
+            _ => {}
+        }
+    }
+
+    // Only add exported variables with known types
+    if !ty.is_empty() {
+        for name in names {
+            if is_exported(&name) {
+                pkg.variables.insert(
+                    name.clone(),
+                    VarDef {
+                        name,
+                        ty: ty.clone(),
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// Try to infer variable type from initialization expression
+fn infer_var_type_from_expr(node: tree_sitter::Node, source: &str, pkg: &GoPackage) -> String {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "call_expression" {
+            // Get the function being called
+            if let Some(func_node) = child.child_by_field_name("function") {
+                let func_name = node_text(func_node, source);
+                // Look up the function's return type in the package
+                if let Some(func_def) = pkg.functions.get(func_name)
+                    && !func_def.return_type.is_empty()
+                {
+                    return func_def.return_type.clone();
+                }
+            }
+        }
+    }
+    String::new()
 }
 
 fn extract_type_string(node: tree_sitter::Node, source: &str) -> String {
@@ -962,5 +1141,109 @@ type Shape interface {{
         assert_eq!(point.fields.len(), 0);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_var_block() {
+        let dir = std::env::temp_dir().join("soppo-var-block-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("test.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+type File struct {{}}
+
+func NewFile() *File {{ return nil }}
+
+var (
+    Stdin  = NewFile()
+    Stdout = NewFile()
+)
+
+var Single = NewFile()
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+
+        assert!(
+            pkg.functions.contains_key("NewFile"),
+            "NewFile should exist"
+        );
+        assert_eq!(pkg.functions["NewFile"].return_type, "*File");
+        assert!(pkg.variables.contains_key("Stdin"), "Stdin should exist");
+        assert!(pkg.variables.contains_key("Stdout"), "Stdout should exist");
+        assert!(pkg.variables.contains_key("Single"), "Single should exist");
+        assert_eq!(pkg.variables["Stdin"].ty, "*File");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_os_stdin() {
+        use std::process::Command;
+
+        // Get GOROOT
+        let output = Command::new("go").args(["env", "GOROOT"]).output().unwrap();
+        let goroot = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        let os_path = std::path::PathBuf::from(&goroot).join("src/os");
+        let pkg = extract(&os_path).unwrap();
+
+        // os package should have NewFile function and Stdin variable
+        assert!(
+            pkg.functions.contains_key("NewFile"),
+            "NewFile should exist"
+        );
+        assert!(pkg.variables.contains_key("Stdin"), "Stdin should exist");
+        assert_eq!(pkg.variables["Stdin"].ty, "*File");
+    }
+
+    #[test]
+    fn test_extract_bufio_methods() {
+        use std::process::Command;
+
+        // Get GOROOT
+        let output = Command::new("go").args(["env", "GOROOT"]).output().unwrap();
+        let goroot = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        let bufio_path = std::path::PathBuf::from(&goroot).join("src/bufio");
+        let pkg = extract(&bufio_path).unwrap();
+
+        println!("\n=== Types ===");
+        for name in pkg.types.keys() {
+            println!("  {}", name);
+        }
+
+        println!("\n=== Methods ===");
+        for (receiver, methods) in &pkg.methods {
+            println!("  {} has {} methods:", receiver, methods.len());
+            for m in methods.iter().take(5) {
+                println!("    - {} -> {}", m.name, m.return_type);
+            }
+        }
+
+        // bufio should have Reader type with ReadString method
+        assert!(pkg.types.contains_key("Reader"), "Reader type should exist");
+        assert!(
+            pkg.methods.contains_key("Reader"),
+            "Reader should have methods"
+        );
+
+        let reader_methods = &pkg.methods["Reader"];
+        let read_string = reader_methods.iter().find(|m| m.name == "ReadString");
+        assert!(read_string.is_some(), "ReadString method should exist");
+
+        let read_string = read_string.unwrap();
+        println!(
+            "\nReadString: params={:?}, return={}",
+            read_string.params, read_string.return_type
+        );
     }
 }

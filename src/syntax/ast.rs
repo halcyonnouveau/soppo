@@ -279,6 +279,8 @@ pub enum ExprKind {
     Integer(i64),
     Float(f64),
     String(String),
+    /// Rune literal: 'a', '\n', etc. - stores the raw character content
+    Rune(String),
     /// Interpolated string: "Hello, {name}!"
     StringInterpolation(Vec<StringPart>),
     Bool(bool),

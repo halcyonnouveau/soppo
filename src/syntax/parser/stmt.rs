@@ -682,8 +682,16 @@ impl Parser {
                     self.pos = saved_pos;
                 }
 
-                // Regular for loop with condition
-                let condition = self.parse_expr()?;
+                // Regular for loop with condition, or infinite loop (for { })
+                let condition = if matches!(self.peek(), Some(Token::LBrace)) {
+                    // Infinite loop: for { } - use true as condition
+                    Expr {
+                        span: start_span,
+                        kind: ExprKind::Bool(true),
+                    }
+                } else {
+                    self.parse_expr()?
+                };
                 let body = self.parse_block()?;
 
                 Ok(Stmt {

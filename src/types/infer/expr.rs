@@ -17,6 +17,8 @@ impl Infer {
 
             ExprKind::String(_) => Ok(Type::simple("string")),
 
+            ExprKind::Rune(_) => Ok(Type::simple("rune")),
+
             ExprKind::StringInterpolation(parts) => {
                 // Type check each interpolated expression
                 for part in parts {
@@ -539,6 +541,13 @@ impl Infer {
             && let Some(field_ty) = self.lookup_go_struct_field(module_name, struct_name, field)
         {
             return Ok(field_ty);
+        }
+
+        // Check if this is a method call on a Go package type
+        if let (Some(struct_name), Some(module_name)) = (&struct_name, &module_name)
+            && let Some(method_ty) = self.lookup_go_method(module_name, struct_name, field)
+        {
+            return Ok(method_ty);
         }
 
         if let Some(struct_name) = &struct_name {

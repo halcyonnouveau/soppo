@@ -46,6 +46,16 @@ impl Infer {
             return Ok(());
         }
 
+        // Check if expected type is "error" which is a built-in interface
+        if matches!(&t1, Type::Con { name, .. } if name.name == "error" || name.name == "?error") {
+            return Ok(());
+        }
+
+        // Check if expected type is an interface from a Go package
+        if self.is_go_interface_type(&t1) {
+            return Ok(());
+        }
+
         match (&t1, &t2) {
             // Never type unifies with anything (it's bottom type)
             (Type::Never, _) | (_, Type::Never) => Ok(()),

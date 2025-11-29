@@ -322,10 +322,92 @@ impl Infer {
         let return_type = if func_def.return_type.is_empty() {
             Type::unit()
         } else {
-            parse_go_type(&func_def.return_type)
+            // Parse the return type and set module for types from this package
+            Self::parse_go_type_with_module(&func_def.return_type, package_name)
         };
 
         Some(Type::fun(param_types, return_type))
+    }
+
+    /// Parse a Go type string and set the module for types that are from the given package
+    fn parse_go_type_with_module(type_str: &str, package_name: &str) -> Type {
+        let ty = parse_go_type(type_str);
+        Self::set_module_recursive(ty, package_name)
+    }
+
+    /// Recursively set the module on types that don't already have one
+    fn set_module_recursive(ty: Type, package_name: &str) -> Type {
+        match ty {
+            Type::Con {
+                name,
+                args,
+                nullable,
+            } => {
+                // Set module if empty and this looks like a type from the package
+                // (not a built-in like int, string, etc.)
+                let is_builtin = matches!(
+                    name.name.as_str(),
+                    "int"
+                        | "int8"
+                        | "int16"
+                        | "int32"
+                        | "int64"
+                        | "uint"
+                        | "uint8"
+                        | "uint16"
+                        | "uint32"
+                        | "uint64"
+                        | "uintptr"
+                        | "float32"
+                        | "float64"
+                        | "complex64"
+                        | "complex128"
+                        | "bool"
+                        | "string"
+                        | "byte"
+                        | "rune"
+                        | "error"
+                        | "any"
+                );
+
+                let new_module = if name.module.0.is_empty()
+                    && !is_builtin
+                    && !name.name.starts_with("[]")
+                    && !name.name.starts_with("map[")
+                    && !name.name.starts_with("chan ")
+                {
+                    ModuleId::new(package_name)
+                } else {
+                    name.module
+                };
+
+                Type::Con {
+                    name: Symbol {
+                        module: new_module,
+                        name: name.name,
+                        span: name.span,
+                    },
+                    args: args
+                        .into_iter()
+                        .map(|a| Self::set_module_recursive(a, package_name))
+                        .collect(),
+                    nullable,
+                }
+            }
+            Type::Fun {
+                args,
+                ret,
+                nullable,
+            } => Type::Fun {
+                args: args
+                    .into_iter()
+                    .map(|a| Self::set_module_recursive(a, package_name))
+                    .collect(),
+                ret: Box::new(Self::set_module_recursive(*ret, package_name)),
+                nullable,
+            },
+            other => other,
+        }
     }
 
     /// Look up a type in an imported Go package
@@ -384,6 +466,11 @@ impl Infer {
             return Some(parse_go_type(const_ty));
         }
 
+        // Check if it's a variable (e.g., os.Stdin, os.Stdout)
+        if let Some(var_def) = pkg.variables.get(type_name) {
+            return Some(parse_go_type(&var_def.ty));
+        }
+
         None
     }
 
@@ -434,9 +521,90 @@ impl Infer {
         Some(field_ty)
     }
 
+    /// Look up a method on a Go type
+    /// Returns the method type as a function type
+    pub(super) fn lookup_go_method(
+        &mut self,
+        package_name: &str,
+        type_name: &str,
+        method_name: &str,
+    ) -> Option<Type> {
+        let import_path = self.imported_packages.get(package_name)?.clone();
+
+        let pkg = self
+            .go_cache
+            .get_or_parse(&import_path, self.project.as_ref())
+            .ok()?;
+
+        // Look up methods for this type (methods are stored by base type name without *)
+        let base_type = type_name.strip_prefix('*').unwrap_or(type_name);
+        let methods = pkg.methods.get(base_type)?;
+
+        // Find the method
+        let method = methods.iter().find(|m| m.name == method_name)?;
+
+        // Build the function type
+        let param_tys: Vec<Type> = method.params.iter().map(|p| parse_go_type(&p.ty)).collect();
+        let return_ty = if method.return_type.is_empty() {
+            Type::unit()
+        } else {
+            parse_go_type(&method.return_type)
+        };
+
+        Some(Type::fun(param_tys, return_ty))
+    }
+
     /// Check if a name refers to an imported Go package
     pub(super) fn is_imported_package(&self, name: &str) -> bool {
         self.imported_packages.contains_key(name)
+    }
+
+    /// Check if a type is an interface from a Go package
+    /// Returns true if the type is defined as an interface in its source package
+    pub(super) fn is_go_interface_type(&mut self, ty: &Type) -> bool {
+        let (type_name, package_name) = match ty {
+            Type::Con { name, .. } => {
+                // Skip built-in types that aren't from a package
+                let pkg = if name.module.0.is_empty() {
+                    return false;
+                } else {
+                    name.module.0.clone()
+                };
+                // Strip nullable prefix if present
+                let ty_name = name
+                    .name
+                    .strip_prefix('?')
+                    .unwrap_or(&name.name)
+                    .to_string();
+                (ty_name, pkg)
+            }
+            _ => return false,
+        };
+
+        // Get the import path for this package
+        // First check if it's explicitly imported, otherwise try the package name directly
+        // (for stdlib packages that are dependencies of imported packages)
+        let import_path = self
+            .imported_packages
+            .get(&package_name)
+            .cloned()
+            .unwrap_or_else(|| package_name.clone());
+
+        // Try to get the package info
+        let pkg = match self
+            .go_cache
+            .get_or_parse(&import_path, self.project.as_ref())
+        {
+            Ok(pkg) => pkg,
+            Err(_) => return false,
+        };
+
+        // Look up the type and check if it's an interface
+        if let Some(type_def) = pkg.types.get(&type_name) {
+            return type_def.kind == "interface";
+        }
+
+        false
     }
 
     /// Get the ultimate underlying type for a type alias chain.
@@ -899,6 +1067,70 @@ impl Infer {
 mod tests {
     use super::*;
     use crate::syntax::{Decl, FileId, Parser};
+
+    #[test]
+    fn test_is_go_interface_type() {
+        let mut infer = Infer::new().unwrap();
+
+        // Import io package to look up Reader interface
+        infer
+            .imported_packages
+            .insert("io".to_string(), "io".to_string());
+
+        // io.Reader is an interface
+        let reader_type = Type::Con {
+            name: Symbol {
+                module: ModuleId::new("io"),
+                name: "Reader".to_string(),
+                span: Span::dummy(),
+            },
+            args: vec![],
+            nullable: false,
+        };
+        assert!(infer.is_go_interface_type(&reader_type));
+
+        // io.Writer is an interface
+        let writer_type = Type::Con {
+            name: Symbol {
+                module: ModuleId::new("io"),
+                name: "Writer".to_string(),
+                span: Span::dummy(),
+            },
+            args: vec![],
+            nullable: false,
+        };
+        assert!(infer.is_go_interface_type(&writer_type));
+
+        // Primitive types are not interfaces
+        let int_type = Type::simple("int");
+        assert!(!infer.is_go_interface_type(&int_type));
+
+        // Types without module are not checked
+        let no_module = Type::simple("Reader");
+        assert!(!infer.is_go_interface_type(&no_module));
+    }
+
+    #[test]
+    fn test_is_go_interface_type_indirect_import() {
+        let mut infer = Infer::new().unwrap();
+
+        // Only import bufio, not io
+        infer
+            .imported_packages
+            .insert("bufio".to_string(), "bufio".to_string());
+
+        // io.Reader should still be detected as interface (stdlib fallback)
+        let reader_type = Type::Con {
+            name: Symbol {
+                module: ModuleId::new("io"),
+                name: "Reader".to_string(),
+                span: Span::dummy(),
+            },
+            args: vec![],
+            nullable: false,
+        };
+        assert!(infer.is_go_interface_type(&reader_type));
+    }
 
     #[test]
     fn test_import_tracking() {

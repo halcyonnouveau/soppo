@@ -1,0 +1,23 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+// Tests Go package variable lookup (os.Stdin, os.Stdout, os.Stderr)
+import "fmt"
+import "os"
+
+func main() {
+    // Package-level variables from os
+    stdin := os.Stdin
+    stdout := os.Stdout
+    stderr := os.Stderr
+    // These are *os.File types
+    _ = stdin
+    _ = stdout
+    _ = stderr
+    // Use stdout for printing
+    fmt.Fprintln(os.Stdout, "Hello via os.Stdout")
+}

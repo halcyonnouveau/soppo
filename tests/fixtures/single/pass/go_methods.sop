@@ -1,0 +1,16 @@
+// Tests method calls on Go types from stdlib
+package main
+
+import "bufio"
+import "os"
+import "strings"
+
+func main() {
+    // Method call on bufio.Reader (returned from bufio.NewReader)
+    reader := bufio.NewReader(os.Stdin).(!nil)
+    text, _ := reader.ReadString('\n')
+
+    // Method call on result of strings.TrimSpace
+    trimmed := strings.TrimSpace(text)
+    _ = trimmed
+}
