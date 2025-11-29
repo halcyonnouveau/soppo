@@ -103,6 +103,7 @@ pub enum EnumVariant {
 pub struct Field {
     pub name: String,
     pub ty: Type,
+    pub tag: Option<String>,
     pub span: Span,
 }
 

@@ -36,6 +36,16 @@ impl Infer {
         let t1 = self.resolve_alias(self.substitute(t1.clone()));
         let t2 = self.resolve_alias(self.substitute(t2.clone()));
 
+        // Check if either type is `any` (Go's interface{})
+        // any accepts any type, so unification always succeeds
+        let is_any = |ty: &Type| -> bool {
+            matches!(ty, Type::Con { name, .. } if name.name == "any" || name.name == "?any" || name.name == "interface{}")
+        };
+
+        if is_any(&t1) || is_any(&t2) {
+            return Ok(());
+        }
+
         match (&t1, &t2) {
             // Never type unifies with anything (it's bottom type)
             (Type::Never, _) | (_, Type::Never) => Ok(()),

@@ -83,6 +83,13 @@ pub enum Token {
     })]
     String(String),
 
+    // Raw string (backtick): `...` - no escape processing, can span lines
+    #[regex(r"`[^`]*`", |lex| {
+        let s = lex.slice();
+        s[1..s.len()-1].to_string()
+    })]
+    RawString(String),
+
     // Operators
     #[token("+")]
     Plus,

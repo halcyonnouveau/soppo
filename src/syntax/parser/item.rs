@@ -399,9 +399,22 @@ impl Parser {
 
         let ty = self.parse_type()?;
 
+        // Parse optional struct tag (backtick string)
+        let tag = match self.peek() {
+            Some(Token::RawString(_)) => {
+                if let Some((Token::RawString(s), _)) = self.advance() {
+                    Some(s)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
         Ok(Field {
             name,
             ty,
+            tag,
             span: name_span,
         })
     }

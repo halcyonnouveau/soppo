@@ -257,10 +257,16 @@ impl Codegen {
                 EnumVariant::Struct { name, fields, .. } => {
                     self.emit_line(&format!("    {} {{", name));
                     for field in fields {
+                        let tag = field
+                            .tag
+                            .as_ref()
+                            .map(|t| format!(" `{}`", t))
+                            .unwrap_or_default();
                         self.emit_line(&format!(
-                            "        {} {}",
+                            "        {} {}{}",
                             field.name,
-                            self.go_type(&field.ty.name)
+                            self.go_type(&field.ty.name),
+                            tag
                         ));
                     }
                     self.emit_line("    }");

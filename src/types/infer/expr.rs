@@ -854,8 +854,34 @@ impl Infer {
         }
 
         // Check if this is a type conversion: TypeName(value) or pkg.TypeName(value)
+        // Built-in types that can be used for type conversion
+        let is_builtin_type = |name: &str| -> bool {
+            matches!(
+                name,
+                "string"
+                    | "int"
+                    | "int8"
+                    | "int16"
+                    | "int32"
+                    | "int64"
+                    | "uint"
+                    | "uint8"
+                    | "uint16"
+                    | "uint32"
+                    | "uint64"
+                    | "uintptr"
+                    | "byte"
+                    | "rune"
+                    | "float32"
+                    | "float64"
+                    | "bool"
+                    | "complex64"
+                    | "complex128"
+            )
+        };
+
         if let ExprKind::Ident(type_name) = &func.kind
-            && self.global_state.has_type(type_name)
+            && (self.global_state.has_type(type_name) || is_builtin_type(type_name))
         {
             // This is a type conversion, not a function call
             // Type conversions take exactly one argument

@@ -33,6 +33,7 @@ mod pass {
         simple_add,
         string_interpolation,
         struct_match,
+        struct_tags,
         try_operator,
         type_alias,
     );

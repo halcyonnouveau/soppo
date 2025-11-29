@@ -115,10 +115,16 @@ impl Codegen {
                             ));
                             self.indent();
                             for field in fields {
+                                let tag = field
+                                    .tag
+                                    .as_ref()
+                                    .map(|t| format!(" `{}`", t))
+                                    .unwrap_or_default();
                                 self.emit_line(&format!(
-                                    "{} {}",
+                                    "{} {}{}",
                                     field.name,
-                                    self.go_type(&field.ty.name)
+                                    self.go_type(&field.ty.name),
+                                    tag
                                 ));
                             }
                             self.dedent();
@@ -228,7 +234,15 @@ impl Codegen {
                 for field in fields {
                     let go_type = self.go_type_from_ast(&field.ty);
                     let nilable_comment = self.nilable_comment(&field.ty);
-                    self.emit_line(&format!("{} {}{}", field.name, go_type, nilable_comment));
+                    let tag = field
+                        .tag
+                        .as_ref()
+                        .map(|t| format!(" `{}`", t))
+                        .unwrap_or_default();
+                    self.emit_line(&format!(
+                        "{} {}{}{}",
+                        field.name, go_type, tag, nilable_comment
+                    ));
                 }
                 self.dedent();
                 self.emit_line("}");
