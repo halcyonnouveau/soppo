@@ -3,6 +3,7 @@ name: CI
 permissions:
   pull-requests: write
   contents: write
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
