@@ -364,14 +364,16 @@ impl Codegen {
                 stmt: inner_stmt,
                 error_name,
                 handler,
+                discard_count,
                 ..
             } => {
                 // Generate the inner statement with error capture
                 let err_var = self.fresh_error_var();
+                let discard = discard_count.get();
 
                 // Emit the inner statement with error variable added
                 self.emit_indent();
-                self.gen_try_inner_stmt(inner_stmt, &err_var);
+                self.gen_try_inner_stmt(inner_stmt, &err_var, discard);
                 self.emit("\n");
 
                 // Generate error check: if err != nil { ... }
@@ -424,8 +426,8 @@ impl Codegen {
     /// Generate inner statement with error capture for ? operator
     /// Transforms: x := f() -> x, _err := f()
     /// Transforms: x = f()  -> x, _err = f()
-    /// Transforms: f()      -> _, _err := f()
-    fn gen_try_inner_stmt(&mut self, stmt: &Stmt, err_var: &str) {
+    /// Transforms: f()      -> _, _err := f() (with appropriate number of _ for multi-return)
+    fn gen_try_inner_stmt(&mut self, stmt: &Stmt, err_var: &str, discard_count: usize) {
         match &stmt.kind {
             StmtKind::Decl { name, value } => {
                 // x := f() -> x, _err := f()
@@ -456,9 +458,15 @@ impl Codegen {
                 self.gen_expr(&values[0]);
             }
             StmtKind::Expr(expr) => {
-                // f() -> _err := f() for error-only returns like deleteFile()
-                // Note: If function returns multiple values, user should use declaration form
-                self.emit(&format!("{} := ", err_var));
+                // f() -> _err := f() for error-only returns
+                // f() -> _, _err := f() for (T, error) returns
+                // f() -> _, _, _err := f() for (T, U, error) returns
+                if discard_count > 0 {
+                    let blanks = vec!["_"; discard_count].join(", ");
+                    self.emit(&format!("{}, {} := ", blanks, err_var));
+                } else {
+                    self.emit(&format!("{} := ", err_var));
+                }
                 self.gen_expr(expr);
             }
             _ => {

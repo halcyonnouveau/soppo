@@ -832,6 +832,7 @@ impl Infer {
                 error_name,
                 handler,
                 try_span,
+                discard_count,
             } => {
                 // Check current function returns error as last type
                 let return_types = self
@@ -895,7 +896,22 @@ impl Infer {
                     }
                     StmtKind::Expr(expr) => {
                         let expr_ty = self.infer_expr(expr)?;
-                        (self.substitute(expr_ty), expr.span)
+                        let expr_ty_sub = self.substitute(expr_ty);
+
+                        // Calculate how many non-error values to discard
+                        // For tuple[T, error] -> 1, for tuple[T, U, error] -> 2, for error -> 0
+                        let count = if let Type::Con { name, args, .. } = &expr_ty_sub
+                            && name.name == "tuple"
+                        {
+                            // Count non-error args (all except the last one which is error)
+                            args.len().saturating_sub(1)
+                        } else {
+                            // Single error return
+                            0
+                        };
+                        discard_count.set(count);
+
+                        (expr_ty_sub, expr.span)
                     }
                     _ => {
                         return Err(SoppoError::Type {

@@ -160,6 +160,34 @@ func tryWithStructReturn() (User, error) {
     return *user, nil
 }
 
+// === ? with bare expression discarding return values ===
+
+func multiReturnNoCapture(s string) (int, error) {
+    return len(s), nil
+}
+
+func threeReturnNoCapture(s string) (int, string, error) {
+    return len(s), s, nil
+}
+
+func discardSingleReturn() error {
+    // f() ? where f returns (int, error) - should generate: _, _err := f()
+    multiReturnNoCapture("test") ?
+    return nil
+}
+
+func discardMultipleReturns() error {
+    // f() ? where f returns (int, string, error) - should generate: _, _, _err := f()
+    threeReturnNoCapture("test") ?
+    return nil
+}
+
+func discardErrorOnly() error {
+    // f() ? where f returns just error - should generate: _err := f()
+    deleteFile("/tmp/test") ?
+    return nil
+}
+
 func main() {
     simplePropagate()
     customHandler()
@@ -174,4 +202,7 @@ func main() {
     tryWithIntReturn()
     tryWithStringReturn()
     tryWithStructReturn()
+    discardSingleReturn()
+    discardMultipleReturns()
+    discardErrorOnly()
 }

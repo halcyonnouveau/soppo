@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use super::lexer::Comment;
 use super::source::Span;
 
@@ -255,6 +257,10 @@ pub enum StmtKind {
         error_name: Option<String>,
         handler: Option<Block>,
         try_span: Span,
+        /// Number of non-error return values to discard (set by type checker)
+        /// For `f() ?` where f returns `(T, error)`, this is 1
+        /// For `f() ?` where f returns just `error`, this is 0
+        discard_count: Cell<usize>,
     },
 }
 

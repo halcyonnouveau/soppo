@@ -1,4 +1,3 @@
-// A simple HTTP server demonstrating Go stdlib integration
 package main
 
 import "fmt"
@@ -12,8 +11,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 
 // Handler for /hello with query parameter
 func handleHello(w http.ResponseWriter, r *http.Request) {
-    // Assert r and r.URL are non-nil (HTTP handlers always get valid requests)
-    name := r.(!nil).URL.(!nil).Query().Get("name")
+    name := r.URL.(!nil).Query().Get("name")
     if name == "" {
         name = "Anonymous"
     }
@@ -27,7 +25,6 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-    // Register handlers using function references (not inline functions)
     http.HandleFunc("/", handleHome)
     http.HandleFunc("/hello", handleHello)
     http.HandleFunc("/health", handleHealth)

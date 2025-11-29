@@ -860,16 +860,14 @@ fn extract_type_string(node: tree_sitter::Node, source: &str) -> String {
         "interface_type" => "interface{}".to_string(),
         "struct_type" => "struct{}".to_string(),
         "parameter_list" => {
-            // Multiple return values
+            // Multiple return values - extract only the type from each parameter_declaration
             let mut types = Vec::new();
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "parameter_declaration" {
-                    let mut inner_cursor = child.walk();
-                    for inner_child in child.children(&mut inner_cursor) {
-                        if is_type_node(inner_child.kind()) {
-                            types.push(extract_type_string(inner_child, source));
-                        }
+                    // Use the "type" field to get only the type, not the name
+                    if let Some(ty) = child.child_by_field_name("type") {
+                        types.push(extract_type_string(ty, source));
                     }
                 }
             }
@@ -1309,5 +1307,72 @@ var Single = NewFile()
             "\nReadString: params={:?}, return={}",
             read_string.params, read_string.return_type
         );
+    }
+
+    #[test]
+    fn test_extract_named_return_values() {
+        // Regression test: named return values like (n int, err error) should be
+        // extracted as just the types (int, error), not (n, int, err, error)
+        let dir = std::env::temp_dir().join("soppo-named-return-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("test.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+func SingleNamedReturn(s string) (n int) {{
+    return len(s)
+}}
+
+func MultiNamedReturn(s string) (n int, err error) {{
+    return len(s), nil
+}}
+
+func ThreeNamedReturns(s string) (a int, b string, c error) {{
+    return 0, s, nil
+}}
+
+func MixedReturn(s string) (int, error) {{
+    return len(s), nil
+}}
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+
+        // Single named return should be just "int", not "n int" or similar
+        let single = &pkg.functions["SingleNamedReturn"];
+        assert_eq!(
+            single.return_type, "int",
+            "Single named return should extract type only"
+        );
+
+        // Multiple named returns should be "(int, error)", not "(n, int, err, error)"
+        let multi = &pkg.functions["MultiNamedReturn"];
+        assert_eq!(
+            multi.return_type, "(int, error)",
+            "Multi named return should extract types only"
+        );
+
+        // Three named returns
+        let three = &pkg.functions["ThreeNamedReturns"];
+        assert_eq!(
+            three.return_type, "(int, string, error)",
+            "Three named returns should extract types only"
+        );
+
+        // Unnamed returns should still work
+        let mixed = &pkg.functions["MixedReturn"];
+        assert_eq!(
+            mixed.return_type, "(int, error)",
+            "Unnamed returns should work"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{Block, Expr, ExprKind, SelectCase, SelectCaseKind, Stmt, StmtKind};
@@ -46,6 +48,7 @@ impl Parser {
                     error_name,
                     handler,
                     try_span,
+                    discard_count: Cell::new(0),
                 },
                 span: Span::with_bytes(
                     stmt_span.start,
