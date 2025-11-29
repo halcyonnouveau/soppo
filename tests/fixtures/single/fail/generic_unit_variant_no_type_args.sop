@@ -1,0 +1,13 @@
+package main
+
+import "fmt"
+
+type Option[T any] enum {
+	Some T
+	None
+}
+
+func main() {
+	y := Option.None
+	fmt.Println(y)
+}

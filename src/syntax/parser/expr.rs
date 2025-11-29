@@ -158,9 +158,10 @@ impl Parser {
                         }
                     }
 
-                    // Check if ] followed by (
+                    // Check if ] followed by ( or if this is a type instantiation for unit variant
                     if is_type_args && matches!(self.peek(), Some(Token::RBracket)) {
-                        self.advance(); // consume ]
+                        let bracket_end_span = self.expect(Token::RBracket)?;
+
                         if matches!(self.peek(), Some(Token::LParen)) {
                             // This is type args + call: expr[T](args)
                             self.advance(); // consume (
@@ -210,9 +211,33 @@ impl Parser {
                             };
                             continue;
                         }
+
+                        // No call - check if this is a type instantiation for unit enum variant
+                        // Pattern: Type.Variant[TypeArgs] without ()
+                        // This allows Option.None[int] syntax
+                        if !type_args.is_empty() && matches!(expr.kind, ExprKind::Field { .. }) {
+                            // This is a type instantiation: expr[types] -> treat as call with no args
+                            expr = Expr {
+                                span: Span::with_bytes(
+                                    expr.span.start,
+                                    bracket_end_span.end,
+                                    self.file,
+                                    expr.span.byte_start,
+                                    bracket_end_span.byte_end,
+                                ),
+                                kind: ExprKind::Call {
+                                    func: Box::new(expr),
+                                    type_args,
+                                    args: vec![],
+                                },
+                            };
+                            continue;
+                        }
+
+                        // Not a type instantiation - fall through to index parsing
                     }
 
-                    // Not type args - backtrack and parse as array index or slice
+                    // Not type args or not a type instantiation - backtrack and parse as array index or slice
                     self.pos = saved_pos;
                     self.advance(); // consume the [ we backtracked past
 

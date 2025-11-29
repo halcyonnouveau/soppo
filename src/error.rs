@@ -141,6 +141,18 @@ pub enum SoppoError {
         /// List of (source_file, import_path) pairs forming the cycle
         cycle: Vec<(String, String)>,
     },
+
+    #[error("Generic unit variant `{enum_name}.{variant_name}` requires type arguments")]
+    #[diagnostic(
+        code(soppo::generic_unit_variant),
+        help("use `{enum_name}.{variant_name}[T]` syntax")
+    )]
+    GenericUnitVariant {
+        enum_name: String,
+        variant_name: String,
+        #[label("missing type arguments")]
+        span: Span,
+    },
 }
 
 fn format_cycle(cycle: &[(String, String)]) -> String {

@@ -478,9 +478,23 @@ impl Infer {
                         if variant_name == field {
                             // Found the variant
                             return match variant {
-                                EnumVariant::Unit { .. } => {
-                                    // Unit variant: just returns the enum type
-                                    Ok(Type::simple(type_name))
+                                EnumVariant::Unit {
+                                    name: variant_name, ..
+                                } => {
+                                    // Unit variant: for non-generic enums, return the enum type directly
+                                    // For generic enums, error - they must be accessed via call syntax
+                                    // with type args: Option.None[int]
+                                    if type_def.generics.is_empty() {
+                                        Ok(Type::simple(type_name))
+                                    } else {
+                                        // Generic unit variant accessed without call syntax
+                                        // This generates invalid Go (can't reference generic func without instantiation)
+                                        Err(SoppoError::GenericUnitVariant {
+                                            enum_name: type_name.clone(),
+                                            variant_name: variant_name.clone(),
+                                            span: *field_span,
+                                        })
+                                    }
                                 }
                                 EnumVariant::Single { ty, .. } => {
                                     // Single variant: returns a constructor function
@@ -695,6 +709,37 @@ impl Infer {
         args: &[(Option<(String, Span)>, Expr)],
         expr_span: &Span,
     ) -> Result<Type> {
+        // Handle generic unit variant calls: Option.None[int]
+        // Must be handled BEFORE infer_expr(func) since bare generic unit variants are invalid
+        if let ExprKind::Field {
+            expr: type_expr,
+            field: variant_name,
+            ..
+        } = &func.kind
+            && let ExprKind::Ident(type_name) = &type_expr.kind
+            && let Some(type_def) = self.global_state.lookup_type(type_name).cloned()
+            && let TypeDefKind::Enum { variants } = &type_def.kind
+        {
+            // Check if this is a unit variant of a generic enum
+            for variant in variants {
+                if let EnumVariant::Unit { name, .. } = variant
+                    && name == variant_name
+                    && !type_def.generics.is_empty()
+                {
+                    // This is a generic unit variant call
+                    if type_args.is_empty() {
+                        return Err(SoppoError::GenericUnitVariant {
+                            enum_name: type_name.clone(),
+                            variant_name: variant_name.clone(),
+                            span: func.span,
+                        });
+                    }
+                    // Return the enum type - args are handled by codegen
+                    return Ok(Type::simple(type_name));
+                }
+            }
+        }
+
         // Handle Go built-in functions
         if let ExprKind::Ident(name) = &func.kind {
             // close(channel) - closes a channel, returns unit

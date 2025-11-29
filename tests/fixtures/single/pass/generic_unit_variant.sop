@@ -1,0 +1,16 @@
+package main
+
+import "fmt"
+
+type Option[T any] enum {
+	Some T
+	None
+}
+
+func main() {
+	// Generic unit variant with explicit type args
+	none := Option.None[int]
+	some := Option.Some(42)
+
+	fmt.Printf("%v %v\n", none, some)
+}

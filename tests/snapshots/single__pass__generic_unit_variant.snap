@@ -1,0 +1,41 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+/*soppo:enum
+Option[T] {
+    Some T
+    None
+}
+*/
+type Option[T any] interface {
+    isOption()
+}
+
+type Option_Some[T any] struct {
+    Value T
+}
+func (Option_Some[T]) isOption() {}
+
+type Option_None[T any] struct {}
+func (Option_None[T]) isOption() {}
+func (Option_None[T]) String() string { return "None" }
+
+func OptionSome[T any](value T) Option[T] {
+    return Option_Some[T]{Value: value}
+}
+func OptionNone[T any]() Option[T] {
+    return Option_None[T]{}
+}
+
+func main() {
+    // Generic unit variant with explicit type args
+    none := OptionNone[int]()
+    some := OptionSome(42)
+    fmt.Printf("%v %v\n", none, some)
+}
