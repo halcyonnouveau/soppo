@@ -21,7 +21,7 @@ pub fn compile_soppo_file(input_file: &str) -> Result<String, String> {
 
     let output = Command::new("cargo")
         .env("RUSTFLAGS", "-A warnings")
-        .args(&["run", "--quiet", "--bin", "sop", "--", "build", input_file])
+        .args(["run", "--quiet", "--bin", "sop", "--", "build", input_file])
         .output()
         .expect("Failed to run sop");
 
@@ -29,7 +29,7 @@ pub fn compile_soppo_file(input_file: &str) -> Result<String, String> {
         let go_code = fs::read_to_string(&output_file).expect("Failed to read generated .go file");
 
         let vet_output = Command::new("go")
-            .args(&["vet", &output_file])
+            .args(["vet", &output_file])
             .output()
             .expect("Failed to run go vet");
 

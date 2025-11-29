@@ -524,7 +524,7 @@ import "github.com/other/lib"
 func main() {}"#,
         );
 
-        let graph = DepGraph::build(&[main.clone()], root, TEST_MODULE).unwrap();
+        let graph = DepGraph::build(std::slice::from_ref(&main), root, TEST_MODULE).unwrap();
         // Should have no dependencies (Go imports are ignored)
         assert!(!graph.has_sop_deps(&main));
     }
