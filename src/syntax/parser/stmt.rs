@@ -693,82 +693,154 @@ impl Parser {
             Some(Token::If) => {
                 self.advance();
 
-                // Check for if-let pattern: if x := expr.(Variant) { ... }
-                // We need to look ahead to see if this is `ident :=` or `_ :=`
+                // Check for if-init: if x := expr; cond { } or if x, ok := expr; cond { }
                 let saved_pos = self.pos;
 
-                // Handle both regular identifiers and underscore as binding
-                let binding = match self.peek() {
-                    Some(Token::Ident(name)) => Some(name.clone()),
-                    Some(Token::Underscore) => Some("_".to_string()),
-                    _ => None,
-                };
+                // Try to parse identifier(s) followed by :=
+                let mut names: Vec<String> = Vec::new();
 
-                if let Some(binding) = binding {
-                    self.advance(); // consume ident or underscore
+                // First identifier or underscore
+                match self.peek() {
+                    Some(Token::Ident(name)) => {
+                        names.push(name.clone());
+                        self.advance();
+                    }
+                    Some(Token::Underscore) => {
+                        names.push("_".to_string());
+                        self.advance();
+                    }
+                    _ => {}
+                }
 
-                    if self.consume(&Token::ColonAssign) {
-                        // Parse the expression after :=
-                        let expr = self.parse_expr()?;
+                // Check for additional identifiers (comma-separated)
+                while !names.is_empty() && self.consume(&Token::Comma) {
+                    match self.peek() {
+                        Some(Token::Ident(name)) => {
+                            names.push(name.clone());
+                            self.advance();
+                        }
+                        Some(Token::Underscore) => {
+                            names.push("_".to_string());
+                            self.advance();
+                        }
+                        _ => {
+                            // Comma but no identifier - backtrack
+                            self.pos = saved_pos;
+                            names.clear();
+                            break;
+                        }
+                    }
+                }
 
-                        // Check if it's a type assertion (if-let pattern)
-                        if let ExprKind::TypeAssert {
-                            expr: inner_expr,
-                            ty,
-                        } = expr.kind
-                        {
-                            // This is if-let: if x := expr.(Variant) { ... }
-                            let then_block = self.parse_block()?;
+                // Check for := after identifiers
+                if !names.is_empty() && self.consume(&Token::ColonAssign) {
+                    // Parse the expression(s) after :=
+                    let mut values: Vec<Expr> = vec![self.parse_expr()?];
 
-                            let else_block = if self.consume(&Token::Else) {
-                                if matches!(self.peek(), Some(Token::If)) {
-                                    let if_stmt = self.parse_stmt()?;
-                                    let span = if_stmt.span;
-                                    Some(Block {
-                                        stmts: vec![if_stmt],
-                                        span,
-                                    })
-                                } else {
-                                    Some(self.parse_block()?)
+                    // Check for additional values (comma-separated)
+                    while self.consume(&Token::Comma) {
+                        values.push(self.parse_expr()?);
+                    }
+
+                    // Check for semicolon (explicit condition) or block (implicit nil check for type assertions)
+                    let has_semicolon = self.consume(&Token::Semicolon);
+
+                    // For type assertions without semicolon, allow implicit nil check
+                    let is_type_assert =
+                        values.len() == 1 && matches!(&values[0].kind, ExprKind::TypeAssert { .. });
+
+                    if has_semicolon || (is_type_assert && self.check(&Token::LBrace)) {
+                        let init_end_span = values.last().unwrap().span;
+
+                        // Build the condition - explicit or implicit nil check
+                        let condition = if has_semicolon {
+                            self.parse_expr()?
+                        } else {
+                            // Implicit condition: x != nil
+                            // Use the first name as the variable to check
+                            let name = names[0].clone();
+                            Expr {
+                                kind: ExprKind::Binary {
+                                    op: crate::syntax::BinOp::Ne,
+                                    left: Box::new(Expr {
+                                        kind: ExprKind::Ident(name),
+                                        span: init_end_span,
+                                    }),
+                                    right: Box::new(Expr {
+                                        kind: ExprKind::Nil,
+                                        span: init_end_span,
+                                    }),
+                                },
+                                span: init_end_span,
+                            }
+                        };
+
+                        let init_stmt = Stmt {
+                            span: Span::with_bytes(
+                                start_span.start,
+                                init_end_span.end,
+                                self.file,
+                                start_span.byte_start,
+                                init_end_span.byte_end,
+                            ),
+                            kind: if names.len() == 1 && values.len() == 1 {
+                                StmtKind::Decl {
+                                    name: names.into_iter().next().unwrap(),
+                                    value: values.into_iter().next().unwrap(),
                                 }
                             } else {
-                                None
-                            };
+                                StmtKind::MultiDecl { names, values }
+                            },
+                        };
 
-                            let end_span = else_block
-                                .as_ref()
-                                .map(|b| b.span)
-                                .unwrap_or(then_block.span);
+                        let then_block = self.parse_block()?;
 
-                            return Ok(Stmt {
-                                span: Span::with_bytes(
-                                    start_span.start,
-                                    end_span.end,
-                                    self.file,
-                                    start_span.byte_start,
-                                    end_span.byte_end,
-                                ),
-                                kind: StmtKind::IfLet {
-                                    binding,
-                                    expr: *inner_expr,
-                                    variant: ty.name,
-                                    then_block,
-                                    else_block,
-                                },
-                            });
+                        let else_block = if self.consume(&Token::Else) {
+                            if matches!(self.peek(), Some(Token::If)) {
+                                let if_stmt = self.parse_stmt()?;
+                                let span = if_stmt.span;
+                                Some(Block {
+                                    stmts: vec![if_stmt],
+                                    span,
+                                })
+                            } else {
+                                Some(self.parse_block()?)
+                            }
                         } else {
-                            // Not a type assertion - error for now
-                            // (Could support init statements later: if x := foo(); cond { })
-                            return Err(SoppoError::Parse {
-                                message: "Expected type assertion in if-let pattern (e.g., `if x := expr.(Variant)`)"
-                                    .to_string(),
-                                span: expr.span,
-                            });
-                        }
+                            None
+                        };
+
+                        let end_span = else_block
+                            .as_ref()
+                            .map(|b| b.span)
+                            .unwrap_or(then_block.span);
+
+                        return Ok(Stmt {
+                            span: Span::with_bytes(
+                                start_span.start,
+                                end_span.end,
+                                self.file,
+                                start_span.byte_start,
+                                end_span.byte_end,
+                            ),
+                            kind: StmtKind::If {
+                                init: Some(Box::new(init_stmt)),
+                                condition,
+                                then_block,
+                                else_block,
+                            },
+                        });
                     } else {
-                        // Not := after ident, backtrack and parse as regular if
-                        self.pos = saved_pos;
+                        // No semicolon and not a type assertion with block - error
+                        return Err(SoppoError::Parse {
+                            message: "Expected `;` after init statement in if (e.g., `if x := expr; cond { }`)"
+                                .to_string(),
+                            span: values.last().unwrap().span,
+                        });
                     }
+                } else {
+                    // Not := after ident(s), backtrack and parse as regular if
+                    self.pos = saved_pos;
                 }
 
                 // Regular if statement
@@ -806,6 +878,7 @@ impl Parser {
                         end_span.byte_end,
                     ),
                     kind: StmtKind::If {
+                        init: None,
                         condition,
                         then_block,
                         else_block,

@@ -98,7 +98,7 @@ impl Infer {
                 type_args,
                 args,
             } => {
-                // Handle built-in make(type, ...), new(type), close(ch)
+                // Handle Go built-in functions
                 if let ExprKind::Ident(name) = &func.kind {
                     // close(channel) - closes a channel, returns unit
                     if name == "close" && args.len() == 1 {
@@ -139,6 +139,254 @@ impl Infer {
                         // Use *{type} naming pattern consistent with UnaryOp::Ref
                         let ptr_name = format!("*{}", inner_ty);
                         return Ok(Type::generic(&ptr_name, vec![inner_ty]));
+                    }
+
+                    // len(v) - returns length of array, slice, string, map, or channel
+                    if name == "len" && args.len() == 1 {
+                        let arg_ty = self.infer_expr(&args[0].1)?;
+                        let arg_ty = self.substitute(arg_ty);
+                        // Verify it's a valid type for len
+                        let valid = match &arg_ty {
+                            Type::Con { name, .. } => {
+                                name.name == "string"
+                                    || name.name == "array" // array[T] representation
+                                    || name.name.starts_with("[]")
+                                    || name.name.starts_with("[")
+                                    || name.name.starts_with("map") // map[K]V or map[K, V]
+                                    || name.name.starts_with("chan ")
+                            }
+                            _ => false,
+                        };
+                        if !valid {
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "len requires array, slice, string, map, or channel; got {}",
+                                    arg_ty
+                                ),
+                                span: args[0].1.span,
+                            });
+                        }
+                        return Ok(Type::simple("int"));
+                    }
+
+                    // cap(v) - returns capacity of slice or channel
+                    if name == "cap" && args.len() == 1 {
+                        let arg_ty = self.infer_expr(&args[0].1)?;
+                        let arg_ty = self.substitute(arg_ty);
+                        // Verify it's a valid type for cap
+                        let valid = match &arg_ty {
+                            Type::Con { name, .. } => {
+                                name.name == "array" // array[T] representation
+                                    || name.name.starts_with("[]")
+                                    || name.name.starts_with("[")
+                                    || name.name.starts_with("chan ")
+                            }
+                            _ => false,
+                        };
+                        if !valid {
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "cap requires array, slice, or channel; got {}",
+                                    arg_ty
+                                ),
+                                span: args[0].1.span,
+                            });
+                        }
+                        return Ok(Type::simple("int"));
+                    }
+
+                    // append(slice, elems...) - returns the same slice type
+                    if name == "append" && !args.is_empty() {
+                        let slice_ty = self.infer_expr(&args[0].1)?;
+                        let slice_ty = self.substitute(slice_ty);
+                        // Verify first arg is a slice
+                        let elem_ty = match &slice_ty {
+                            Type::Con { name, args } if name.name.starts_with("[]") => {
+                                if args.is_empty() {
+                                    // Extract element type from name like "[]int"
+                                    Type::simple(&name.name[2..])
+                                } else {
+                                    args[0].clone()
+                                }
+                            }
+                            _ => {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "first argument to append must be a slice; got {}",
+                                        slice_ty
+                                    ),
+                                    span: args[0].1.span,
+                                });
+                            }
+                        };
+                        // Type check remaining arguments against element type
+                        for (_, arg) in args.iter().skip(1) {
+                            let arg_ty = self.infer_expr(arg)?;
+                            self.unify(&elem_ty, &arg_ty, &arg.span)?;
+                        }
+                        return Ok(slice_ty);
+                    }
+
+                    // copy(dst, src) - returns int (number of elements copied)
+                    if name == "copy" && args.len() == 2 {
+                        let dst_ty = self.infer_expr(&args[0].1)?;
+                        let dst_ty = self.substitute(dst_ty);
+                        let src_ty = self.infer_expr(&args[1].1)?;
+                        let src_ty = self.substitute(src_ty);
+                        // Both must be slices (or src can be string for []byte)
+                        let dst_is_slice = matches!(&dst_ty, Type::Con { name, .. } if name.name.starts_with("[]"));
+                        let src_is_slice = matches!(&src_ty, Type::Con { name, .. } if name.name.starts_with("[]"));
+                        let src_is_string =
+                            matches!(&src_ty, Type::Con { name, .. } if name.name == "string");
+
+                        if !dst_is_slice {
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "first argument to copy must be a slice; got {}",
+                                    dst_ty
+                                ),
+                                span: args[0].1.span,
+                            });
+                        }
+                        if !src_is_slice && !src_is_string {
+                            return Err(SoppoError::Type {
+                                message: format!(
+                                    "second argument to copy must be a slice or string; got {}",
+                                    src_ty
+                                ),
+                                span: args[1].1.span,
+                            });
+                        }
+                        // For string source, dst must be []byte
+                        if src_is_string
+                            && let Type::Con { name, .. } = &dst_ty
+                            && name.name != "[]byte"
+                            && name.name != "[]uint8"
+                        {
+                            return Err(SoppoError::Type {
+                                message: format!("cannot copy string to {}; need []byte", dst_ty),
+                                span: args[0].1.span,
+                            });
+                        }
+                        return Ok(Type::simple("int"));
+                    }
+
+                    // delete(map, key) - deletes key from map, returns unit
+                    if name == "delete" && args.len() == 2 {
+                        let map_ty = self.infer_expr(&args[0].1)?;
+                        let map_ty = self.substitute(map_ty);
+                        // Verify first arg is a map
+                        let key_ty = match &map_ty {
+                            Type::Con { name, args } if name.name.starts_with("map") => {
+                                if !args.is_empty() {
+                                    args[0].clone()
+                                } else {
+                                    // Extract key type from name like "map[string]int"
+                                    let inner = &name.name[4..]; // skip "map["
+                                    if let Some(bracket_end) = inner.find(']') {
+                                        Type::simple(&inner[..bracket_end])
+                                    } else {
+                                        Type::simple("any")
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "first argument to delete must be a map; got {}",
+                                        map_ty
+                                    ),
+                                    span: args[0].1.span,
+                                });
+                            }
+                        };
+                        // Type check key argument
+                        let arg_key_ty = self.infer_expr(&args[1].1)?;
+                        self.unify(&key_ty, &arg_key_ty, &args[1].1.span)?;
+                        return Ok(Type::unit());
+                    }
+
+                    // panic(v) - panics with value, returns never (diverges)
+                    if name == "panic" && args.len() == 1 {
+                        // panic accepts any type
+                        self.infer_expr(&args[0].1)?;
+                        return Ok(Type::never());
+                    }
+
+                    // recover() - returns any (interface{})
+                    if name == "recover" && args.is_empty() {
+                        return Ok(Type::simple("any"));
+                    }
+
+                    // print and println - variadic, accept any types, return unit
+                    if name == "print" || name == "println" {
+                        for (_, arg) in args {
+                            self.infer_expr(arg)?;
+                        }
+                        return Ok(Type::unit());
+                    }
+
+                    // complex(r, i) - creates complex number from two float64
+                    if name == "complex" && args.len() == 2 {
+                        let r_ty = self.infer_expr(&args[0].1)?;
+                        let i_ty = self.infer_expr(&args[1].1)?;
+                        self.unify(&r_ty, &Type::simple("float64"), &args[0].1.span)?;
+                        self.unify(&i_ty, &Type::simple("float64"), &args[1].1.span)?;
+                        return Ok(Type::simple("complex128"));
+                    }
+
+                    // real(c) - extracts real part of complex number
+                    if name == "real" && args.len() == 1 {
+                        let c_ty = self.infer_expr(&args[0].1)?;
+                        let c_ty = self.substitute(c_ty);
+                        match &c_ty {
+                            Type::Con { name, .. }
+                                if name.name == "complex128" || name.name == "complex64" =>
+                            {
+                                let result = if name.name == "complex128" {
+                                    "float64"
+                                } else {
+                                    "float32"
+                                };
+                                return Ok(Type::simple(result));
+                            }
+                            _ => {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "real requires complex argument; got {}",
+                                        c_ty
+                                    ),
+                                    span: args[0].1.span,
+                                });
+                            }
+                        }
+                    }
+
+                    // imag(c) - extracts imaginary part of complex number
+                    if name == "imag" && args.len() == 1 {
+                        let c_ty = self.infer_expr(&args[0].1)?;
+                        let c_ty = self.substitute(c_ty);
+                        match &c_ty {
+                            Type::Con { name, .. }
+                                if name.name == "complex128" || name.name == "complex64" =>
+                            {
+                                let result = if name.name == "complex128" {
+                                    "float64"
+                                } else {
+                                    "float32"
+                                };
+                                return Ok(Type::simple(result));
+                            }
+                            _ => {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "imag requires complex argument; got {}",
+                                        c_ty
+                                    ),
+                                    span: args[0].1.span,
+                                });
+                            }
+                        }
                     }
                 }
 
@@ -935,9 +1183,12 @@ impl Infer {
             }
 
             ExprKind::TypeAssert { expr, ty } => {
-                // Type assertion: x.(Type) - infer expression and return the asserted type
+                // Type assertion: x.(Type) - returns a pointer to the asserted type
+                // The pointer is nil if the assertion fails, non-nil if it succeeds
+                // This enables: if x := val.(Type); x != nil { use(x) }
                 self.infer_expr(expr)?;
-                Ok(Type::simple(&ty.name))
+                let inner_ty = Type::simple(&ty.name.replace('.', "_"));
+                Ok(Type::ptr(inner_ty))
             }
 
             ExprKind::NilAssert { expr } => {

@@ -6,6 +6,7 @@ package main
 
 import "fmt"
 
+// === Enums for type assertion tests ===
 /*soppo:enum
 Option {
     Some int
@@ -115,62 +116,125 @@ var (
     ColourBlue Colour = Colour_Blue{}
 )
 
-// Test if-let with single-value variant
+// === Helper functions ===
+func maybeValue() (int, bool) {
+    return 42, true
+}
+
+func maybeError() (string, error) {
+    return "success", nil
+}
+
+func getPointer() *int {
+    x := 10
+    return (&x)
+}
+
+// === Tests for if-init with type assertions (enum variants) ===
+// Test type assertion with single-value variant
 func unwrapOr(opt Option, defaultVal int) int {
-    if __v, __ok := opt.(Option_Some); __ok {
-        x := __v.Value
-        _ = x
-        return x
+    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); (x != nil) {
+        return x.Value
     }
     return defaultVal
 }
 
-// Test if-let with else block
+// Test type assertion with else block
 func unwrapOrElse(opt Option, defaultVal int) int {
-    if __v, __ok := opt.(Option_Some); __ok {
-        x := __v.Value
-        _ = x
-        return x
+    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); (x != nil) {
+        return x.Value
     } else {
         return defaultVal
     }
 }
 
-// Test if-let with struct variant
+// Test type assertion with struct variant
 func getRadius(s Shape) float64 {
-    if __v, __ok := s.(Shape_Circle); __ok {
-        c := __v
-        _ = c
+    if c := func() *Shape_Circle { if _v, _ok := s.(Shape_Circle); _ok { return &_v }; return nil }(); (c != nil) {
         return c.radius
     }
     return 0.0
 }
 
-// Test if-let with unit variant
+// Test type assertion with unit variant
 func isRed(c Colour) bool {
-    if _, __ok := c.(Colour_Red); __ok {
+    if x := func() *Colour_Red { if _v, _ok := c.(Colour_Red); _ok { return &_v }; return nil }(); (x != nil) {
         return true
     }
     return false
 }
 
-// Test nested if-let
+// Test nested type assertions
 func processResult(r Result) string {
-    if __v, __ok := r.(Result_Ok); __ok {
-        ok := __v.Value
-        _ = ok
-        return "success: {ok}"
+    if ok := func() *Result_Ok { if _v, _ok := r.(Result_Ok); _ok { return &_v }; return nil }(); (ok != nil) {
+        return fmt.Sprintf("success: %s", ok.Value)
     } else {
-        if __v, __ok := r.(Result_Err); __ok {
-            err := __v.Value
-            _ = err
-            return "error: {err}"
+        if err := func() *Result_Err { if _v, _ok := r.(Result_Err); _ok { return &_v }; return nil }(); (err != nil) {
+            return fmt.Sprintf("error: %s", err.Value)
         }
-        return "unknown"
+    }
+    return "unknown"
+}
+
+// === Tests for if-init with regular expressions ===
+func testBasicIfInit() {
+    // Basic if-init with simple expression
+    if x := 5; (x > 0) {
+        fmt.Println("x is positive:", x)
+    }
+    // If-init with multi-return (comma-ok idiom)
+    if val, ok := maybeValue(); ok {
+        fmt.Println("Got value:", val)
+    }
+    // If-init with error check
+    if result, err := maybeError(); (err == nil) {
+        fmt.Println("Result:", result)
+    }
+    // If-init with nil check on pointer
+    if p := getPointer(); (p != nil) {
+        fmt.Println("Pointer value:", (*p))
+    }
+    // If-init with else
+    if n := 0; (n > 0) {
+        fmt.Println("positive")
+    } else {
+        fmt.Println("not positive")
+    }
+    // If-init with else-if chain
+    if x := 10; (x < 0) {
+        fmt.Println("negative")
+    } else {
+        if (x == 0) {
+            fmt.Println("zero")
+        } else {
+            fmt.Println("positive")
+        }
+    }
+    // If-init with inline function call
+    if result := func() int {
+        return 100
+    }(); (result > 50) {
+        fmt.Println("Large result:", result)
+    }
+    // Map lookup (single value form)
+    m := map[string]int{"a": 1, "b": 2}
+    if v := m["a"]; (v != 0) {
+        fmt.Println("Found:", v)
     }
 }
 
+// Test recover with if-init
+func safeRecover() {
+    defer func() {
+        if r := recover(); (r != nil) {
+            fmt.Println("Recovered:", r)
+        }
+    }()
+    panic("test panic")
+}
+
 func main() {
+    // Test enum type assertions
     some := OptionSome(42)
     none := OptionNone
     fmt.Printf("unwrapOr(some, 0) = %d\n", unwrapOr(some, 0))
@@ -189,4 +253,6 @@ func main() {
     err := ResultErr("failed")
     fmt.Printf("processResult(ok) = %s\n", processResult(ok))
     fmt.Printf("processResult(err) = %s\n", processResult(err))
+    // Test regular if-init
+    testBasicIfInit()
 }

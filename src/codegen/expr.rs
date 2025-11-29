@@ -143,10 +143,16 @@ impl Codegen {
             }
 
             ExprKind::TypeAssert { expr, ty } => {
+                // Type assertion returns a pointer: nil if failed, &value if succeeded
+                // Generate: func() *Type { if _v, _ok := expr.(Type); _ok { return &_v }; return nil }()
+                let type_name = ty.name.replace('.', "_");
+                self.emit("func() *");
+                self.emit(&type_name);
+                self.emit(" { if _v, _ok := ");
                 self.gen_expr(expr);
                 self.emit(".(");
-                self.emit(&ty.name);
-                self.emit(")");
+                self.emit(&type_name);
+                self.emit("); _ok { return &_v }; return nil }()");
             }
 
             ExprKind::NilAssert { expr } => {

@@ -204,15 +204,8 @@ pub enum StmtKind {
         body: Block,
     },
     If {
+        init: Option<Box<Stmt>>, // Optional init statement: if x := expr; condition { }
         condition: Expr,
-        then_block: Block,
-        else_block: Option<Block>,
-    },
-    // if x := expr.(Variant) { ... } else { ... }
-    IfLet {
-        binding: String, // The variable to bind (e.g., "x")
-        expr: Expr,      // The expression to match against
-        variant: String, // The variant to check (e.g., "Option.Some")
         then_block: Block,
         else_block: Option<Block>,
     },

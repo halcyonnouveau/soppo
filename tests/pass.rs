@@ -52,9 +52,9 @@ fn test_try_operator() {
 }
 
 #[test]
-fn test_if_let() {
+fn test_if_init() {
     let output =
-        compile_soppo_file("tests/fixtures/pass/if_let.sop").expect("Compilation should succeed");
+        compile_soppo_file("tests/fixtures/pass/if_init.sop").expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }
 
@@ -69,5 +69,12 @@ fn test_struct_match() {
 fn test_named_args() {
     let output = compile_soppo_file("tests/fixtures/pass/named_args.sop")
         .expect("Compilation should succeed");
+    insta::assert_snapshot!(output);
+}
+
+#[test]
+fn test_builtins() {
+    let output =
+        compile_soppo_file("tests/fixtures/pass/builtins.sop").expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }

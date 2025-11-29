@@ -97,6 +97,23 @@ impl Type {
         }
     }
 
+    /// Create a pointer type
+    pub fn ptr(inner: Type) -> Self {
+        // Represent as *T in the type name
+        let inner_name = match &inner {
+            Type::Con { name, .. } => name.name.clone(),
+            _ => "?".to_string(),
+        };
+        Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: format!("*{}", inner_name),
+                span: Span::dummy(),
+            },
+            args: vec![inner],
+        }
+    }
+
     /// Convert an AST type to a runtime type
     pub fn from_ast(ast_ty: &AstType) -> Self {
         // Handle variadic types: ...T -> variadic[T]

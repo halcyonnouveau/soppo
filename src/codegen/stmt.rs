@@ -1,8 +1,5 @@
 use super::Codegen;
-use crate::syntax::{
-    EnumVariant, FieldPattern, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
-};
-use crate::types::TypeDefKind;
+use crate::syntax::{FieldPattern, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind};
 
 impl Codegen {
     /// Emit a statement ending with optional trailing comment and newline
@@ -211,89 +208,42 @@ impl Codegen {
             }
 
             StmtKind::If {
+                init,
                 condition,
                 then_block,
                 else_block,
             } => {
                 self.emit_indent();
                 self.emit("if ");
+                // Generate init statement if present: if x := expr; cond { }
+                if let Some(init_stmt) = init {
+                    // Generate the init statement inline (without indent/newline)
+                    match &init_stmt.kind {
+                        StmtKind::Decl { name, value } => {
+                            self.emit(name);
+                            self.emit(" := ");
+                            self.gen_expr(value);
+                        }
+                        StmtKind::MultiDecl { names, values } => {
+                            self.emit(&names.join(", "));
+                            self.emit(" := ");
+                            for (i, v) in values.iter().enumerate() {
+                                if i > 0 {
+                                    self.emit(", ");
+                                }
+                                self.gen_expr(v);
+                            }
+                        }
+                        _ => {
+                            // For other statement types, just generate them inline
+                            // This shouldn't happen in practice
+                        }
+                    }
+                    self.emit("; ");
+                }
                 self.gen_expr(condition);
                 self.emit(" ");
                 self.gen_block(then_block);
-
-                if let Some(else_block) = else_block {
-                    self.emit(" else ");
-                    self.gen_block(else_block);
-                }
-                self.output.push('\n');
-            }
-
-            StmtKind::IfLet {
-                binding,
-                expr,
-                variant,
-                then_block,
-                else_block,
-            } => {
-                // Generate: if __v, __ok := expr.(EnumType_Variant); __ok { binding := __v.Value; ... }
-                // If binding is _, use _ for __v to avoid unused variable error
-                self.emit_indent();
-                let val_var = if binding == "_" { "_" } else { "__v" };
-                self.emit(&format!("if {}, __ok := ", val_var));
-                self.gen_expr(expr);
-
-                // Convert variant name (e.g., "Option.Some") to Go type (e.g., "Option_Some")
-                let go_variant_type = variant.replace('.', "_");
-                self.emit(&format!(".({}); __ok ", go_variant_type));
-
-                // Generate the then block with binding extraction
-                self.emit("{\n");
-                self.indent();
-
-                // Determine how to extract the binding based on variant type
-                // Look up the enum to find the variant kind
-                let enum_name = variant.split('.').next().unwrap_or(variant);
-                let variant_name = variant.rsplit('.').next().unwrap_or(variant);
-
-                let mut is_single_value = false;
-                if let Some(type_def) = self.global_state.lookup_type(enum_name)
-                    && let TypeDefKind::Enum { variants } = &type_def.kind
-                {
-                    for v in variants {
-                        match v {
-                            EnumVariant::Single { name, .. } if name == variant_name => {
-                                is_single_value = true;
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-
-                // Generate the binding assignment (skip if binding is underscore)
-                if binding != "_" {
-                    self.emit_indent();
-                    if is_single_value {
-                        // Single value variant: extract the inner value
-                        self.emit(&format!("{} := __v.Value\n", binding));
-                    } else {
-                        // Unit or struct variant: binding is the full struct
-                        self.emit(&format!("{} := __v\n", binding));
-                    }
-
-                    // Suppress unused variable warning
-                    self.emit_indent();
-                    self.emit(&format!("_ = {}\n", binding));
-                }
-
-                // Generate then block statements
-                for stmt in &then_block.stmts {
-                    self.gen_stmt(stmt);
-                }
-
-                self.dedent();
-                self.emit_indent();
-                self.emit("}");
 
                 if let Some(else_block) = else_block {
                     self.emit(" else ");

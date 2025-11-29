@@ -1,0 +1,184 @@
+package main
+
+import "fmt"
+
+// === Enums for type assertion tests ===
+
+type Option enum {
+    Some int
+    None
+}
+
+type Result enum {
+    Ok string
+    Err string
+}
+
+type Shape enum {
+    Circle struct {
+        radius float64
+    }
+    Rectangle struct {
+        width float64
+        height float64
+    }
+}
+
+type Colour enum {
+    Red
+    Green
+    Blue
+}
+
+// === Helper functions ===
+
+func maybeValue() (int, bool) {
+    return 42, true
+}
+
+func maybeError() (string, error) {
+    return "success", nil
+}
+
+func getPointer() *int {
+    x := 10
+    return &x
+}
+
+// === Tests for if-init with type assertions (enum variants) ===
+
+// Test type assertion with single-value variant
+func unwrapOr(opt Option, defaultVal int) int {
+    if x := opt.(Option.Some) {
+        return x.Value
+    }
+    return defaultVal
+}
+
+// Test type assertion with else block
+func unwrapOrElse(opt Option, defaultVal int) int {
+    if x := opt.(Option.Some) {
+        return x.Value
+    } else {
+        return defaultVal
+    }
+}
+
+// Test type assertion with struct variant
+func getRadius(s Shape) float64 {
+    if c := s.(Shape.Circle) {
+        return c.radius
+    }
+    return 0.0
+}
+
+// Test type assertion with unit variant
+func isRed(c Colour) bool {
+    if x := c.(Colour.Red) {
+        return true
+    }
+    return false
+}
+
+// Test nested type assertions
+func processResult(r Result) string {
+    if ok := r.(Result.Ok) {
+        return fmt.Sprintf("success: %s", ok.Value)
+    } else if err := r.(Result.Err) {
+        return fmt.Sprintf("error: %s", err.Value)
+    }
+    return "unknown"
+}
+
+// === Tests for if-init with regular expressions ===
+
+func testBasicIfInit() {
+    // Basic if-init with simple expression
+    if x := 5; x > 0 {
+        fmt.Println("x is positive:", x)
+    }
+
+    // If-init with multi-return (comma-ok idiom)
+    if val, ok := maybeValue(); ok {
+        fmt.Println("Got value:", val)
+    }
+
+    // If-init with error check
+    if result, err := maybeError(); err == nil {
+        fmt.Println("Result:", result)
+    }
+
+    // If-init with nil check on pointer
+    if p := getPointer(); p != nil {
+        fmt.Println("Pointer value:", *p)
+    }
+
+    // If-init with else
+    if n := 0; n > 0 {
+        fmt.Println("positive")
+    } else {
+        fmt.Println("not positive")
+    }
+
+    // If-init with else-if chain
+    if x := 10; x < 0 {
+        fmt.Println("negative")
+    } else if x == 0 {
+        fmt.Println("zero")
+    } else {
+        fmt.Println("positive")
+    }
+
+    // If-init with inline function call
+    if result := func() int { return 100 }(); result > 50 {
+        fmt.Println("Large result:", result)
+    }
+
+    // Map lookup (single value form)
+    m := map[string]int{"a": 1, "b": 2}
+    if v := m["a"]; v != 0 {
+        fmt.Println("Found:", v)
+    }
+}
+
+// Test recover with if-init
+func safeRecover() {
+    defer func() {
+        if r := recover(); r != nil {
+            fmt.Println("Recovered:", r)
+        }
+    }()
+    panic("test panic")
+}
+
+func main() {
+    // Test enum type assertions
+    some := Option.Some(42)
+    none := Option.None
+
+    fmt.Printf("unwrapOr(some, 0) = %d\n", unwrapOr(some, 0))
+    fmt.Printf("unwrapOr(none, 99) = %d\n", unwrapOr(none, 99))
+    fmt.Printf("unwrapOrElse(some, 0) = %d\n", unwrapOrElse(some, 0))
+    fmt.Printf("unwrapOrElse(none, 99) = %d\n", unwrapOrElse(none, 99))
+
+    circle := Shape.Circle{radius: 5.0}
+    rect := Shape.Rectangle{width: 3.0, height: 4.0}
+
+    fmt.Printf("getRadius(circle) = %f\n", getRadius(circle))
+    fmt.Printf("getRadius(rect) = %f\n", getRadius(rect))
+
+    red := Colour.Red
+    green := Colour.Green
+
+    fmt.Printf("isRed(red) = %t\n", isRed(red))
+    fmt.Printf("isRed(green) = %t\n", isRed(green))
+
+    ok := Result.Ok("done")
+    err := Result.Err("failed")
+
+    fmt.Printf("processResult(ok) = %s\n", processResult(ok))
+    fmt.Printf("processResult(err) = %s\n", processResult(err))
+
+    // Test regular if-init
+    testBasicIfInit()
+}
