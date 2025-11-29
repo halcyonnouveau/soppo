@@ -24,6 +24,7 @@ pub struct Import {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Const(ConstDecl),
+    ConstBlock(Vec<ConstDecl>), // Grouped const block for iota support
     Type(TypeDecl),
     Func(FuncDecl),
 }

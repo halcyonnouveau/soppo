@@ -346,6 +346,14 @@ impl Codegen {
                     self.gen_const_decl(const_decl);
                     self.emit_line("");
                 }
+                Decl::ConstBlock(consts) => {
+                    // Generate grouped const block for iota support
+                    if let Some(first) = consts.first() {
+                        self.emit_comments_before(first.span.byte_start, first.span.start.line);
+                    }
+                    self.gen_const_block(consts);
+                    self.emit_line("");
+                }
                 Decl::Type(type_decl) => {
                     self.emit_comments_before(type_decl.span.byte_start, type_decl.span.start.line);
                     self.gen_type_decl(type_decl);

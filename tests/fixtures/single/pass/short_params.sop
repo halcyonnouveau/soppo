@@ -1,0 +1,26 @@
+package main
+
+import "fmt"
+
+func add(a, b int) int {
+    return a + b
+}
+
+func multiply(x, y, z int) int {
+    return x * y * z
+}
+
+func greet(first, last string) {
+    fmt.Println("Hello", first, last)
+}
+
+func mixed(a, b int, c, d string) {
+    fmt.Println(a, b, c, d)
+}
+
+func main() {
+    fmt.Println(add(1, 2))
+    fmt.Println(multiply(2, 3, 4))
+    greet("John", "Doe")
+    mixed(1, 2, "hello", "world")
+}

@@ -230,6 +230,12 @@ fn register_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -
             // Consts are fully processed in pass 1 since they don't have bodies
             infer.infer_const_decl(const_decl).map_err(add_source)?;
         }
+        Decl::ConstBlock(consts) => {
+            // Process each const in the block
+            for const_decl in consts {
+                infer.infer_const_decl(const_decl).map_err(add_source)?;
+            }
+        }
         Decl::Type(type_decl) => {
             // Types are fully processed in pass 1
             infer.infer_type_decl(type_decl).map_err(add_source)?;
@@ -250,7 +256,7 @@ fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> R
 
     match decl {
         // Consts and types were fully processed in pass 1
-        Decl::Const(_) | Decl::Type(_) => {}
+        Decl::Const(_) | Decl::ConstBlock(_) | Decl::Type(_) => {}
         // Only functions need body checking in pass 2
         Decl::Func(func) => {
             infer.infer_func_decl(func).map_err(add_source)?;

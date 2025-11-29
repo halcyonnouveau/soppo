@@ -1,0 +1,24 @@
+package main
+
+import "fmt"
+
+const (
+    Sunday = iota
+    Monday
+    Tuesday
+    Wednesday
+    Thursday
+    Friday
+    Saturday
+)
+
+const (
+    KB = 1 << (10 * iota)
+    MB
+    GB
+)
+
+func main() {
+    fmt.Println(Sunday, Monday, Tuesday)
+    fmt.Println(KB, MB, GB)
+}

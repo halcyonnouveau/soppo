@@ -21,6 +21,41 @@ impl Codegen {
         self.emit("\n");
     }
 
+    /// Generate a grouped const block (for iota support)
+    pub(crate) fn gen_const_block(&mut self, consts: &[ConstDecl]) {
+        self.emit_line("const (");
+        self.indent();
+        for const_decl in consts {
+            self.emit_indent();
+            if let Some(ty) = &const_decl.ty {
+                // X type = value
+                self.emit(&format!(
+                    "{} {} = ",
+                    const_decl.name,
+                    self.go_type(&ty.name)
+                ));
+                self.gen_expr(&const_decl.value);
+            } else {
+                // X = value or just X (for implicit iota continuation)
+                self.emit(&const_decl.name);
+                // Only emit " = value" if the value isn't just "iota" on continuation lines
+                // For the first entry with iota, we need to emit it
+                // For subsequent entries, Go handles implicit continuation
+                let is_iota = matches!(
+                    &const_decl.value.kind,
+                    crate::syntax::ExprKind::Ident(name) if name == "iota"
+                );
+                if !is_iota || consts.first() == Some(const_decl) {
+                    self.emit(" = ");
+                    self.gen_expr(&const_decl.value);
+                }
+            }
+            self.emit("\n");
+        }
+        self.dedent();
+        self.emit_line(")");
+    }
+
     /// Generate a type declaration (enum or struct)
     pub(crate) fn gen_type_decl(&mut self, type_decl: &TypeDecl) {
         match &type_decl.kind {

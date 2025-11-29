@@ -1,8 +1,8 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
-    ConstDecl, Decl, EnumVariant, Field, File, FuncDecl, Generic, Import, InterfaceMethod, Param,
-    TypeDecl, TypeKind,
+    ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Import,
+    InterfaceMethod, Param, TypeDecl, TypeKind,
 };
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
@@ -36,6 +36,66 @@ impl Parser {
             ty,
             span: name_span,
         })
+    }
+
+    /// Parse function parameter list with support for grouped parameters: (a, b int, c string)
+    fn parse_param_list(&mut self) -> Result<Vec<Param>> {
+        let mut params = Vec::new();
+
+        if matches!(self.peek(), Some(Token::RParen)) {
+            return Ok(params);
+        }
+
+        let mut pending_names: Vec<(String, Span)> = Vec::new();
+
+        loop {
+            // Parse name
+            let (name, name_span) = match self.advance() {
+                Some((Token::Ident(name), span)) => (name, span),
+                Some((tok, span)) => {
+                    return Err(SoppoError::Parse {
+                        message: format!("Expected parameter name, found {:?}", tok),
+                        span,
+                    });
+                }
+                None => {
+                    return Err(SoppoError::Parse {
+                        message: "Expected parameter name".to_string(),
+                        span: Span::dummy(),
+                    });
+                }
+            };
+
+            self.validate_identifier(&name, &name_span)?;
+            pending_names.push((name, name_span));
+
+            if self.consume(&Token::Comma) {
+                // Could be more names in the group, or end of a param group
+                // Continue to parse next name
+                continue;
+            }
+
+            // No comma - parse the type for all pending names
+            let ty = self.parse_type()?;
+
+            // Assign type to all pending names
+            for (name, span) in pending_names.drain(..) {
+                params.push(Param {
+                    name,
+                    ty: ty.clone(),
+                    span,
+                });
+            }
+
+            // Check if there's another parameter group
+            if self.consume(&Token::Comma) {
+                continue;
+            }
+
+            break;
+        }
+
+        Ok(params)
     }
 
     /// Parse generic parameters: [T any, E comparable]
@@ -134,20 +194,9 @@ impl Parser {
         // Parse optional generics [T any, U any]
         let generics = self.parse_generics()?;
 
-        // Parse parameters
+        // Parse parameters (supports grouped params: a, b int)
         self.expect(Token::LParen)?;
-        let mut params = Vec::new();
-
-        if !matches!(self.peek(), Some(Token::RParen)) {
-            loop {
-                params.push(self.parse_param()?);
-
-                if !self.consume(&Token::Comma) {
-                    break;
-                }
-            }
-        }
-
+        let params = self.parse_param_list()?;
         self.expect(Token::RParen)?;
 
         // Parse optional return type(s)
@@ -437,20 +486,9 @@ impl Parser {
             }
         };
 
-        // Parse parameters
+        // Parse parameters (supports grouped params: a, b int)
         self.expect(Token::LParen)?;
-        let mut params = Vec::new();
-
-        if !matches!(self.peek(), Some(Token::RParen)) {
-            loop {
-                params.push(self.parse_param()?);
-
-                if !self.consume(&Token::Comma) {
-                    break;
-                }
-            }
-        }
-
+        let params = self.parse_param_list()?;
         let end_span = self.expect(Token::RParen)?;
 
         // Parse optional return type(s)
@@ -665,12 +703,12 @@ impl Parser {
             Some(&Token::Newline) | Some(&Token::RParen) | None
         ) {
             // Implicit iota continuation (NAME on its own line)
-            // For now, require explicit values - this is a simplification
-            return Err(SoppoError::Parse {
-                message: "Implicit iota continuation not yet supported, use explicit value"
-                    .to_string(),
+            // Generate an iota expression - Go will handle the incrementing
+            let iota_expr = Expr {
+                kind: ExprKind::Ident("iota".to_string()),
                 span: name_span,
-            });
+            };
+            (None, iota_expr)
         } else {
             return Err(SoppoError::Parse {
                 message: "Expected type, '=', or newline in const declaration".to_string(),
@@ -791,14 +829,16 @@ impl Parser {
             if self.peek() == Some(&Token::Const) {
                 self.advance(); // consume 'const'
                 if self.consume(&Token::LParen) {
-                    // Grouped const block
+                    // Grouped const block - use ConstBlock for iota support
+                    let mut block_consts = Vec::new();
                     self.skip_terminators();
                     while self.peek() != Some(&Token::RParen) {
                         let const_decl = self.parse_const_in_group()?;
-                        decls.push(Decl::Const(const_decl));
+                        block_consts.push(const_decl);
                         self.skip_terminators();
                     }
                     self.expect(Token::RParen)?;
+                    decls.push(Decl::ConstBlock(block_consts));
                     continue;
                 } else {
                     // Single const - need to parse it, but we already consumed 'const'

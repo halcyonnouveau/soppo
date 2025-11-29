@@ -30,6 +30,18 @@ impl Codegen {
                 self.emit_indent();
                 self.emit(&names.join(", "));
                 self.emit(" := ");
+
+                // Check for comma-ok idiom: v, ok := expr
+                // For these expressions, generate native Go comma-ok syntax
+                if names.len() == 2
+                    && values.len() == 1
+                    && let Some(raw) = self.gen_comma_ok_expr(&values[0])
+                {
+                    self.emit(&raw);
+                    self.emit_stmt_end(stmt_line);
+                    return;
+                }
+
                 for (i, val) in values.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");

@@ -41,6 +41,10 @@ impl Infer {
                 if name == "_" {
                     return Ok(Type::unit());
                 }
+                // Handle iota - a Go builtin constant generator for const blocks
+                if name == "iota" {
+                    return Ok(Type::simple("int"));
+                }
                 self.lookup_var(name)
                     .ok_or_else(|| SoppoError::UndefinedVariable {
                         name: name.clone(),

@@ -1203,6 +1203,76 @@ impl Infer {
             _ => None,
         }
     }
+
+    /// Check if an expression supports the comma-ok idiom and return the types
+    /// Returns None if the expression doesn't support comma-ok
+    /// Returns Some((value_type, bool_type)) for:
+    /// - Type assertions: x.(T) -> (T, bool)
+    /// - Map index: m[k] -> (V, bool) when m is a map
+    /// - Channel receive: <-ch -> (T, bool)
+    pub(super) fn infer_comma_ok_expr(
+        &mut self,
+        expr: &crate::syntax::Expr,
+    ) -> crate::error::Result<Option<(Type, Type)>> {
+        use crate::syntax::UnaryOp;
+
+        match &expr.kind {
+            // Type assertion: x.(T) -> (T, bool)
+            ExprKind::TypeAssert { expr: _, ty } => {
+                let asserted_ty = self.resolve_type(ty);
+                Ok(Some((asserted_ty, Type::simple("bool"))))
+            }
+
+            // Map index: m[k] -> (V, bool) when m is a map type
+            ExprKind::Index {
+                expr: map_expr,
+                index: _,
+            } => {
+                let map_ty = self.infer_expr(map_expr)?;
+                let map_ty = self.substitute(map_ty);
+
+                // Check if this is a map type
+                if let Type::Con { name, args, .. } = &map_ty
+                    && name.name.starts_with("map[")
+                    && args.len() == 2
+                {
+                    // args[0] is key type, args[1] is value type
+                    let value_ty = args[1].clone();
+                    return Ok(Some((value_ty, Type::simple("bool"))));
+                }
+                // Not a map, could be slice/array index - no comma-ok
+                Ok(None)
+            }
+
+            // Channel receive: <-ch -> (T, bool)
+            ExprKind::Unary {
+                op: UnaryOp::Recv,
+                operand,
+            } => {
+                let chan_ty = self.infer_expr(operand)?;
+                let chan_ty = self.substitute(chan_ty);
+
+                // Extract element type from channel
+                if let Type::Con { name, args, .. } = &chan_ty
+                    && name.name.starts_with("chan ")
+                    && args.len() == 1
+                {
+                    let elem_ty = args[0].clone();
+                    return Ok(Some((elem_ty, Type::simple("bool"))));
+                }
+                // Fallback: try to extract from name
+                if let Type::Con { name, .. } = &chan_ty
+                    && let Some(elem) = name.name.strip_prefix("chan ")
+                {
+                    let elem_ty = Type::simple(elem);
+                    return Ok(Some((elem_ty, Type::simple("bool"))));
+                }
+                Ok(None)
+            }
+
+            _ => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]

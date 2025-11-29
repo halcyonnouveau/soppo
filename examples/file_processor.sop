@@ -23,7 +23,7 @@ func run() error {
 
     writeLines("output.txt", upper) ?
 
-    fmt.Println("Processed ${len(lines)} lines")
+    fmt.Println("Processed {len(lines)} lines")
     return nil
 }
 

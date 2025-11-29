@@ -90,6 +90,16 @@ impl Infer {
                     // a, b := f() (multi-return unpacking)
                     let value = &values[0];
 
+                    // Check for comma-ok idiom: v, ok := expr
+                    // Applies to: type assertions, map access, channel receive
+                    if names.len() == 2
+                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)?
+                    {
+                        self.insert_var(names[0].clone(), value_ty);
+                        self.insert_var(names[1].clone(), ok_ty);
+                        return Ok(Type::unit());
+                    }
+
                     let value_ty = self.infer_expr(value)?;
                     let value_ty = self.substitute(value_ty);
 
@@ -208,6 +218,26 @@ impl Infer {
                 } else if values.len() == 1 && names.len() > 1 {
                     // var a, b = f() (multi-return unpacking)
                     let value = &values[0];
+
+                    // Check for comma-ok idiom: v, ok := expr
+                    // Applies to: type assertions, map access, channel receive
+                    if names.len() == 2
+                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)?
+                    {
+                        // First variable gets the value type
+                        let var_ty = if let Some(t) = ty {
+                            let declared_ty = Type::from_ast(t);
+                            self.unify(&declared_ty, &value_ty, &value.span)?;
+                            declared_ty
+                        } else {
+                            value_ty
+                        };
+                        self.insert_var(names[0].clone(), var_ty);
+                        // Second variable gets the ok type (bool)
+                        self.insert_var(names[1].clone(), ok_ty);
+                        return Ok(Type::unit());
+                    }
+
                     let value_ty = self.infer_expr(value)?;
                     let value_ty = self.substitute(value_ty);
 

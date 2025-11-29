@@ -424,6 +424,42 @@ impl Codegen {
             args.iter().map(|(_, arg)| arg).collect()
         }
     }
+
+    /// Generate a comma-ok expression (type assertion, map index, channel receive)
+    /// Returns Some(code) if this is a comma-ok expression, None otherwise
+    pub(crate) fn gen_comma_ok_expr(&mut self, expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            // Type assertion: x.(T) -> native Go comma-ok
+            ExprKind::TypeAssert { expr: inner, ty } => {
+                let mut code = String::new();
+                let mut temp = Codegen::new();
+                temp.gen_expr(inner);
+                code.push_str(temp.output());
+                code.push_str(".(");
+                code.push_str(&ty.name.replace('.', "_"));
+                code.push(')');
+                Some(code)
+            }
+
+            // Map index and channel receive work natively with comma-ok
+            // Just generate the expression normally
+            ExprKind::Index { .. } => {
+                let mut temp = Codegen::new();
+                temp.gen_expr(expr);
+                Some(temp.output().to_string())
+            }
+
+            ExprKind::Unary {
+                op: UnaryOp::Recv, ..
+            } => {
+                let mut temp = Codegen::new();
+                temp.gen_expr(expr);
+                Some(temp.output().to_string())
+            }
+
+            _ => None,
+        }
+    }
 }
 
 /// Convert a struct type name for codegen:

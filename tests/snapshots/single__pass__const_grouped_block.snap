@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -7,11 +7,11 @@ package main
 
 import "fmt"
 
-const MaxSize = 100
-
-const MinSize = 10
-
-const DefaultName string = "default"
+const (
+    MaxSize = 100
+    MinSize = 10
+    DefaultName string = "default"
+)
 
 func main() {
     fmt.Println(MaxSize, MinSize, DefaultName)
