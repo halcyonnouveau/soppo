@@ -118,7 +118,7 @@ func parsePort(s string) (int, error) {
     return 8080, nil
 }
 
-func getUser(id int) (*struct{ name string }, error) {
+func getUser(id int) (?*struct{ name string }, error) {
     if id <= 0 {
         return nil, errors.New("invalid id")
     }
