@@ -151,12 +151,12 @@ import "fmt"
 
 type User struct {
     name    string
-    profile *struct {
+    profile ?*struct {
         bio string
     }
 }
 
-func getUser(id int) *User {
+func getUser(id int) ?*User {
     if id == 1 {
         return &User{name: "Alice", profile: &struct{ bio string }{bio: "Hello!"}}
     }

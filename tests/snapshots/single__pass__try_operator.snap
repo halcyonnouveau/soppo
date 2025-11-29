@@ -32,6 +32,7 @@ type User struct {
     age int
 }
 
+//soppo:nilable : 0
 func getUser(id int) (*User, error) {
     if (id <= 0) {
         return nil, errors.New("invalid id")

@@ -92,7 +92,13 @@ impl Parser {
                 // Parse field: name type or grouped names: name1, name2 type
                 let parsed_fields = self.parse_fields()?;
                 for field in parsed_fields {
-                    field_strs.push(format!("{} {}", field.name, field.ty.name));
+                    // Preserve nullable marker in type name for inner fields
+                    let ty_str = if field.ty.nullable {
+                        format!("?{}", field.ty.name)
+                    } else {
+                        field.ty.name.clone()
+                    };
+                    field_strs.push(format!("{} {}", field.name, ty_str));
                 }
 
                 // Skip terminators between fields

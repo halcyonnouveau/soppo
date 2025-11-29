@@ -28,7 +28,7 @@ type User struct {
     age  int
 }
 
-func getUser(id int) (*User, error) {
+func getUser(id int) (?*User, error) {
     if id <= 0 {
         return nil, errors.New("invalid id")
     }

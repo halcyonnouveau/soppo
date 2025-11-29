@@ -1,0 +1,13 @@
+package main
+
+type User struct {
+    name    string
+    profile *struct {
+        bio string
+    }
+}
+
+func main() {
+    u := User{name: "Alice", profile: nil}
+    println(u.name)
+}

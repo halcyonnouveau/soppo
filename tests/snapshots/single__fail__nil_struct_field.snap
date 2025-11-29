@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_to_non_nilable
+
+  × Cannot assign `nil` to non-nilable type `*struct { bio string }`
+    ╭─[nil_struct_field.sop:11:39]
+ 10 │ func main() {
+ 11 │     u := User{name: "Alice", profile: nil}
+    ·                                       ─┬─
+    ·                                        ╰── cannot be nil
+ 12 │     println(u.name)
+    ╰────
+  help: use `?*struct { bio string }` for a nilable type

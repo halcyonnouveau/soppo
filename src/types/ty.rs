@@ -253,6 +253,18 @@ impl Type {
             Type::Never => false,
         }
     }
+
+    /// Check if this is a Go interface type (error, any, interface{})
+    /// These are always implicitly nilable in Go
+    pub fn is_go_interface(&self) -> bool {
+        match self {
+            Type::Con { name, .. } => {
+                let n = &name.name;
+                n == "error" || n == "any" || n == "interface{}"
+            }
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Type {

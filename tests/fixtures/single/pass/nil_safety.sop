@@ -15,10 +15,10 @@ type Profile struct {
 type User struct {
     name    string
     age     int
-    profile *Profile
+    profile ?*Profile
 }
 
-func getUser(id int) *User {
+func getUser(id int) ?*User {
     return nil
 }
 

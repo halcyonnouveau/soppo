@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_to_non_nilable
+
+  × Cannot assign `nil` to non-nilable type `*User`
+   ╭─[nil_map_value.sop:8:40]
+ 7 │ func main() {
+ 8 │     users := map[string]*User{"alice": nil}
+   ·                                        ─┬─
+   ·                                         ╰── cannot be nil
+ 9 │     println(len(users))
+   ╰────
+  help: use `?*User` for a nilable type

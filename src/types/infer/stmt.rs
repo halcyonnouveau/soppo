@@ -592,6 +592,19 @@ impl Infer {
                         });
                     }
                     for (expr, expected) in values.iter().zip(expected_types.iter()) {
+                        // Check: returning nil to a non-nilable type is an error
+                        // Exception: `error` and `any` are always implicitly nilable in Go
+                        if matches!(expr.kind, ExprKind::Nil)
+                            && expected.is_nilable_kind()
+                            && !expected.is_nullable()
+                            && !expected.is_go_interface()
+                        {
+                            return Err(SoppoError::NilToNonNilable {
+                                ty: expected.to_string(),
+                                span: expr.span,
+                            });
+                        }
+
                         let value_ty = self.infer_expr(expr)?;
                         self.unify(expected, &value_ty, &expr.span)?;
                     }
@@ -750,14 +763,37 @@ impl Infer {
                 let channel_ty = self.infer_expr(channel)?;
                 let channel_ty = self.substitute(channel_ty);
                 let value_ty = self.infer_expr(value)?;
+                let is_nil = matches!(value.kind, ExprKind::Nil);
 
-                // Extract element type from channel
+                // Extract element type from channel and check nil safety
                 if let Type::Con { name, args, .. } = &channel_ty {
                     if name.name.starts_with("chan ") && args.len() == 1 {
+                        // Check: sending nil to a channel with non-nilable element type is an error
+                        if is_nil
+                            && args[0].is_nilable_kind()
+                            && !args[0].is_nullable()
+                            && !args[0].is_go_interface()
+                        {
+                            return Err(SoppoError::NilToNonNilable {
+                                ty: args[0].to_string(),
+                                span: value.span,
+                            });
+                        }
                         self.unify(&args[0], &value_ty, &value.span)?;
                     } else if name.name.starts_with("chan ") {
                         let elem_name = &name.name[5..]; // skip "chan "
                         let elem_ty = Type::simple(elem_name);
+                        // Check nil safety for non-nilable element types
+                        if is_nil
+                            && elem_ty.is_nilable_kind()
+                            && !elem_ty.is_nullable()
+                            && !elem_ty.is_go_interface()
+                        {
+                            return Err(SoppoError::NilToNonNilable {
+                                ty: elem_ty.to_string(),
+                                span: value.span,
+                            });
+                        }
                         self.unify(&elem_ty, &value_ty, &value.span)?;
                     }
                 }
@@ -826,13 +862,36 @@ impl Infer {
                             let channel_ty = self.infer_expr(channel)?;
                             let channel_ty = self.substitute(channel_ty);
                             let value_ty = self.infer_expr(value)?;
+                            let is_nil = matches!(value.kind, ExprKind::Nil);
 
                             if let Type::Con { name, args, .. } = &channel_ty {
                                 if name.name.starts_with("chan ") && args.len() == 1 {
+                                    // Check nil safety
+                                    if is_nil
+                                        && args[0].is_nilable_kind()
+                                        && !args[0].is_nullable()
+                                        && !args[0].is_go_interface()
+                                    {
+                                        return Err(SoppoError::NilToNonNilable {
+                                            ty: args[0].to_string(),
+                                            span: value.span,
+                                        });
+                                    }
                                     self.unify(&args[0], &value_ty, &value.span)?;
                                 } else if name.name.starts_with("chan ") {
                                     let elem_name = &name.name[5..];
                                     let elem_ty = Type::simple(elem_name);
+                                    // Check nil safety
+                                    if is_nil
+                                        && elem_ty.is_nilable_kind()
+                                        && !elem_ty.is_nullable()
+                                        && !elem_ty.is_go_interface()
+                                    {
+                                        return Err(SoppoError::NilToNonNilable {
+                                            ty: elem_ty.to_string(),
+                                            span: value.span,
+                                        });
+                                    }
                                     self.unify(&elem_ty, &value_ty, &value.span)?;
                                 }
                             }

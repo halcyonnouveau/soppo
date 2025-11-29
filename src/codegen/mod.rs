@@ -414,6 +414,52 @@ impl Codegen {
         if ty.nullable { " //soppo:nilable" } else { "" }
     }
 
+    /// Emit a struct field with an anonymous struct type, formatting it as multiline
+    /// Input: go_type = "*struct { bio string; ptr ?*int }"
+    /// Output (if outer type is nilable):
+    ///   field_name *struct { //soppo:nilable
+    ///       bio string
+    ///       ptr *int //soppo:nilable
+    ///   }
+    pub(crate) fn emit_struct_field_with_anon_struct(
+        &mut self,
+        field_name: &str,
+        go_type: &str,
+        tag: &str,
+        nilable_comment: &str,
+    ) {
+        // Extract struct body from "*struct { ... }"
+        let struct_body = go_type
+            .strip_prefix("*struct { ")
+            .and_then(|s| s.strip_suffix(" }"))
+            .unwrap_or("");
+
+        // Emit opening line with nilable comment if applicable
+        self.emit_line(&format!("{} *struct {{{}", field_name, nilable_comment));
+        self.indent();
+
+        // Parse and emit each field, handling inner nilable types
+        for field_def in struct_body.split("; ") {
+            if !field_def.is_empty() {
+                // Check if field type has ? prefix (nilable)
+                // Format: "name ?*Type" or "name Type"
+                if let Some((name, ty)) = field_def.split_once(' ') {
+                    if let Some(inner_ty) = ty.strip_prefix('?') {
+                        // Nilable inner field
+                        self.emit_line(&format!("{} {} //soppo:nilable", name, inner_ty));
+                    } else {
+                        self.emit_line(field_def);
+                    }
+                } else {
+                    self.emit_line(field_def);
+                }
+            }
+        }
+
+        self.dedent();
+        self.emit_line(&format!("}}{}", tag));
+    }
+
     /// Convert binary operator to Go operator
     pub(crate) fn go_binop(&self, op: &BinOp) -> &str {
         match op {

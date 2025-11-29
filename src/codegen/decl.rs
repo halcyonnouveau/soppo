@@ -274,10 +274,22 @@ impl Codegen {
                         .as_ref()
                         .map(|t| format!(" `{}`", t))
                         .unwrap_or_default();
-                    self.emit_line(&format!(
-                        "{} {}{}{}",
-                        field.name, go_type, tag, nilable_comment
-                    ));
+
+                    // Special handling for nilable anonymous struct pointers
+                    // Format as multiline: *struct { //soppo:nilable\n  field1\n  field2\n}
+                    if !nilable_comment.is_empty() && go_type.starts_with("*struct { ") {
+                        self.emit_struct_field_with_anon_struct(
+                            &field.name,
+                            &go_type,
+                            &tag,
+                            nilable_comment,
+                        );
+                    } else {
+                        self.emit_line(&format!(
+                            "{} {}{}{}",
+                            field.name, go_type, tag, nilable_comment
+                        ));
+                    }
                 }
                 self.dedent();
                 self.emit_line("}");

@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_to_non_nilable
+
+  × Cannot assign `nil` to non-nilable type `*User`
+   ╭─[nil_slice_element.sop:8:22]
+ 7 │ func main() {
+ 8 │     users := []*User{nil, nil}
+   ·                      ─┬─
+   ·                       ╰── cannot be nil
+ 9 │     println(len(users))
+   ╰────
+  help: use `?*User` for a nilable type

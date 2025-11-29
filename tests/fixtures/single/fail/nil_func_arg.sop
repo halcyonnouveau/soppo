@@ -1,0 +1,13 @@
+package main
+
+type User struct {
+    name string
+}
+
+func process(u *User) {
+    println(u.name)
+}
+
+func main() {
+    process(nil)
+}

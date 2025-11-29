@@ -1,0 +1,17 @@
+package main
+
+type User struct {
+    name string
+}
+
+func getUser(id int) *User {
+    if id == 1 {
+        return &User{name: "Alice"}
+    }
+    return nil
+}
+
+func main() {
+    u := getUser(1)
+    println(u.name)
+}

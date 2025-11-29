@@ -181,6 +181,17 @@ impl Infer {
 
                 // All elements must have the same type
                 for elem in elements {
+                    // Check: assigning nil to a non-nilable element type is an error
+                    if matches!(elem.kind, ExprKind::Nil)
+                        && elem_ty.is_nilable_kind()
+                        && !elem_ty.is_nullable()
+                        && !elem_ty.is_go_interface()
+                    {
+                        return Err(SoppoError::NilToNonNilable {
+                            ty: elem_ty.to_string(),
+                            span: elem.span,
+                        });
+                    }
                     let elem_ty_actual = self.infer_expr(elem)?;
                     self.unify(&elem_ty, &elem_ty_actual, &elem.span)?;
                 }
@@ -194,9 +205,38 @@ impl Infer {
             }
 
             ExprKind::StructLit { ty, fields } => {
-                // Type check each field
-                for (_field_name, value) in fields {
-                    self.infer_expr(value)?;
+                // Look up struct definition to check field types
+                if let Some(type_def) = self.global_state.lookup_type(&ty.name).cloned() {
+                    if let TypeDefKind::Struct { fields: field_defs } = &type_def.kind {
+                        // Build map of field name -> type
+                        let field_types: std::collections::HashMap<_, _> = field_defs
+                            .iter()
+                            .map(|(name, ty)| (name.as_str(), ty.clone()))
+                            .collect();
+
+                        // Type check each field
+                        for (field_name, value) in fields {
+                            if let Some(field_ty) = field_types.get(field_name.as_str()) {
+                                // Check: assigning nil to a non-nilable field is an error
+                                if matches!(value.kind, ExprKind::Nil)
+                                    && field_ty.is_nilable_kind()
+                                    && !field_ty.is_nullable()
+                                    && !field_ty.is_go_interface()
+                                {
+                                    return Err(SoppoError::NilToNonNilable {
+                                        ty: field_ty.to_string(),
+                                        span: value.span,
+                                    });
+                                }
+                            }
+                            self.infer_expr(value)?;
+                        }
+                    }
+                } else {
+                    // Fallback: just type check values without nil check
+                    for (_field_name, value) in fields {
+                        self.infer_expr(value)?;
+                    }
                 }
 
                 // Check if this is a qualified type (e.g., pkg.Type)
@@ -259,6 +299,17 @@ impl Infer {
 
                 // Type check all entries
                 for (key, value) in entries {
+                    // Check: assigning nil to a non-nilable value type is an error
+                    if matches!(value.kind, ExprKind::Nil)
+                        && val_ty.is_nilable_kind()
+                        && !val_ty.is_nullable()
+                        && !val_ty.is_go_interface()
+                    {
+                        return Err(SoppoError::NilToNonNilable {
+                            ty: val_ty.to_string(),
+                            span: value.span,
+                        });
+                    }
                     let k_ty = self.infer_expr(key)?;
                     let v_ty = self.infer_expr(value)?;
                     self.unify(&key_ty, &k_ty, &key.span)?;
@@ -1273,11 +1324,12 @@ impl Infer {
             });
         };
 
-        // Infer argument types with their spans
+        // Infer argument types with their spans and track if they're nil expressions
         // Use infer_expr_narrowed to apply nil-state narrowing
         let mut arg_tys = Vec::new();
         for (arg, span) in &ordered_args {
-            arg_tys.push((self.infer_expr_narrowed(arg)?, *span));
+            let is_nil = matches!(arg.kind, ExprKind::Nil);
+            arg_tys.push((self.infer_expr_narrowed(arg)?, *span, is_nil));
         }
 
         // Check function call with detailed error spans
@@ -1287,6 +1339,22 @@ impl Infer {
                 ret,
                 ..
             } => {
+                // Helper to check nil arg against param type
+                let check_nil_arg =
+                    |param_ty: &Type, arg_span: &Span, is_nil: bool| -> Result<()> {
+                        if is_nil
+                            && param_ty.is_nilable_kind()
+                            && !param_ty.is_nullable()
+                            && !param_ty.is_go_interface()
+                        {
+                            return Err(SoppoError::NilToNonNilable {
+                                ty: param_ty.to_string(),
+                                span: *arg_span,
+                            });
+                        }
+                        Ok(())
+                    };
+
                 // Check if last param is variadic
                 let has_variadic = param_tys.last().is_some_and(|last| {
                     matches!(last, Type::Con { name, .. } if name.name == "variadic" || name.name.starts_with("..."))
@@ -1314,18 +1382,22 @@ impl Infer {
                     }
 
                     // Check fixed params
-                    for (param_ty, (arg_ty, arg_span)) in fixed_params.iter().zip(arg_tys.iter()) {
+                    for (param_ty, (arg_ty, arg_span, is_nil)) in
+                        fixed_params.iter().zip(arg_tys.iter())
+                    {
+                        check_nil_arg(param_ty, arg_span, *is_nil)?;
                         self.unify(param_ty, arg_ty, arg_span)?;
                     }
 
                     // Check variadic args
-                    for (arg_ty, arg_span) in arg_tys.iter().skip(fixed_params.len()) {
+                    for (arg_ty, arg_span, is_nil) in arg_tys.iter().skip(fixed_params.len()) {
                         // For "any" type (or nullable any), any argument is valid
                         let is_any = match &variadic_elem {
                             Type::Con { name, .. } => name.name == "any",
                             _ => false,
                         };
                         if !is_any {
+                            check_nil_arg(&variadic_elem, arg_span, *is_nil)?;
                             self.unify(&variadic_elem, arg_ty, arg_span)?;
                         }
                     }
@@ -1343,7 +1415,10 @@ impl Infer {
                     }
 
                     // Check each argument type
-                    for (param_ty, (arg_ty, arg_span)) in param_tys.iter().zip(arg_tys.iter()) {
+                    for (param_ty, (arg_ty, arg_span, is_nil)) in
+                        param_tys.iter().zip(arg_tys.iter())
+                    {
+                        check_nil_arg(param_ty, arg_span, *is_nil)?;
                         self.unify(param_ty, arg_ty, arg_span)?;
                     }
                 }
@@ -1353,7 +1428,7 @@ impl Infer {
             Type::Var(_) => {
                 // Function type is unknown, use standard unification
                 let result_ty = self.fresh_ty_var();
-                let arg_types: Vec<Type> = arg_tys.into_iter().map(|(ty, _)| ty).collect();
+                let arg_types: Vec<Type> = arg_tys.into_iter().map(|(ty, _, _)| ty).collect();
                 let expected_func_ty = Type::fun(arg_types, result_ty.clone());
                 self.unify(&func_ty, &expected_func_ty, expr_span)?;
                 Ok(self.substitute(result_ty))

@@ -1,0 +1,10 @@
+package main
+
+type User struct {
+    name string
+}
+
+func main() {
+    users := []*User{nil, nil}
+    println(len(users))
+}

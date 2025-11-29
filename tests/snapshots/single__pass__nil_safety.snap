@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -20,9 +20,10 @@ type Profile struct {
 type User struct {
     name string
     age int
-    profile *Profile
+    profile *Profile //soppo:nilable
 }
 
+//soppo:nilable : 0
 func getUser(id int) *User {
     return nil
 }

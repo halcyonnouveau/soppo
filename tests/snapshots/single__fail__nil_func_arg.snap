@@ -5,11 +5,11 @@ expression: result.unwrap_err()
 Error: soppo::nil_to_non_nilable
 
   × Cannot assign `nil` to non-nilable type `*User`
-    ╭─[nil_reassign_resets.sop:10:12]
-  9 │ func getUser(id int) *User {
- 10 │     return nil
-    ·            ─┬─
-    ·             ╰── cannot be nil
- 11 │ }
+    ╭─[nil_func_arg.sop:12:13]
+ 11 │ func main() {
+ 12 │     process(nil)
+    ·             ─┬─
+    ·              ╰── cannot be nil
+ 13 │ }
     ╰────
   help: use `?*User` for a nilable type

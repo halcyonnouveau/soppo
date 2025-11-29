@@ -1,0 +1,10 @@
+package main
+
+type User struct {
+    name string
+}
+
+func main() {
+    users := map[string]*User{"alice": nil}
+    println(len(users))
+}

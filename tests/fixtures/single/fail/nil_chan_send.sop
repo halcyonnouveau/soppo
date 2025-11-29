@@ -1,0 +1,10 @@
+package main
+
+type User struct {
+    name string
+}
+
+func main() {
+    ch := make(chan *User)
+    ch <- nil
+}
