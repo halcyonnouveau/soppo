@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -103,6 +103,37 @@ func nilSafety() error {
     return nil
 }
 
+// === Nil safety for other nilable types after ? ===
+func getNames() ([]string, error) {
+    return []string{"alice", "bob"}, nil
+}
+
+func getScores() (map[string]int, error) {
+    return map[string]int{"alice": 1, "bob": 2}, nil
+}
+
+func nilSafetySlice() error {
+    names, _err0 := getNames()
+    if _err0 != nil {
+        return _err0
+    }
+    // After ?, slice is known to be non-nil
+    fmt.Println(len(names))
+    fmt.Println(names[0])
+    return nil
+}
+
+func nilSafetyMap() error {
+    scores, _err0 := getScores()
+    if _err0 != nil {
+        return _err0
+    }
+    // After ?, map is known to be non-nil
+    fmt.Println(len(scores))
+    fmt.Println(scores["alice"])
+    return nil
+}
+
 // === Multiple ? in same function ===
 func multipleTry() error {
     port, _err0 := parsePort("8080")
@@ -171,6 +202,8 @@ func main() {
     errorOnly()
     multiReturn()
     nilSafety()
+    nilSafetySlice()
+    nilSafetyMap()
     multipleTry()
     nestedTry()
     tryWithIntReturn()

@@ -709,14 +709,30 @@ impl Infer {
         }
     }
 
-    /// Check if a type is a pointer type
-    pub(super) fn is_pointer_type(ty: &Type) -> bool {
+    /// Check if a type is nilable (can hold nil in Go)
+    /// This includes: pointers, slices, maps, channels, functions, and interfaces
+    pub(super) fn is_nilable_type(ty: &Type) -> bool {
         match ty {
-            Type::Con { name, args, .. } => {
-                // Check for ptr[T] or *T patterns
+            Type::Con { name, .. } => {
                 let ty_name = &name.name;
-                (ty_name == "ptr" || ty_name.starts_with('*')) && args.len() == 1
+                // Pointers: *T or ptr[T]
+                ty_name.starts_with('*')
+                    || ty_name == "ptr"
+                    // Slices: []T
+                    || ty_name.starts_with("[]")
+                    // Maps: map[K]V or map
+                    || ty_name.starts_with("map")
+                    // Channels: chan T
+                    || ty_name.starts_with("chan ")
+                    // Functions: func(...) or fn(...)
+                    || ty_name.starts_with("func")
+                    || ty_name.starts_with("fn")
+                    // Interfaces: interface{} or common interface types
+                    || ty_name == "interface"
+                    || ty_name == "any"
+                    || ty_name == "error"
             }
+            Type::Fun { .. } => true, // Function types are nilable
             _ => false,
         }
     }
@@ -729,8 +745,8 @@ impl Infer {
     ///
     /// Returns Nullable for everything else that could be nil
     pub(super) fn get_expr_nullability(&self, expr: &Expr, ty: &Type) -> Nullability {
-        // Only pointer types can be nullable
-        if !Self::is_pointer_type(ty) {
+        // Only nilable types can be nullable
+        if !Self::is_nilable_type(ty) {
             return Nullability::NonNull;
         }
 
@@ -796,7 +812,7 @@ impl Infer {
         value: &Expr,
         value_ty: &Type,
     ) {
-        if Self::is_pointer_type(value_ty) {
+        if Self::is_nilable_type(value_ty) {
             let nullability = self.get_expr_nullability(value, value_ty);
             self.set_nil_state(name.to_string(), nullability);
         }

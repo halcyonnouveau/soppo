@@ -90,6 +90,32 @@ func nilSafety() error {
     return nil
 }
 
+// === Nil safety for other nilable types after ? ===
+
+func getNames() ([]string, error) {
+    return []string{"alice", "bob"}, nil
+}
+
+func getScores() (map[string]int, error) {
+    return map[string]int{"alice": 1, "bob": 2}, nil
+}
+
+func nilSafetySlice() error {
+    names := getNames() ?
+    // After ?, slice is known to be non-nil
+    fmt.Println(len(names))
+    fmt.Println(names[0])
+    return nil
+}
+
+func nilSafetyMap() error {
+    scores := getScores() ?
+    // After ?, map is known to be non-nil
+    fmt.Println(len(scores))
+    fmt.Println(scores["alice"])
+    return nil
+}
+
 // === Multiple ? in same function ===
 
 func multipleTry() error {
@@ -141,6 +167,8 @@ func main() {
     errorOnly()
     multiReturn()
     nilSafety()
+    nilSafetySlice()
+    nilSafetyMap()
     multipleTry()
     nestedTry()
     tryWithIntReturn()

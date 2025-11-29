@@ -111,35 +111,36 @@ default:
 
 All variants must be handled (exhaustiveness checking for enums).
 
-**Codegen Limitation:** Using match as the final statement in a returning function is semantically valid in Soppo, but the generated Go code won't compile. This is because Go doesn't recognise exhaustive switch statements - it requires a return after the switch even when all cases return. Assign to a variable instead:
-
-```go
-// Semantically correct, but generated Go won't compile
-func describe(c Colour) string {
-    match c {
-    case Colour.Red:
-        return "red"
-    case Colour.Green:
-        return "green"
-    case Colour.Blue:
-        return "blue"
-    }
-}
-
-// Use assignment instead
-func describe(c Colour) string {
-    var result string
-    match c {
-    case Colour.Red:
-        result = "red"
-    case Colour.Green:
-        result = "green"
-    case Colour.Blue:
-        result = "blue"
-    }
-    return result
-}
-```
+> [!WARNING]
+> Using match as the final statement in a returning function is semantically valid in Soppo, but the generated Go code won't compile. Go doesn't recognise exhaustive switch statements, it requires a return after the switch even when all cases return. Assign to a variable instead:
+>
+> ```go
+> // Semantically correct, but generated Go won't compile
+> func describe(c Colour) string {
+>     match c {
+>     case Colour.Red:
+>         return "red"
+>     case Colour.Green:
+>         return "green"
+>     case Colour.Blue:
+>         return "blue"
+>     }
+> }
+>
+> // Use assignment instead
+> func describe(c Colour) string {
+>     var result string
+>     match c {
+>     case Colour.Red:
+>         result = "red"
+>     case Colour.Green:
+>         result = "green"
+>     case Colour.Blue:
+>         result = "blue"
+>     }
+>     return result
+> }
+> ```
 
 When you only care about one variant, full `match` is verbose. Combining `if` with a type assertion provides a concise way to check and destructure a single variant:
 
@@ -204,7 +205,8 @@ deleteFile(path) ?
 
 Works with `error` and `(T, error)` returns. On non-nil error, returns early with zero values + error.
 
-**Note**: There is a space before the `?` (not like Rust).
+> [!TIP]
+> There is a space before the `?` (not like Rust).
 
 ## Nil Safety
 
@@ -243,7 +245,7 @@ var user *User = &User{}    // OK
 After a nil check, nilable types are automatically narrowed to non-nilable:
 
 ```go
-result := findUser(1)       // ?*User
+result := findUser(1)           // ?*User
 
 if result != nil {
     fmt.Println(result.name)    // OK: result is *User here
@@ -254,17 +256,21 @@ if result != nil {
 if result == nil {
     return
 }
-fmt.Println(result.name)    // OK: result is non-nil after guard
+
+fmt.Println(result.name)        // OK: result is non-nil after guard
 ```
 
 Some expressions are guaranteed non-nil:
 - `&expr` (address-of) - always points to a valid value
 - `new(T)` - allocates and returns a valid pointer
-- Pointer results after `?` succeeds
-
+- Nilable results after `?` succeeds 
 ```go
 ptr := &User{}              // *User (non-nilable)
 newUser := new(User)        // *User (non-nilable)
+
+func getUser(id int) (*User, error) { ... }
+func getNames() ([]string, error) { ... }
+func getScores() (map[string]int, error) { ... }
 
 func process() error {
     user := getUser(1) ?    // If we get here, error was nil
@@ -284,7 +290,22 @@ This generates no runtime code - it's purely a compile-time assertion.
 
 Types from external Go packages default to nilable since Go has no nilability annotations. Use nil checks or `.(!nil)` when passing to Soppo functions expecting non-nilable types.
 
-**Note**: Flow-sensitive nil tracking is complex, and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees. Interface nil is a known limitation.
+> [!NOTE]
+> Flow-sensitive nil tracking is complex, and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees. One notable limitation is Go's interface nil behaviour, an interface is only `== nil` when both its type and value are nil:
+>
+> ```go
+> func getError() error {
+>     var p *MyError = nil
+>     return p  // interface has (type=*MyError, value=nil)
+> }
+>
+> err := getError()
+> if err != nil {
+>     // This runs! The interface isn't nil because it has a concrete type
+> }
+> ```
+>
+> Soppo supports `?Interface` but currently cannot detect when a non-nil interface wraps a nil concrete value.
 
 ## Named Arguments
 
@@ -316,7 +337,8 @@ msg := "hello {name}, you are {age}"
 // Codegens to: fmt.Sprintf("hello %v, you are %v", name, age)
 ```
 
-Variables only, no expressions. Use `{{` to escape literal braces.
+> [!TIP]
+> Variables only, no expressions. Use `{{` to escape literal braces.
 
 ## Go Interop and Imports
 
@@ -370,4 +392,5 @@ When importing regular Go packages (no marker):
 
 This allows Soppo projects to depend on generated Go from other Soppo projects while preserving nil safety guarantees.
 
-**Note**: You cannot import external Soppo source directly. To use an external Soppo library, import its generated Go code as a regular Go import.
+> [!IMPORTANT]
+> You cannot import external Soppo source directly. To use an external Soppo library, import its generated Go code as a regular Go import.

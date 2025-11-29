@@ -180,11 +180,11 @@ impl Infer {
                 };
                 let var_ty_sub = self.substitute(var_ty.clone());
                 self.insert_var(name.clone(), var_ty);
-                // Track nil state for pointer types
+                // Track nil state for nilable types
                 if let Some(expr) = init_expr {
                     self.update_nil_state_for_assignment(name, expr, &var_ty_sub);
-                } else if Self::is_pointer_type(&var_ty_sub) {
-                    // Zero-initialized pointers are nil
+                } else if Self::is_nilable_type(&var_ty_sub) {
+                    // Zero-initialized nilable types are nil
                     self.set_nil_state(name.clone(), crate::types::ty::Nullability::Nullable);
                 }
                 Ok(Type::unit())
@@ -922,12 +922,12 @@ impl Infer {
                     self.pop_scope();
                 }
 
-                // Mark assigned pointer variables as non-null (success implies valid result)
+                // Mark assigned nilable variables as non-null (success implies valid result)
                 if let Some(var_name) = self.get_assigned_var_name(inner_stmt)
                     && let Some(var_type) = self.lookup_var(&var_name)
                 {
                     let var_type_sub = self.substitute(var_type);
-                    if Self::is_pointer_type(&var_type_sub) {
+                    if Self::is_nilable_type(&var_type_sub) {
                         self.set_nil_state(var_name, Nullability::NonNull);
                     }
                 }

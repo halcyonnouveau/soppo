@@ -259,8 +259,9 @@ impl Infer {
                     self.unify(&val_ty, &v_ty, &value.span)?;
                 }
 
-                // Return map[K]V type
-                Ok(Type::generic("map", vec![key_ty, val_ty]))
+                // Return map[K]V type with proper Go format in name
+                let map_name = format!("map[{}]{}", key_ty, val_ty);
+                Ok(Type::generic(&map_name, vec![key_ty, val_ty]))
             }
 
             ExprKind::Unary { op, operand } => self.infer_unary(op, operand),
@@ -356,15 +357,15 @@ impl Infer {
                 let ty = self.infer_expr(expr)?;
                 let ty = self.substitute(ty);
 
-                // If this is a pointer type with an identifier, mark it as non-nil
-                if Self::is_pointer_type(&ty)
+                // If this is a nilable type with an identifier, mark it as non-nil
+                if Self::is_nilable_type(&ty)
                     && let ExprKind::Ident(name) = &expr.kind
                 {
                     self.set_nil_state(name.clone(), Nullability::NonNull);
                 }
 
                 // Return the non-nullable version of the type
-                // x.(!nil) converts ?*T -> *T
+                // x.(!nil) converts ?*T -> *T, ?[]T -> []T, etc.
                 Ok(ty.as_non_nullable())
             }
         }
@@ -472,9 +473,9 @@ impl Infer {
         let expr_ty = self.infer_expr(field_expr)?;
         let expr_ty = self.substitute(expr_ty);
 
-        // Check for nil pointer dereference on field access
-        // If the expression is a pointer type, verify it's not nullable
-        if Self::is_pointer_type(&expr_ty) {
+        // Check for nil dereference on field access
+        // If the expression is a nilable type, verify it's not nullable
+        if Self::is_nilable_type(&expr_ty) {
             // Convert expression to a trackable key (supports identifiers and field chains)
             let expr_key = super::stmt::expr_to_key(field_expr);
 
@@ -1196,8 +1197,9 @@ impl Infer {
                 // *p: operand must be *T, result is T
                 let operand_ty = self.substitute(operand_ty);
 
-                // Check for nil pointer dereference
-                if Self::is_pointer_type(&operand_ty) {
+                // Check for nil pointer dereference (only pointers can be dereferenced)
+                let is_ptr = matches!(&operand_ty, Type::Con { name, .. } if name.name.starts_with('*') || name.name == "ptr");
+                if is_ptr {
                     // Get a key for the expression (works for identifiers and field chains)
                     let expr_key = super::stmt::expr_to_key(operand);
 
