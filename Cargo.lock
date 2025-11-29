@@ -579,7 +579,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "soppo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "insta",
