@@ -168,7 +168,23 @@ impl Parser {
 
                             if !matches!(self.peek(), Some(Token::RParen)) {
                                 loop {
-                                    args.push(self.parse_expr()?);
+                                    // Check for named argument: Ident followed by Colon
+                                    let arg = if let Some(Token::Ident(name)) = self.peek()
+                                        && matches!(self.peek_at(1), Some(Token::Colon))
+                                    {
+                                        let name = name.clone();
+                                        let (_, name_span) = self.advance().unwrap(); // consume identifier
+                                        self.advance(); // consume colon
+                                        let value = self.parse_expr()?;
+                                        (Some((name, name_span)), value)
+                                    } else {
+                                        // Positional argument
+                                        // Note: We allow positional after named because variadic params
+                                        // are always positional at the end. The type checker validates
+                                        // that non-variadic positional args don't follow named args.
+                                        (None, self.parse_expr()?)
+                                    };
+                                    args.push(arg);
 
                                     if !self.consume(&Token::Comma) {
                                         break;
@@ -268,7 +284,23 @@ impl Parser {
 
                     if !matches!(self.peek(), Some(Token::RParen)) {
                         loop {
-                            args.push(self.parse_expr()?);
+                            // Check for named argument: Ident followed by Colon
+                            let arg = if let Some(Token::Ident(name)) = self.peek()
+                                && matches!(self.peek_at(1), Some(Token::Colon))
+                            {
+                                let name = name.clone();
+                                let (_, name_span) = self.advance().unwrap(); // consume identifier
+                                self.advance(); // consume colon
+                                let value = self.parse_expr()?;
+                                (Some((name, name_span)), value)
+                            } else {
+                                // Positional argument
+                                // Note: We allow positional after named because variadic params
+                                // are always positional at the end. The type checker validates
+                                // that non-variadic positional args don't follow named args.
+                                (None, self.parse_expr()?)
+                            };
+                            args.push(arg);
 
                             if !self.consume(&Token::Comma) {
                                 break;
@@ -704,10 +736,10 @@ impl Parser {
                 // First argument is a type
                 let ty = self.parse_type()?;
 
-                // Optional additional arguments (size, capacity)
+                // Optional additional arguments (size, capacity) - always positional
                 let mut args = Vec::new();
                 while self.consume(&Token::Comma) {
-                    args.push(self.parse_expr()?);
+                    args.push((None, self.parse_expr()?));
                 }
 
                 let end_span = self.expect(Token::RParen)?;
@@ -746,7 +778,7 @@ impl Parser {
                             span,
                         }),
                         type_args: vec![ty],
-                        args: vec![],
+                        args: vec![], // new has no runtime args
                     },
                     span: Span::with_bytes(
                         span.start,
@@ -1033,9 +1065,46 @@ mod tests {
             } => {
                 assert!(matches!(func.kind, ExprKind::Ident(s) if s == "foo"));
                 assert_eq!(args.len(), 2);
-                assert!(matches!(args[0].kind, ExprKind::Integer(1)));
-                assert!(matches!(args[1].kind, ExprKind::Integer(2)));
+                // Args are (Option<String>, Expr) tuples - positional args have None name
+                assert!(args[0].0.is_none());
+                assert!(matches!(args[0].1.kind, ExprKind::Integer(1)));
+                assert!(args[1].0.is_none());
+                assert!(matches!(args[1].1.kind, ExprKind::Integer(2)));
                 assert!(type_args.is_empty());
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_named_arguments() {
+        let expr = parse_expr_helper("foo(a: 1, b: 2)").unwrap();
+        match expr.kind {
+            ExprKind::Call { func, args, .. } => {
+                assert!(matches!(func.kind, ExprKind::Ident(s) if s == "foo"));
+                assert_eq!(args.len(), 2);
+                // Named args have Some((name, span))
+                assert!(matches!(&args[0].0, Some((n, _)) if n == "a"));
+                assert!(matches!(args[0].1.kind, ExprKind::Integer(1)));
+                assert!(matches!(&args[1].0, Some((n, _)) if n == "b"));
+                assert!(matches!(args[1].1.kind, ExprKind::Integer(2)));
+            }
+            _ => panic!("Expected call expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_mixed_arguments() {
+        let expr = parse_expr_helper("foo(1, b: 2)").unwrap();
+        match expr.kind {
+            ExprKind::Call { func, args, .. } => {
+                assert!(matches!(func.kind, ExprKind::Ident(s) if s == "foo"));
+                assert_eq!(args.len(), 2);
+                // First is positional (None), second is named (Some((name, span)))
+                assert!(args[0].0.is_none());
+                assert!(matches!(args[0].1.kind, ExprKind::Integer(1)));
+                assert!(matches!(&args[1].0, Some((n, _)) if n == "b"));
+                assert!(matches!(args[1].1.kind, ExprKind::Integer(2)));
             }
             _ => panic!("Expected call expression"),
         }

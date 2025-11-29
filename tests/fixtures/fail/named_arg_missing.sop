@@ -1,0 +1,9 @@
+package main
+
+func greet(name string, age int, active bool) string {
+    return name
+}
+
+func main() {
+    greet(name: "alice", active: true)
+}

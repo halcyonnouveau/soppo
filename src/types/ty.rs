@@ -99,6 +99,12 @@ impl Type {
 
     /// Convert an AST type to a runtime type
     pub fn from_ast(ast_ty: &AstType) -> Self {
+        // Handle variadic types: ...T -> variadic[T]
+        if ast_ty.name.starts_with("...") {
+            let inner_name = &ast_ty.name[3..];
+            return Type::generic("variadic", vec![Type::simple(inner_name)]);
+        }
+
         Type::Con {
             name: Symbol {
                 module: ModuleId::empty(),

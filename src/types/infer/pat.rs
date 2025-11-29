@@ -90,10 +90,10 @@ impl Infer {
                                             && let Some(field) = variant_fields
                                                 .iter()
                                                 .find(|f| &f.name == field_name)
-                                            {
-                                                let field_ty = Type::simple(&field.ty.name);
-                                                bindings.push((binding_name.clone(), field_ty));
-                                            }
+                                        {
+                                            let field_ty = Type::simple(&field.ty.name);
+                                            bindings.push((binding_name.clone(), field_ty));
+                                        }
                                         // Literals don't create bindings
                                     }
                                     break;
@@ -109,9 +109,9 @@ impl Infer {
                                 if let FieldPattern::Bind(binding_name) = field_pattern
                                     && let Some((_, field_ty)) =
                                         struct_fields.iter().find(|(name, _)| name == field_name)
-                                    {
-                                        bindings.push((binding_name.clone(), field_ty.clone()));
-                                    }
+                                {
+                                    bindings.push((binding_name.clone(), field_ty.clone()));
+                                }
                                 // Literals don't create bindings
                             }
                         }
@@ -214,10 +214,10 @@ impl Infer {
                                             && let Some(field) = variant_fields
                                                 .iter()
                                                 .find(|f| &f.name == field_name)
-                                            {
-                                                let field_ty = Type::simple(&field.ty.name);
-                                                bindings.insert(binding_name.clone(), field_ty);
-                                            }
+                                        {
+                                            let field_ty = Type::simple(&field.ty.name);
+                                            bindings.insert(binding_name.clone(), field_ty);
+                                        }
                                     }
                                     break;
                                 }
@@ -230,9 +230,9 @@ impl Infer {
                                 if let FieldPattern::Bind(binding_name) = field_pattern
                                     && let Some((_, field_ty)) =
                                         struct_fields.iter().find(|(name, _)| name == field_name)
-                                    {
-                                        bindings.insert(binding_name.clone(), field_ty.clone());
-                                    }
+                                {
+                                    bindings.insert(binding_name.clone(), field_ty.clone());
+                                }
                             }
                         }
                         _ => {}

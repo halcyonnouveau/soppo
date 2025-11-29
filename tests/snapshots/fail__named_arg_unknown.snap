@@ -1,0 +1,14 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: Unknown parameter name: `unknown`
+   ╭─[named_arg_unknown.sop:8:11]
+ 7 │ func main() {
+ 8 │     greet(unknown: "test", age: 30)
+   ·           ───┬───
+   ·              ╰── error occurred here
+ 9 │ }
+   ╰────

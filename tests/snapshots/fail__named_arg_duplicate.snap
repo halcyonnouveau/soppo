@@ -1,0 +1,14 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: Argument `name` provided multiple times
+   ╭─[named_arg_duplicate.sop:8:26]
+ 7 │ func main() {
+ 8 │     greet(name: "alice", name: "bob")
+   ·                          ──┬─
+   ·                            ╰── error occurred here
+ 9 │ }
+   ╰────

@@ -140,3 +140,40 @@ fn test_try_expr_no_error() {
     );
     insta::assert_snapshot!(result.unwrap_err());
 }
+
+#[test]
+fn test_named_arg_unknown() {
+    let result = compile_soppo_file("tests/fixtures/fail/named_arg_unknown.sop");
+    assert!(result.is_err(), "Expected error for unknown named argument");
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_named_arg_duplicate() {
+    let result = compile_soppo_file("tests/fixtures/fail/named_arg_duplicate.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for duplicate named argument"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_named_arg_missing() {
+    let result = compile_soppo_file("tests/fixtures/fail/named_arg_missing.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for missing required argument"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}
+
+#[test]
+fn test_named_arg_wrong_order() {
+    let result = compile_soppo_file("tests/fixtures/fail/named_arg_wrong_order.sop");
+    assert!(
+        result.is_err(),
+        "Expected error for positional after named on non-variadic function"
+    );
+    insta::assert_snapshot!(result.unwrap_err());
+}

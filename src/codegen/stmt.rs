@@ -354,63 +354,65 @@ impl Codegen {
                                 self.emit("} else {\n");
                             }
                         } else if let Some(pattern) = arm.patterns.first()
-                            && let PatternKind::StructDestructor { fields, .. } = &pattern.kind {
-                                // Collect literal conditions
-                                let conditions: Vec<_> = fields
-                                    .iter()
-                                    .filter_map(|(field_name, field_pattern)| {
-                                        if let FieldPattern::Literal(lit) = field_pattern {
-                                            Some((field_name.clone(), lit.clone()))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect();
+                            && let PatternKind::StructDestructor { fields, .. } = &pattern.kind
+                        {
+                            // Collect literal conditions
+                            let conditions: Vec<_> = fields
+                                .iter()
+                                .filter_map(|(field_name, field_pattern)| {
+                                    if let FieldPattern::Literal(lit) = field_pattern {
+                                        Some((field_name.clone(), lit.clone()))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
 
-                                if first_arm {
-                                    self.emit("if ");
-                                } else {
-                                    self.emit("} else if ");
-                                }
+                            if first_arm {
+                                self.emit("if ");
+                            } else {
+                                self.emit("} else if ");
+                            }
 
-                                // Generate condition from literal patterns
-                                if conditions.is_empty() {
-                                    // No literal conditions - this matches anything (like a default)
-                                    self.emit("true");
-                                } else {
-                                    for (i, (field_name, lit)) in conditions.iter().enumerate() {
-                                        if i > 0 {
-                                            self.emit(" && ");
-                                        }
-                                        self.gen_expr(scrutinee_expr);
-                                        self.emit(&format!(".{} == ", field_name));
-                                        match lit {
-                                            Literal::Integer(n) => self.emit(&format!("{}", n)),
-                                            Literal::String(s) => self.emit(&format!("\"{}\"", s)),
-                                            Literal::Bool(b) => self.emit(&format!("{}", b)),
-                                        }
+                            // Generate condition from literal patterns
+                            if conditions.is_empty() {
+                                // No literal conditions - this matches anything (like a default)
+                                self.emit("true");
+                            } else {
+                                for (i, (field_name, lit)) in conditions.iter().enumerate() {
+                                    if i > 0 {
+                                        self.emit(" && ");
+                                    }
+                                    self.gen_expr(scrutinee_expr);
+                                    self.emit(&format!(".{} == ", field_name));
+                                    match lit {
+                                        Literal::Integer(n) => self.emit(&format!("{}", n)),
+                                        Literal::String(s) => self.emit(&format!("\"{}\"", s)),
+                                        Literal::Bool(b) => self.emit(&format!("{}", b)),
                                     }
                                 }
-
-                                self.emit(" {\n");
                             }
+
+                            self.emit(" {\n");
+                        }
 
                         self.indent();
 
                         // Extract bindings
                         if let Some(pattern) = arm.patterns.first()
-                            && let PatternKind::StructDestructor { fields, .. } = &pattern.kind {
-                                for (field_name, field_pattern) in fields {
-                                    if let FieldPattern::Bind(binding_name) = field_pattern {
-                                        self.emit_indent();
-                                        self.emit(&format!("{} := ", binding_name));
-                                        self.gen_expr(scrutinee_expr);
-                                        self.emit(&format!(".{}\n", field_name));
-                                        self.emit_indent();
-                                        self.emit(&format!("_ = {}\n", binding_name));
-                                    }
+                            && let PatternKind::StructDestructor { fields, .. } = &pattern.kind
+                        {
+                            for (field_name, field_pattern) in fields {
+                                if let FieldPattern::Bind(binding_name) = field_pattern {
+                                    self.emit_indent();
+                                    self.emit(&format!("{} := ", binding_name));
+                                    self.gen_expr(scrutinee_expr);
+                                    self.emit(&format!(".{}\n", field_name));
+                                    self.emit_indent();
+                                    self.emit(&format!("_ = {}\n", binding_name));
                                 }
                             }
+                        }
 
                         // Emit arm body
                         for arm_stmt in &arm.body.stmts {

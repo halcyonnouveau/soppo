@@ -1,0 +1,43 @@
+---
+source: tests/pass.rs
+expression: output
+---
+package main
+
+import "fmt"
+
+// Helper function with multiple parameters
+func createUser(name string, age int, active bool) string {
+    var status string
+    if active {
+        status = "active"
+    } else {
+        status = "inactive"
+    }
+    return fmt.Sprintf("User %s (age %d) is %s", name, age, status)
+}
+
+// Helper function to test reordering
+func formatPoint(x int, y int, z int) string {
+    return fmt.Sprintf("(%d, %d, %d)", x, y, z)
+}
+
+// Helper for variadic test
+func log(level string, msg string, args ...int) string {
+    return fmt.Sprintf("[%s] %s", level, msg)
+}
+
+func main() {
+    // All positional
+    fmt.Println(createUser("alice", 30, true))
+    // All named
+    fmt.Println(createUser("bob", 25, false))
+    // Mixed (positional first, then named)
+    fmt.Println(createUser("charlie", 35, true))
+    // Named in different order than parameters
+    fmt.Println(createUser("dave", 40, true))
+    // Named arguments with reordering
+    fmt.Println(formatPoint(1, 2, 3))
+    // Variadic with named fixed params
+    fmt.Println(log("INFO", "test", 1, 2, 3))
+}

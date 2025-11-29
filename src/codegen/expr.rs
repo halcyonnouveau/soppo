@@ -59,13 +59,16 @@ impl Codegen {
                     // Type is first argument
                     self.emit(&type_args[0].name);
                     // Additional arguments
-                    for arg in args {
+                    for (_, arg) in args {
                         self.emit(", ");
                         self.gen_expr(arg);
                     }
                     self.emit(")");
                     return;
                 }
+
+                // Reorder args based on named arguments if needed
+                let ordered_args = self.reorder_call_args(func, args);
 
                 self.gen_expr(func);
                 // Emit type arguments if present: func[int, string](args)
@@ -80,7 +83,7 @@ impl Codegen {
                     self.emit("]");
                 }
                 self.emit("(");
-                for (i, arg) in args.iter().enumerate() {
+                for (i, arg) in ordered_args.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
                     }
@@ -283,6 +286,83 @@ impl Codegen {
             ExprKind::Block(block) => {
                 self.gen_block(block);
             }
+        }
+    }
+
+    /// Reorder function call arguments based on named arguments
+    fn reorder_call_args<'a>(
+        &self,
+        func: &Expr,
+        args: &'a [(Option<(String, crate::syntax::Span)>, Expr)],
+    ) -> Vec<&'a Expr> {
+        // Check if any args are named
+        let has_named = args.iter().any(|(name, _)| name.is_some());
+
+        // If no named args, just return all in order
+        if !has_named {
+            return args.iter().map(|(_, arg)| arg).collect();
+        }
+
+        // Look up parameter names (exclude variadic params)
+        let param_names: Option<Vec<String>> = if let ExprKind::Ident(func_name) = &func.kind {
+            self.global_state.lookup_function(func_name).map(|f| {
+                f.params
+                    .iter()
+                    .filter(|(_, ty)| !ty.to_string().starts_with("variadic"))
+                    .map(|(name, _)| name.clone())
+                    .collect()
+            })
+        } else {
+            None
+        };
+
+        if let Some(param_names) = param_names {
+            // Reorder based on parameter names
+            // Rules:
+            // - Positional args before any named arg fill fixed params in order
+            // - Named args fill their named slots
+            // - Positional args after a named arg go to variadic
+            let mut result: Vec<Option<&Expr>> = vec![None; param_names.len()];
+            let mut variadic_args: Vec<&Expr> = Vec::new();
+            let mut seen_named = false;
+            let mut next_positional_idx = 0;
+
+            for (name, arg) in args {
+                match name {
+                    Some((n, _)) => {
+                        seen_named = true;
+                        if let Some(idx) = param_names.iter().position(|p| p == n) {
+                            result[idx] = Some(arg);
+                        }
+                    }
+                    None => {
+                        if seen_named {
+                            // Positional after named goes to variadic
+                            variadic_args.push(arg);
+                        } else {
+                            // Positional before any named fills fixed params
+                            if next_positional_idx < param_names.len() {
+                                result[next_positional_idx] = Some(arg);
+                                next_positional_idx += 1;
+                            } else {
+                                // Extra positional goes to variadic
+                                variadic_args.push(arg);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Collect results (type checker already validated all are filled)
+            let mut ordered: Vec<&Expr> = result.into_iter().flatten().collect();
+
+            // Add variadic args at the end
+            ordered.extend(variadic_args);
+
+            ordered
+        } else {
+            // Unknown function - just use positional order (type checker would have errored)
+            args.iter().map(|(_, arg)| arg).collect()
         }
     }
 }

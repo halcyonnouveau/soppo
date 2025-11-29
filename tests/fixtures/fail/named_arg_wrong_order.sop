@@ -1,0 +1,10 @@
+package main
+
+func greet(name string, age int) string {
+    return name
+}
+
+func main() {
+    // Named followed by positional - invalid for non-variadic
+    greet(name: "alice", 30)
+}

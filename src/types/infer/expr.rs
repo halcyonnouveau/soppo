@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::Infer;
 use crate::error::{Result, SoppoError};
-use crate::syntax::{BinOp, EnumVariant, Expr, ExprKind, UnaryOp};
+use crate::syntax::{BinOp, EnumVariant, Expr, ExprKind, Span, UnaryOp};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
 use crate::types::ty::Nullability;
@@ -102,7 +102,7 @@ impl Infer {
                 if let ExprKind::Ident(name) = &func.kind {
                     // close(channel) - closes a channel, returns unit
                     if name == "close" && args.len() == 1 {
-                        let channel_ty = self.infer_expr(&args[0])?;
+                        let channel_ty = self.infer_expr(&args[0].1)?;
                         let channel_ty = self.substitute(channel_ty);
                         // Verify it's a channel type
                         if let Type::Con { name, .. } = &channel_ty
@@ -113,7 +113,7 @@ impl Infer {
                                     "close requires a channel argument, got {}",
                                     channel_ty
                                 ),
-                                span: args[0].span,
+                                span: args[0].1.span,
                             });
                         }
                         return Ok(Type::unit());
@@ -122,7 +122,7 @@ impl Infer {
                     if name == "make" && !type_args.is_empty() {
                         // make(type, ...) - returns the type
                         // Validate additional arguments are integers (size, capacity)
-                        for arg in args {
+                        for (_, arg) in args {
                             let arg_ty = self.infer_expr(arg)?;
                             self.unify(&arg_ty, &Type::simple("int"), &arg.span)?;
                         }
@@ -159,7 +159,7 @@ impl Infer {
                     }
 
                     // Infer the argument type (we don't need to use it, just check it's valid)
-                    self.infer_expr(&args[0])?;
+                    self.infer_expr(&args[0].1)?;
 
                     // Return the target type
                     return Ok(Type::simple(type_name));
@@ -179,7 +179,7 @@ impl Infer {
                         if let Some(func_ty) = self.lookup_soppo_function(pkg_name, name) {
                             // Found the function - infer args and check against signature
                             let mut arg_tys = Vec::new();
-                            for arg in args {
+                            for (_, arg) in args {
                                 arg_tys.push((self.infer_expr(arg)?, arg.span));
                             }
 
@@ -224,7 +224,7 @@ impl Infer {
                                     span: expr.span,
                                 });
                             }
-                            self.infer_expr(&args[0])?;
+                            self.infer_expr(&args[0].1)?;
                             return Ok(ty);
                         }
 
@@ -249,7 +249,7 @@ impl Infer {
                         }
 
                         // Infer the argument type (we don't need to use it, just check it's valid)
-                        self.infer_expr(&args[0])?;
+                        self.infer_expr(&args[0].1)?;
 
                         // Return the target type
                         return Ok(ty);
@@ -260,10 +260,127 @@ impl Infer {
                 let func_ty = self.infer_expr(func)?;
                 let func_ty = self.substitute(func_ty);
 
+                // Look up parameter info if this is a known function
+                // Exclude variadic params (type name starts with "variadic")
+                let (param_names, is_variadic): (Option<Vec<String>>, bool) =
+                    if let ExprKind::Ident(func_name) = &func.kind {
+                        if let Some(f) = self.global_state.lookup_function(func_name) {
+                            let has_variadic = f
+                                .params
+                                .last()
+                                .is_some_and(|(_, ty)| ty.to_string().starts_with("variadic"));
+                            let names = f
+                                .params
+                                .iter()
+                                .filter(|(_, ty)| !ty.to_string().starts_with("variadic"))
+                                .map(|(name, _)| name.clone())
+                                .collect();
+                            (Some(names), has_variadic)
+                        } else {
+                            (None, false)
+                        }
+                    } else {
+                        (None, false)
+                    };
+
+                // Check if any args are named
+                let has_named = args.iter().any(|(name, _)| name.is_some());
+
+                // Reorder arguments based on named arguments
+                let ordered_args: Vec<(&Expr, Span)> = if !has_named {
+                    // All positional - just use them in order
+                    args.iter().map(|(_, e)| (e, e.span)).collect()
+                } else if let Some(param_names) = &param_names {
+                    // We have named args and know parameter names - reorder
+                    // Rules:
+                    // - Positional args before any named arg fill fixed params in order
+                    // - Named args fill their named slots
+                    // - Positional args after a named arg go to variadic
+                    let mut result: Vec<Option<(&Expr, Span)>> = vec![None; param_names.len()];
+                    let mut variadic_args: Vec<(&Expr, Span)> = Vec::new();
+                    let mut seen_named = false;
+                    let mut next_positional_idx = 0;
+
+                    for (name, arg_expr) in args {
+                        match name {
+                            Some((n, name_span)) => {
+                                seen_named = true;
+                                if let Some(idx) = param_names.iter().position(|p| p == n) {
+                                    if result[idx].is_some() {
+                                        return Err(SoppoError::Type {
+                                            message: format!(
+                                                "Argument `{}` provided multiple times",
+                                                n
+                                            ),
+                                            span: *name_span,
+                                        });
+                                    }
+                                    result[idx] = Some((arg_expr, arg_expr.span));
+                                } else {
+                                    return Err(SoppoError::Type {
+                                        message: format!("Unknown parameter name: `{}`", n),
+                                        span: *name_span,
+                                    });
+                                }
+                            }
+                            None => {
+                                if seen_named {
+                                    // Positional after named - only allowed for variadic functions
+                                    if !is_variadic {
+                                        return Err(SoppoError::Type {
+                                            message: "Positional argument cannot follow named argument (non-variadic function)".to_string(),
+                                            span: arg_expr.span,
+                                        });
+                                    }
+                                    variadic_args.push((arg_expr, arg_expr.span));
+                                } else {
+                                    // Positional before any named fills fixed params
+                                    if next_positional_idx < param_names.len() {
+                                        result[next_positional_idx] =
+                                            Some((arg_expr, arg_expr.span));
+                                        next_positional_idx += 1;
+                                    } else {
+                                        // Extra positional goes to variadic
+                                        variadic_args.push((arg_expr, arg_expr.span));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Check all required params are provided
+                    let mut ordered = Vec::new();
+                    for (i, slot) in result.iter().enumerate() {
+                        match slot {
+                            Some((arg, span)) => ordered.push((*arg, *span)),
+                            None => {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "Missing required argument: `{}`",
+                                        param_names[i]
+                                    ),
+                                    span: func.span,
+                                });
+                            }
+                        }
+                    }
+
+                    // Add variadic args at the end
+                    ordered.extend(variadic_args);
+
+                    ordered
+                } else {
+                    // Named args but unknown function - error
+                    return Err(SoppoError::Type {
+                        message: "Named arguments require a known function".to_string(),
+                        span: func.span,
+                    });
+                };
+
                 // Infer argument types with their spans
                 let mut arg_tys = Vec::new();
-                for arg in args {
-                    arg_tys.push((self.infer_expr(arg)?, arg.span));
+                for (arg, span) in &ordered_args {
+                    arg_tys.push((self.infer_expr(arg)?, *span));
                 }
 
                 // Check function call with detailed error spans

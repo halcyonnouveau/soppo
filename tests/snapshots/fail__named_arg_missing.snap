@@ -1,0 +1,14 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: Missing required argument: `age`
+   ╭─[named_arg_missing.sop:8:5]
+ 7 │ func main() {
+ 8 │     greet(name: "alice", active: true)
+   ·     ──┬──
+   ·       ╰── error occurred here
+ 9 │ }
+   ╰────

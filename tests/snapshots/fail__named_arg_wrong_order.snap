@@ -1,0 +1,15 @@
+---
+source: tests/fail.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: Positional argument cannot follow named argument (non-variadic
+  │ function)
+    ╭─[named_arg_wrong_order.sop:9:26]
+  8 │     // Named followed by positional - invalid for non-variadic
+  9 │     greet(name: "alice", 30)
+    ·                          ─┬
+    ·                           ╰── error occurred here
+ 10 │ }
+    ╰────

@@ -6,9 +6,19 @@ use crate::syntax::source::Span;
 
 impl Parser {
     /// Parse a type annotation
-    /// Supports: T, []T, [N]T, *T, map[K]V, chan T, T[A, B]
+    /// Supports: T, []T, [N]T, *T, map[K]V, chan T, T[A, B], ...T (variadic)
     pub(super) fn parse_type(&mut self) -> Result<Type> {
         let start_span = self.peek_span();
+
+        // Variadic type: ...T
+        if self.consume(&Token::DotDotDot) {
+            let elem_ty = self.parse_type()?;
+            return Ok(Type {
+                name: format!("...{}", elem_ty.name),
+                args: vec![elem_ty],
+                span: start_span,
+            });
+        }
 
         // Slice type: []T
         if self.consume(&Token::LBracket) {

@@ -64,3 +64,10 @@ fn test_struct_match() {
         .expect("Compilation should succeed");
     insta::assert_snapshot!(output);
 }
+
+#[test]
+fn test_named_args() {
+    let output = compile_soppo_file("tests/fixtures/pass/named_args.sop")
+        .expect("Compilation should succeed");
+    insta::assert_snapshot!(output);
+}
