@@ -405,9 +405,9 @@ func main() {
     color: #aaa;
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: 1rem;
   }
 
   .github-link:hover {

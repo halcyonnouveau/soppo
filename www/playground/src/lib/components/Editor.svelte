@@ -109,4 +109,12 @@
   .editor :global(.cm-scroller) {
     overflow: auto;
   }
+
+  .editor :global(.cm-content) {
+    font-size: 14px;
+  }
+
+  .editor :global(.cm-gutters) {
+    font-size: 14px;
+  }
 </style>
