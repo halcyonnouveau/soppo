@@ -7,6 +7,7 @@ mod unify;
 use std::collections::HashMap;
 
 use super::ctx::GlobalCtxt;
+use super::symbols::{SymbolInfo, SymbolKind, SymbolTable};
 use super::ty::{Nullability, Type};
 use crate::error::SoppoError;
 use crate::go::{GoCache, Project, parse_go_type};
@@ -98,6 +99,10 @@ pub struct Infer {
     /// Nil state tracking for pointer variables (scoped like variable bindings)
     /// Each scope maps variable names to their current nullability state
     pub(super) nil_state: Vec<HashMap<String, Nullability>>,
+
+    /// Symbol table for LSP features (hover, go-to-definition)
+    /// Maps spans to symbol information
+    pub(super) symbols: SymbolTable,
 }
 
 impl Infer {
@@ -115,6 +120,7 @@ impl Infer {
             imported_packages: HashMap::new(),
             soppo_imports: HashMap::new(),
             nil_state: vec![HashMap::new()],
+            symbols: SymbolTable::new(),
         }
     }
 
@@ -151,6 +157,36 @@ impl Infer {
     /// Consume the Infer and return the global context
     pub fn into_global_state(self) -> GlobalCtxt {
         self.global_state
+    }
+
+    /// Consume the Infer and return the symbol table
+    pub fn into_symbols(self) -> SymbolTable {
+        self.symbols
+    }
+
+    /// Get a reference to the symbol table
+    pub fn symbols(&self) -> &SymbolTable {
+        &self.symbols
+    }
+
+    /// Record a symbol at the given span
+    pub(super) fn record_symbol(
+        &mut self,
+        span: Span,
+        name: String,
+        ty: Type,
+        definition_span: Option<Span>,
+        kind: SymbolKind,
+    ) {
+        self.symbols.record(
+            span,
+            SymbolInfo {
+                name,
+                ty,
+                definition_span,
+                kind,
+            },
+        );
     }
 
     /// Process imports and add package names to scope

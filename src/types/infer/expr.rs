@@ -5,6 +5,7 @@ use crate::error::{Result, SoppoError};
 use crate::syntax::{BinOp, EnumVariant, Expr, ExprKind, ModuleId, Span, Symbol, UnaryOp};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
+use crate::types::symbols::SymbolKind;
 use crate::types::ty::Nullability;
 
 impl Infer {
@@ -45,11 +46,23 @@ impl Infer {
                 if name == "iota" {
                     return Ok(Type::simple("int"));
                 }
-                self.lookup_var(name)
+                let ty = self
+                    .lookup_var(name)
                     .ok_or_else(|| SoppoError::UndefinedVariable {
                         name: name.clone(),
                         span: expr.span,
-                    })
+                    })?;
+
+                // Record the symbol for LSP features
+                self.record_symbol(
+                    expr.span,
+                    name.clone(),
+                    ty.clone(),
+                    None, // TODO: track definition spans
+                    SymbolKind::Variable,
+                );
+
+                Ok(ty)
             }
 
             ExprKind::Binary { op, left, right } => {

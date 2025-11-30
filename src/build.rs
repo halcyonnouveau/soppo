@@ -7,7 +7,7 @@ use crate::codegen::Codegen;
 use crate::deps::DepGraph;
 use crate::go::Project;
 use crate::syntax::{Decl, FileId, ModuleId, Parser};
-use crate::types::{GlobalCtxt, Infer};
+use crate::types::{GlobalCtxt, Infer, SymbolTable};
 
 /// Result of compiling a project - maps relative paths to generated Go code
 pub type BuildResult = Vec<(String, String)>;
@@ -197,6 +197,12 @@ pub fn compile_with_context(
 
 /// Type-check a single source string without generating code
 pub fn typecheck(source: &str, filename: &str) -> Result<()> {
+    typecheck_with_symbols(source, filename).map(|_| ())
+}
+
+/// Type-check a single source string and return the symbol table.
+/// Used by the LSP for hover and go-to-definition.
+pub fn typecheck_with_symbols(source: &str, filename: &str) -> Result<SymbolTable> {
     let mut parser = Parser::new(source, FileId(0));
     let file = parser.parse_file().map_err(|e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
@@ -216,7 +222,7 @@ pub fn typecheck(source: &str, filename: &str) -> Result<()> {
         infer_decl(&mut infer, decl, source, filename)?;
     }
 
-    Ok(())
+    Ok(infer.into_symbols())
 }
 
 /// Pass 1: Register type definitions and function signatures (no body checking)

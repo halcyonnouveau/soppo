@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use miette::Diagnostic as MietteDiagnostic;
-use soppo::build::typecheck;
+use soppo::build::{typecheck, typecheck_with_symbols};
 use soppo::error::SoppoError;
 use soppo::syntax::Span;
+use soppo::types::SymbolTable;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -203,10 +204,17 @@ pub fn byte_offset_to_range(text: &str, start: usize, end: usize) -> Range {
     }
 }
 
+/// Cached document state including source and symbol table
+#[derive(Debug)]
+struct DocumentState {
+    text: String,
+    symbols: Option<SymbolTable>,
+}
+
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
-    documents: Arc<RwLock<HashMap<Url, String>>>,
+    documents: Arc<RwLock<HashMap<Url, DocumentState>>>,
 }
 
 impl Backend {
@@ -217,16 +225,83 @@ impl Backend {
         }
     }
 
-    async fn publish_diagnostics(&self, uri: Url, text: &str) {
+    /// Analyze a document, returning diagnostics and symbol table
+    fn analyze_document(text: &str, filename: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
+        match typecheck_with_symbols(text, filename) {
+            Ok(symbols) => (vec![], Some(symbols)),
+            Err(report) => {
+                // First try to downcast to SoppoError for rich diagnostics
+                if let Some(err) = report.downcast_ref::<SoppoError>() {
+                    return (soppo_error_to_diagnostics(err), None);
+                }
+
+                // Fallback: extract info from miette's Diagnostic trait
+                let mut range = Range::default();
+                if let Some(labels) = MietteDiagnostic::labels(&*report)
+                    && let Some(label) = labels.into_iter().next()
+                {
+                    range =
+                        byte_offset_to_range(text, label.offset(), label.offset() + label.len());
+                }
+
+                (
+                    vec![Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::ERROR),
+                        source: Some("soppo".to_string()),
+                        message: report.to_string(),
+                        ..Default::default()
+                    }],
+                    None,
+                )
+            }
+        }
+    }
+
+    async fn update_document(&self, uri: Url, text: String) {
         let filename = uri
             .path_segments()
             .and_then(|mut s| s.next_back())
             .unwrap_or("input.sop");
 
-        let diagnostics = check_document(text, filename);
+        let (diagnostics, symbols) = Self::analyze_document(&text, filename);
+
+        // Update document state
+        self.documents
+            .write()
+            .await
+            .insert(uri.clone(), DocumentState { text, symbols });
+
+        // Publish diagnostics
         self.client
             .publish_diagnostics(uri, diagnostics, None)
             .await;
+    }
+
+    /// Convert an LSP position to a byte offset in the document
+    fn position_to_byte_offset(text: &str, position: Position) -> usize {
+        let mut offset = 0;
+        let mut current_line = 0;
+
+        for (i, c) in text.char_indices() {
+            if current_line == position.line as usize {
+                // Count characters in this line
+                for (col, (j, ch)) in text[i..].char_indices().enumerate() {
+                    if col == position.character as usize {
+                        return i + j;
+                    }
+                    if ch == '\n' {
+                        break;
+                    }
+                }
+                return i + text[i..].find('\n').unwrap_or(text.len() - i);
+            }
+            if c == '\n' {
+                current_line += 1;
+            }
+            offset = i + c.len_utf8();
+        }
+        offset
     }
 }
 
@@ -238,6 +313,7 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -257,23 +333,13 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
-
-        self.documents
-            .write()
-            .await
-            .insert(uri.clone(), text.clone());
-        self.publish_diagnostics(uri, &text).await;
+        self.update_document(uri, text).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         if let Some(change) = params.content_changes.into_iter().last() {
-            let text = change.text;
-            self.documents
-                .write()
-                .await
-                .insert(uri.clone(), text.clone());
-            self.publish_diagnostics(uri, &text).await;
+            self.update_document(uri, change.text).await;
         }
     }
 
@@ -282,6 +348,39 @@ impl LanguageServer for Backend {
             .write()
             .await
             .remove(&params.text_document.uri);
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let docs = self.documents.read().await;
+        let Some(doc) = docs.get(&uri) else {
+            return Ok(None);
+        };
+
+        let Some(ref symbols) = doc.symbols else {
+            return Ok(None);
+        };
+
+        // Convert position to byte offset
+        let offset = Self::position_to_byte_offset(&doc.text, position);
+
+        // Find symbol at this position
+        let Some(symbol) = symbols.find_at(offset) else {
+            return Ok(None);
+        };
+
+        // Format hover content
+        let content = format!("```soppo\n{}: {}\n```", symbol.name, symbol.ty);
+
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: content,
+            }),
+            range: None,
+        }))
     }
 }
 
@@ -424,5 +523,100 @@ mod tests {
         assert!(diagnostics[0].message.contains("circular dependency"));
         assert_eq!(diagnostics[0].range.start.line, 0);
         assert_eq!(diagnostics[0].range.start.character, 0);
+    }
+
+    #[test]
+    fn position_to_byte_offset_first_line() {
+        let text = "hello world";
+        let pos = Position {
+            line: 0,
+            character: 6,
+        };
+        assert_eq!(Backend::position_to_byte_offset(text, pos), 6);
+    }
+
+    #[test]
+    fn position_to_byte_offset_second_line() {
+        let text = "hello\nworld";
+        let pos = Position {
+            line: 1,
+            character: 2,
+        };
+        assert_eq!(Backend::position_to_byte_offset(text, pos), 8); // "hello\n" = 6 bytes + 2
+    }
+
+    #[test]
+    fn position_to_byte_offset_start_of_line() {
+        let text = "line1\nline2\nline3";
+        let pos = Position {
+            line: 2,
+            character: 0,
+        };
+        assert_eq!(Backend::position_to_byte_offset(text, pos), 12); // "line1\nline2\n" = 12 bytes
+    }
+
+    #[test]
+    fn analyze_document_returns_symbols_for_valid_code() {
+        let code = r#"
+package main
+
+func main() {
+    x := 42
+    println(x)
+}
+"#;
+        let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+        assert!(
+            diagnostics.is_empty(),
+            "Valid code should have no diagnostics"
+        );
+        assert!(symbols.is_some(), "Valid code should produce symbols");
+
+        let symbols = symbols.unwrap();
+        assert!(
+            !symbols.is_empty(),
+            "Should have recorded at least one symbol"
+        );
+    }
+
+    #[test]
+    fn analyze_document_returns_diagnostics_for_invalid_code() {
+        let code = r#"
+package main
+
+func main() {
+    x := undefined_var
+}
+"#;
+        let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+        assert!(
+            !diagnostics.is_empty(),
+            "Invalid code should have diagnostics"
+        );
+        assert!(symbols.is_none(), "Invalid code should not produce symbols");
+    }
+
+    #[test]
+    fn symbol_lookup_finds_variable() {
+        let code = r#"
+package main
+
+func main() {
+    x := 42
+    println(x)
+}
+"#;
+        let (_, symbols) = Backend::analyze_document(code, "test.sop");
+        let symbols = symbols.expect("Should have symbols");
+
+        // Find the byte offset of the second 'x' (in println(x))
+        // "x" appears at position after "println("
+        let x_usage_offset = code.rfind("(x)").unwrap() + 1;
+
+        let symbol = symbols.find_at(x_usage_offset);
+        assert!(symbol.is_some(), "Should find symbol at x usage");
+        let symbol = symbol.unwrap();
+        assert_eq!(symbol.name, "x");
+        assert_eq!(symbol.ty.to_string(), "int");
     }
 }
