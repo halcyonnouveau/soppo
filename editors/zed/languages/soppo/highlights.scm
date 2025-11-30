@@ -102,6 +102,11 @@
 
 (escape_sequence) @string.escape
 
+; String interpolation
+(string_interpolation
+  "{" @punctuation.special
+  "}" @punctuation.special)
+
 ; Nil, true, false
 (nil) @constant.builtin
 (true) @boolean

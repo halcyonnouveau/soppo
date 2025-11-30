@@ -164,3 +164,85 @@ x.(!nil).field
       operand: (nil_assertion_expression
         operand: (identifier))
       field: (field_identifier))))
+
+================================================================================
+String interpolation with expression
+================================================================================
+
+x := "Hello, {name}!"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (short_var_declaration
+    left: (expression_list
+      (identifier))
+    right: (expression_list
+      (interpreted_string_literal
+        (interpreted_string_literal_content)
+        (string_interpolation
+          (identifier))
+        (interpreted_string_literal_content)))))
+
+================================================================================
+String interpolation with function call
+================================================================================
+
+msg := "Count: {len(items)}"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (short_var_declaration
+    left: (expression_list
+      (identifier))
+    right: (expression_list
+      (interpreted_string_literal
+        (interpreted_string_literal_content)
+        (string_interpolation
+          (call_expression
+            function: (identifier)
+            arguments: (argument_list
+              (identifier))))))))
+
+================================================================================
+String with escaped braces
+================================================================================
+
+x := "Use {{name}} for interpolation"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (short_var_declaration
+    left: (expression_list
+      (identifier))
+    right: (expression_list
+      (interpreted_string_literal
+        (interpreted_string_literal_content)
+        (interpreted_string_literal_content)
+        (interpreted_string_literal_content)
+        (interpreted_string_literal_content)
+        (interpreted_string_literal_content)))))
+
+================================================================================
+String with mixed interpolation and escaped braces
+================================================================================
+
+x := "Value: {x}, literal: {{y}}"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (short_var_declaration
+    left: (expression_list
+      (identifier))
+    right: (expression_list
+      (interpreted_string_literal
+        (interpreted_string_literal_content)
+        (string_interpolation
+          (identifier))
+        (interpreted_string_literal_content)
+        (interpreted_string_literal_content)
+        (interpreted_string_literal_content)
+        (interpreted_string_literal_content)))))

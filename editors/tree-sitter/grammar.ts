@@ -1044,14 +1044,20 @@ export default grammar({
         repeat(
           choice(
             alias(
-              token.immediate(prec(1, /[^"\n\\]+/)),
+              token.immediate(prec(1, /[^"\n\\{}]+/)),
               $.interpreted_string_literal_content,
             ),
             $.escape_sequence,
+            $.string_interpolation,
+            // Escaped braces {{ and }}
+            alias(token.immediate("{{"), $.interpreted_string_literal_content),
+            alias(token.immediate("}}"), $.interpreted_string_literal_content),
           ),
         ),
         token.immediate('"'),
       ),
+
+    string_interpolation: ($) => seq(token.immediate("{"), $._expression, "}"),
 
     escape_sequence: (_) =>
       token.immediate(

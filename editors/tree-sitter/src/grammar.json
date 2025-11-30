@@ -5187,7 +5187,7 @@
                     "value": 1,
                     "content": {
                       "type": "PATTERN",
-                      "value": "[^\"\\n\\\\]+"
+                      "value": "[^\"\\n\\\\{}]+"
                     }
                   }
                 },
@@ -5197,6 +5197,34 @@
               {
                 "type": "SYMBOL",
                 "name": "escape_sequence"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "string_interpolation"
+              },
+              {
+                "type": "ALIAS",
+                "content": {
+                  "type": "IMMEDIATE_TOKEN",
+                  "content": {
+                    "type": "STRING",
+                    "value": "{{"
+                  }
+                },
+                "named": true,
+                "value": "interpreted_string_literal_content"
+              },
+              {
+                "type": "ALIAS",
+                "content": {
+                  "type": "IMMEDIATE_TOKEN",
+                  "content": {
+                    "type": "STRING",
+                    "value": "}}"
+                  }
+                },
+                "named": true,
+                "value": "interpreted_string_literal_content"
               }
             ]
           }
@@ -5207,6 +5235,26 @@
             "type": "STRING",
             "value": "\""
           }
+        }
+      ]
+    },
+    "string_interpolation": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "IMMEDIATE_TOKEN",
+          "content": {
+            "type": "STRING",
+            "value": "{"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_expression"
+        },
+        {
+          "type": "STRING",
+          "value": "}"
         }
       ]
     },
