@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/halcyonnouveau/soppo/compare/v0.2.0...v0.3.0) - 2025-11-30
+
+### Added
+
+- *(lsp)* add tests and fix diagnostic span extraction
+- add tree-sitter grammar and zed extension
+- add generic constraint validation
+- add || operator nil narrowing and fix type assertion semantics
+- generic function instantiation and compound nil narrowing
+
+### Fixed
+
+- zed extension config
+- add non_exhaustive to error enum
+
+### Other
+
+- add zed lsp
+
+### Refactor
+
+- unify container type helpers and nil safety checks
+
 ## [0.2.0](https://github.com/halcyonnouveau/soppo/compare/v0.1.1...v0.2.0) - 2025-11-29
 
 ### Added
