@@ -109,6 +109,95 @@ impl Infer {
                 Ok(())
             }
 
+            // Pointer types: unify underlying types even if names differ (e.g., *T vs *?0)
+            (
+                Type::Con {
+                    name: n1,
+                    args: a1,
+                    nullable: nullable1,
+                },
+                Type::Con {
+                    name: n2,
+                    args: a2,
+                    nullable: nullable2,
+                },
+            ) if n1.name.starts_with('*') && n2.name.starts_with('*') && n1.name != n2.name => {
+                // Check nullability: non-nilable cannot receive nilable
+                if !nullable1 && *nullable2 {
+                    return Err(SoppoError::NilableToNonNilable {
+                        expected: n1.name.clone(),
+                        found: format!("?{}", n2.name),
+                        span: *span,
+                    });
+                }
+                // Unify the underlying types via args if both have them
+                if !a1.is_empty() && !a2.is_empty() {
+                    for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                        self.unify(arg1, arg2, span)?;
+                    }
+                }
+                Ok(())
+            }
+
+            // Slice types: unify element types even if names differ (e.g., []T vs []?0)
+            (
+                Type::Con {
+                    name: n1,
+                    args: a1,
+                    nullable: nullable1,
+                },
+                Type::Con {
+                    name: n2,
+                    args: a2,
+                    nullable: nullable2,
+                },
+            ) if n1.name.starts_with("[]") && n2.name.starts_with("[]") && n1.name != n2.name => {
+                if !nullable1 && *nullable2 {
+                    return Err(SoppoError::NilableToNonNilable {
+                        expected: n1.name.clone(),
+                        found: format!("?{}", n2.name),
+                        span: *span,
+                    });
+                }
+                if !a1.is_empty() && !a2.is_empty() {
+                    for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                        self.unify(arg1, arg2, span)?;
+                    }
+                }
+                Ok(())
+            }
+
+            // Channel types: unify element types even if names differ (e.g., chan T vs chan ?0)
+            (
+                Type::Con {
+                    name: n1,
+                    args: a1,
+                    nullable: nullable1,
+                },
+                Type::Con {
+                    name: n2,
+                    args: a2,
+                    nullable: nullable2,
+                },
+            ) if n1.name.starts_with("chan ")
+                && n2.name.starts_with("chan ")
+                && n1.name != n2.name =>
+            {
+                if !nullable1 && *nullable2 {
+                    return Err(SoppoError::NilableToNonNilable {
+                        expected: n1.name.clone(),
+                        found: format!("?{}", n2.name),
+                        span: *span,
+                    });
+                }
+                if !a1.is_empty() && !a2.is_empty() {
+                    for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                        self.unify(arg1, arg2, span)?;
+                    }
+                }
+                Ok(())
+            }
+
             // Same constructor: unify arguments
             (
                 Type::Con {

@@ -1,0 +1,86 @@
+package main
+
+import "fmt"
+
+// Generic function with any constraint
+func identity[T any](val T) T {
+    return val
+}
+
+// Generic function returning pointer
+func wrap[T any](val T) *T {
+    return &val
+}
+
+// Generic function returning nilable pointer
+func wrapNilable[T any](val T) ?*T {
+    return &val
+}
+
+// Generic function with slice parameter
+func first[T any](items []T) ?*T {
+    if len(items) == 0 {
+        return nil
+    }
+    return &items[0]
+}
+
+// Generic function with comparable constraint
+func contains[T comparable](items []T, target T) bool {
+    for _, item := range items {
+        if item == target {
+            return true
+        }
+    }
+    return false
+}
+
+// Generic function with multiple type parameters
+func pair[A any, B any](a A, b B) (A, B) {
+    return a, b
+}
+
+func main() {
+    // Explicit type args
+    x := identity[int](42)
+    y := identity[string]("hello")
+
+    // Inferred type args
+    z := identity(3.14)
+
+    // Pointer return with explicit type
+    p1 := wrap[int](100)
+
+    // Pointer return with inferred type
+    p2 := wrap("test")
+
+    // Nilable pointer return
+    n1 := wrapNilable[int](50)
+    if n1 != nil {
+        fmt.Println(*n1)
+    }
+
+    // Slice parameter with inference
+    nums := []int{1, 2, 3, 4, 5}
+    f := first(nums)
+    if f != nil {
+        fmt.Println(*f)
+    }
+
+    // Comparable constraint
+    found := contains(nums, 3)
+    notFound := contains[int](nums, 10)
+
+    // Multiple type parameters
+    a, b := pair[int, string](1, "one")
+    c, d := pair(true, 2.5)
+
+    fmt.Println(x, y, z)
+    // Note: wrap returns *T (non-nilable) but nil checker requires explicit check
+    // for return values from generic functions
+    if p1 != nil && p2 != nil {
+        fmt.Println(*p1, *p2)
+    }
+    fmt.Println(found, notFound)
+    fmt.Println(a, b, c, d)
+}

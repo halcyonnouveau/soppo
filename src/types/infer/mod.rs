@@ -974,8 +974,22 @@ impl Infer {
             };
         }
 
-        // Handle pointer types with qualified inner types: *pkg.Type -> pointer to pkg.Type
+        // Handle pointer types: *T, *pkg.Type
         if let Some(inner_name) = ast_ty.name.strip_prefix('*') {
+            // Check if inner type is a generic parameter
+            if let Some(ty_var) = self.generic_params.get(inner_name) {
+                // Generic pointer type: *T where T is a type parameter
+                return Type::Con {
+                    name: Symbol {
+                        module: ModuleId::empty(),
+                        name: format!("*{}", inner_name),
+                        span: ast_ty.span,
+                    },
+                    args: vec![ty_var.clone()],
+                    nullable: ast_ty.nullable,
+                };
+            }
+
             // Parse the inner type
             if let Some(dot_idx) = inner_name.find('.') {
                 // Qualified pointer type: *pkg.Type
@@ -1001,6 +1015,38 @@ impl Infer {
                         span: ast_ty.span,
                     },
                     args: vec![inner_ty],
+                    nullable: ast_ty.nullable,
+                };
+            }
+        }
+
+        // Handle slice types: []T
+        if let Some(inner_name) = ast_ty.name.strip_prefix("[]") {
+            // Check if inner type is a generic parameter
+            if let Some(ty_var) = self.generic_params.get(inner_name) {
+                return Type::Con {
+                    name: Symbol {
+                        module: ModuleId::empty(),
+                        name: format!("[]{}", inner_name),
+                        span: ast_ty.span,
+                    },
+                    args: vec![ty_var.clone()],
+                    nullable: ast_ty.nullable,
+                };
+            }
+        }
+
+        // Handle channel types: chan T
+        if let Some(inner_name) = ast_ty.name.strip_prefix("chan ") {
+            // Check if inner type is a generic parameter
+            if let Some(ty_var) = self.generic_params.get(inner_name) {
+                return Type::Con {
+                    name: Symbol {
+                        module: ModuleId::empty(),
+                        name: format!("chan {}", inner_name),
+                        span: ast_ty.span,
+                    },
+                    args: vec![ty_var.clone()],
                     nullable: ast_ty.nullable,
                 };
             }
@@ -1049,14 +1095,102 @@ impl Infer {
         }
     }
 
-    /// Instantiate a type name using a substitution map
-    /// If the name is in the subst map, return the substituted type variable
-    /// Otherwise return the type as-is
-    pub(super) fn instantiate_type(&self, type_name: &str, subst: &HashMap<String, Type>) -> Type {
-        if let Some(ty_var) = subst.get(type_name) {
-            ty_var.clone()
-        } else {
-            Type::simple(type_name)
+    /// Instantiate a Type by substituting generic parameters with concrete types
+    /// This handles composite types like *T, []T, map[K]V, chan T, and func types
+    pub(super) fn instantiate_generic_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
+        match ty {
+            Type::Con {
+                name,
+                args,
+                nullable,
+            } => {
+                // Check if the whole name is a generic param (e.g., T)
+                if let Some(concrete) = subst.get(&name.name) {
+                    let mut result = concrete.clone();
+                    // Preserve nullability
+                    if *nullable {
+                        result = result.as_nullable();
+                    }
+                    return result;
+                }
+
+                // Handle pointer types: *T
+                if let Some(inner) = name.name.strip_prefix('*')
+                    && let Some(concrete) = subst.get(inner)
+                {
+                    let ptr_name = format!("*{}", concrete);
+                    return Type::Con {
+                        name: Symbol {
+                            module: ModuleId::empty(),
+                            name: ptr_name,
+                            span: name.span,
+                        },
+                        args: vec![concrete.clone()],
+                        nullable: *nullable,
+                    };
+                }
+
+                // Handle slice types: []T
+                if let Some(inner) = name.name.strip_prefix("[]")
+                    && let Some(concrete) = subst.get(inner)
+                {
+                    let slice_name = format!("[]{}", concrete);
+                    return Type::Con {
+                        name: Symbol {
+                            module: ModuleId::empty(),
+                            name: slice_name,
+                            span: name.span,
+                        },
+                        args: vec![concrete.clone()],
+                        nullable: *nullable,
+                    };
+                }
+
+                // Handle channel types: chan T
+                if let Some(inner) = name.name.strip_prefix("chan ")
+                    && let Some(concrete) = subst.get(inner)
+                {
+                    let chan_name = format!("chan {}", concrete);
+                    return Type::Con {
+                        name: Symbol {
+                            module: ModuleId::empty(),
+                            name: chan_name,
+                            span: name.span,
+                        },
+                        args: vec![concrete.clone()],
+                        nullable: *nullable,
+                    };
+                }
+
+                // Recursively instantiate type arguments
+                let new_args: Vec<Type> = args
+                    .iter()
+                    .map(|arg| Self::instantiate_generic_type(arg, subst))
+                    .collect();
+
+                Type::Con {
+                    name: name.clone(),
+                    args: new_args,
+                    nullable: *nullable,
+                }
+            }
+            Type::Fun {
+                args,
+                ret,
+                nullable,
+            } => {
+                let new_args: Vec<Type> = args
+                    .iter()
+                    .map(|arg| Self::instantiate_generic_type(arg, subst))
+                    .collect();
+                let new_ret = Self::instantiate_generic_type(ret, subst);
+                Type::Fun {
+                    args: new_args,
+                    ret: Box::new(new_ret),
+                    nullable: *nullable,
+                }
+            }
+            Type::Var(_) | Type::Never => ty.clone(),
         }
     }
 

@@ -11,11 +11,11 @@ use crate::types::ty::Nullability;
 
 /// Result of analyzing a nil check condition
 #[derive(Debug)]
-struct NilCheck {
+pub(super) struct NilCheck {
     /// The expression key being checked (e.g., "user" or "user.profile")
-    expr_key: String,
+    pub expr_key: String,
     /// True if the check is `expr != nil`, false if `expr == nil`
-    is_not_nil: bool,
+    pub is_not_nil: bool,
 }
 
 /// Convert an expression to a trackable key string
@@ -69,6 +69,28 @@ fn extract_nil_check(expr: &Expr) -> Option<NilCheck> {
     }
 
     None
+}
+
+/// Extract all nil checks from a condition expression
+/// Handles compound conditions with && (e.g., `x != nil && y != nil`)
+pub(super) fn extract_nil_checks(expr: &Expr) -> Vec<NilCheck> {
+    let mut checks = Vec::new();
+
+    if let ExprKind::Binary { op, left, right } = &expr.kind {
+        // Handle && - collect checks from both sides
+        if matches!(op, BinOp::And) {
+            checks.extend(extract_nil_checks(left));
+            checks.extend(extract_nil_checks(right));
+            return checks;
+        }
+    }
+
+    // Try to extract a single nil check from this expression
+    if let Some(check) = extract_nil_check(expr) {
+        checks.push(check);
+    }
+
+    checks
 }
 
 impl Infer {
@@ -519,12 +541,13 @@ impl Infer {
                 let cond_ty = self.infer_expr(condition)?;
                 self.unify(&Type::simple("bool"), &cond_ty, &condition.span)?;
 
-                // Extract nil check from condition for flow-sensitive narrowing
-                let nil_check = extract_nil_check(condition);
+                // Extract nil checks from condition for flow-sensitive narrowing
+                // Handles compound conditions like `x != nil && y != nil`
+                let nil_checks = extract_nil_checks(condition);
 
                 // Type check then block with narrowed nil state
                 self.push_nil_scope();
-                if let Some(ref check) = nil_check {
+                for check in &nil_checks {
                     if check.is_not_nil {
                         // `if x != nil { ... }` - x is non-nil in then block
                         self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
@@ -539,7 +562,7 @@ impl Infer {
                 // Type check else block with opposite narrowing
                 let else_ty = if let Some(else_block) = else_block {
                     self.push_nil_scope();
-                    if let Some(ref check) = nil_check {
+                    for check in &nil_checks {
                         if check.is_not_nil {
                             // `if x != nil { ... } else { ... }` - x is nil in else block
                             self.set_nil_state(check.expr_key.clone(), Nullability::Nullable);
@@ -558,7 +581,7 @@ impl Infer {
                 // Handle early return narrowing:
                 // If then block diverges (returns/breaks) and condition was `x == nil`,
                 // then after the if statement, x is known to be non-nil
-                if let Some(ref check) = nil_check {
+                for check in &nil_checks {
                     if matches!(then_ty, Type::Never) && !check.is_not_nil {
                         // `if x == nil { return }` - x is non-nil after this point
                         self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);

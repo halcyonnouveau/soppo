@@ -53,6 +53,27 @@ impl Infer {
             }
 
             ExprKind::Binary { op, left, right } => {
+                // For && operator, apply short-circuit narrowing:
+                // In `x != nil && f(x)`, x is known non-nil when evaluating f(x)
+                if matches!(op, BinOp::And) {
+                    let left_ty = self.infer_expr(left)?;
+                    self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
+
+                    // Extract nil checks from left side and apply narrowing for right side
+                    let nil_checks = super::stmt::extract_nil_checks(left);
+                    self.push_nil_scope();
+                    for check in &nil_checks {
+                        if check.is_not_nil {
+                            self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
+                        }
+                    }
+                    let right_ty = self.infer_expr(right)?;
+                    self.pop_nil_scope();
+                    self.unify(&right_ty, &Type::simple("bool"), &right.span)?;
+
+                    return Ok(Type::simple("bool"));
+                }
+
                 let left_ty = self.infer_expr(left)?;
                 let right_ty = self.infer_expr(right)?;
 
@@ -551,7 +572,9 @@ impl Infer {
                                     // Single variant: returns a constructor function
                                     // Ok(T) -> fn(T) -> Result[T, E]
                                     // Instantiate generic params with fresh type vars
-                                    let param_ty = self.instantiate_type(&ty.name, &generic_subst);
+                                    let ty_simple = Type::simple(&ty.name);
+                                    let param_ty =
+                                        Self::instantiate_generic_type(&ty_simple, &generic_subst);
                                     let return_ty = Type::simple(type_name);
                                     Ok(Type::fun(vec![param_ty], return_ty))
                                 }
@@ -560,7 +583,13 @@ impl Infer {
                                     // taking all fields as parameters
                                     let param_tys: Vec<Type> = fields
                                         .iter()
-                                        .map(|f| self.instantiate_type(&f.ty.name, &generic_subst))
+                                        .map(|f| {
+                                            let ty_simple = Type::simple(&f.ty.name);
+                                            Self::instantiate_generic_type(
+                                                &ty_simple,
+                                                &generic_subst,
+                                            )
+                                        })
                                         .collect();
                                     let return_ty = Type::simple(type_name);
                                     Ok(Type::fun(param_tys, return_ty))
@@ -1212,6 +1241,43 @@ impl Infer {
         // Regular function call
         let func_ty = self.infer_expr(func)?;
         let func_ty = self.substitute(func_ty);
+
+        // If this is a generic function call, instantiate it
+        let func_ty = if let ExprKind::Ident(func_name) = &func.kind {
+            // Clone generics to avoid borrow conflict
+            let generics = self
+                .global_state
+                .lookup_function(func_name)
+                .map(|f| f.generics.clone());
+
+            if let Some(generics) = generics {
+                if !generics.is_empty() {
+                    // Build substitution map: generic param name -> type
+                    let mut subst = std::collections::HashMap::new();
+                    if !type_args.is_empty() {
+                        // Explicit type args provided: use them
+                        for (generic_name, type_arg) in generics.iter().zip(type_args.iter()) {
+                            let concrete_ty = self.resolve_type(type_arg);
+                            subst.insert(generic_name.clone(), concrete_ty);
+                        }
+                    } else {
+                        // No explicit type args: create fresh type variables for inference
+                        for generic_name in &generics {
+                            let ty_var = self.fresh_ty_var();
+                            subst.insert(generic_name.clone(), ty_var);
+                        }
+                    }
+                    // Instantiate the function type
+                    Self::instantiate_generic_type(&func_ty, &subst)
+                } else {
+                    func_ty
+                }
+            } else {
+                func_ty
+            }
+        } else {
+            func_ty
+        };
 
         // Look up parameter info if this is a known function
         // Exclude variadic params (type name starts with "variadic" or "...")
