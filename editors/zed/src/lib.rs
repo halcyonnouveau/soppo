@@ -21,7 +21,6 @@ impl SoppoExtension {
             &zed::LanguageServerInstallationStatus::CheckingForUpdate,
         );
 
-        // Find the latest v* release (soppo-lsp is released alongside sop)
         let release = self.find_latest_release()?;
 
         let (platform, arch) = zed::current_platform();
@@ -80,7 +79,7 @@ impl SoppoExtension {
         let releases: Vec<GithubReleaseResponse> = serde_json::from_slice(&response.body)
             .map_err(|e| format!("failed to parse releases: {e}"))?;
 
-        // Find the latest v* release (not lsp-v* which was the old format)
+        // Find the latest v* release
         releases
             .into_iter()
             .find(|r| r.tag_name.starts_with('v') && !r.tag_name.starts_with("lsp-v"))

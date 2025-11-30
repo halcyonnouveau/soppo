@@ -20,4 +20,4 @@ See [Zed's documentation](https://zed.dev/docs/extensions/installing-extensions)
 If you want to configure another editor:
 
 - **Syntax highlighting:** The Tree-sitter grammar is located in `editors/tree-sitter`
-- **LSP:** The binary can be downloaded from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases) (tags starting with `lsp-v*`)
+- **LSP:** The binary can be downloaded from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases)
