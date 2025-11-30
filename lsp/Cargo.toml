@@ -1,6 +1,6 @@
 [package]
 name = "soppo-lsp"
-version = "0.3.1"
+version = { workspace = true }
 edition = "2024"
 license = "BSD-3-Clause"
 description = "Language server for Soppo"
@@ -10,7 +10,7 @@ name = "soppo-lsp"
 path = "src/main.rs"
 
 [dependencies]
-soppo = { path = ".." }
+soppo = { workspace = true }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
 miette = "7.6"

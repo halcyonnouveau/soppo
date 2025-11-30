@@ -1,0 +1,12 @@
+package main
+
+func parsePort(s string) (int, error) {
+    return 8080, nil
+}
+
+// ERROR: ? requires a space before it
+func main() error {
+    port := parsePort("8080")?
+    println(port)
+    return nil
+}

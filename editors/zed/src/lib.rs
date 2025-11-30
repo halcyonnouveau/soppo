@@ -21,8 +21,8 @@ impl SoppoExtension {
             &zed::LanguageServerInstallationStatus::CheckingForUpdate,
         );
 
-        // Find the latest lsp-v* release
-        let release = self.find_latest_lsp_release()?;
+        // Find the latest v* release (soppo-lsp is released alongside sop)
+        let release = self.find_latest_release()?;
 
         let (platform, arch) = zed::current_platform();
         let asset_name = format!(
@@ -68,7 +68,7 @@ impl SoppoExtension {
         Ok(binary_path)
     }
 
-    fn find_latest_lsp_release(&self) -> Result<zed::GithubRelease> {
+    fn find_latest_release(&self) -> Result<zed::GithubRelease> {
         let response = zed::http_client::fetch(&zed::http_client::HttpRequest {
             url: "https://api.github.com/repos/halcyonnouveau/soppo/releases".to_string(),
             method: zed::http_client::HttpMethod::Get,
@@ -80,11 +80,12 @@ impl SoppoExtension {
         let releases: Vec<GithubReleaseResponse> = serde_json::from_slice(&response.body)
             .map_err(|e| format!("failed to parse releases: {e}"))?;
 
+        // Find the latest v* release (not lsp-v* which was the old format)
         releases
             .into_iter()
-            .find(|r| r.tag_name.starts_with("lsp-v"))
+            .find(|r| r.tag_name.starts_with('v') && !r.tag_name.starts_with("lsp-v"))
             .map(|r| zed::GithubRelease {
-                version: r.tag_name.trim_start_matches("lsp-v").to_string(),
+                version: r.tag_name.trim_start_matches('v').to_string(),
                 assets: r
                     .assets
                     .into_iter()
@@ -94,7 +95,7 @@ impl SoppoExtension {
                     })
                     .collect(),
             })
-            .ok_or_else(|| "no lsp-v* release found".into())
+            .ok_or_else(|| "no v* release found".into())
     }
 }
 

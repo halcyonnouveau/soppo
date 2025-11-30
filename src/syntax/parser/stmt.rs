@@ -12,7 +12,22 @@ impl Parser {
         let stmt = self.parse_stmt_inner()?;
 
         // Check for ? error propagation
-        if self.consume(&Token::Question) {
+        // The ? operator requires a space before it (not like Rust)
+        if self.check(&Token::Question) {
+            let question_span = self.peek_span();
+            let stmt_end = stmt.span.byte_end;
+
+            // Check if ? is directly adjacent to the statement (no space)
+            if question_span.byte_start == stmt_end {
+                return Err(SoppoError::Parse {
+                    message:
+                        "the `?` operator requires a space before it (e.g., `expr ?` not `expr?`)"
+                            .to_string(),
+                    span: question_span,
+                });
+            }
+
+            self.advance(); // consume the ?
             let try_span = self.previous_span();
             let stmt_span = stmt.span; // Save span before moving
 
@@ -1468,6 +1483,30 @@ mod tests {
         assert!(matches!(block.stmts[1].kind, StmtKind::Decl { .. }));
         assert!(matches!(block.stmts[2].kind, StmtKind::Decl { .. }));
         assert!(matches!(block.stmts[3].kind, StmtKind::Return { .. }));
+    }
+
+    #[test]
+    fn test_parse_try_requires_space() {
+        // ? without space before it should fail
+        let source = "foo()?";
+        let mut parser = Parser::new(source, FileId(0));
+        let result = parser.parse_stmt();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("space before it"));
+    }
+
+    #[test]
+    fn test_parse_try_with_space() {
+        // ? with space before it should parse
+        let source = "foo() ?";
+        let mut parser = Parser::new(source, FileId(0));
+        let result = parser.parse_stmt();
+        assert!(result.is_ok());
+        match result.unwrap().kind {
+            StmtKind::TryStmt { .. } => {}
+            _ => panic!("Expected TryStmt"),
+        }
     }
 
     #[test]

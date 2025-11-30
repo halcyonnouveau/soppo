@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::parse
+
+  × Syntax error: the `?` operator requires a space before it (e.g., `expr ?`
+  │ not `expr?`)
+    ╭─[try_no_space.sop:9:30]
+  8 │ func main() error {
+  9 │     port := parsePort("8080")?
+    ·                              ┬
+    ·                              ╰── unexpected token
+ 10 │     println(port)
+    ╰────

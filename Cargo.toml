@@ -2,9 +2,15 @@
 members = [".", "lsp"]
 exclude = ["editors/zed"]
 
+[workspace.package]
+version = "0.2.0"
+
+[workspace.dependencies]
+soppo = { path = ".", version = "0.2.0" }
+
 [package]
 name = "soppo"
-version = "0.3.0"
+version = { workspace = true }
 edition = "2024"
 license = "BSD-3-Clause"
 repository = "https://github.com/halcyonnouveau/soppo"
