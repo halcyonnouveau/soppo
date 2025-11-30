@@ -1,14 +1,9 @@
-name: LSP
+name: Build LSP and Upload Binaries
 
 permissions:
   contents: write
 
 on:
-  push:
-    paths:
-      - "lsp/**"
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
@@ -47,6 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - name: Build
         run: cargo build --release --package soppo-lsp --target ${{ matrix.target }}
       - name: Package (unix)
