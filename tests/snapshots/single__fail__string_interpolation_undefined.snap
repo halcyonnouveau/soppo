@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::undefined_variable
+
+  × Cannot find value `undefined_func` in this scope
+   ╭─[string_interpolation_undefined.sop:7:29]
+ 6 │     lines := 10
+ 7 │     fmt.Println("Processed {undefined_func(lines)} lines")
+   ·                             ───────┬──────
+   ·                                    ╰── not found in this scope
+ 8 │ }
+   ╰────
+  help: Use `:=` to declare a new variable: `undefined_func := <value>`

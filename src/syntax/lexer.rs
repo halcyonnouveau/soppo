@@ -215,6 +215,8 @@ pub struct Lexer<'a> {
     file: FileId,
     lexer: logos::Lexer<'a, Token>,
     comments: Vec<Comment>,
+    /// Byte offset to add to all spans (for parsing sub-expressions like string interpolation)
+    byte_offset: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -224,6 +226,20 @@ impl<'a> Lexer<'a> {
             file,
             lexer: Token::lexer(source),
             comments: Vec::new(),
+            byte_offset: 0,
+        }
+    }
+
+    /// Create a lexer with a byte offset for all spans.
+    /// Used when parsing sub-expressions (e.g., string interpolation) that need
+    /// their spans to point to the correct location in the original source.
+    pub fn new_with_offset(source: &'a str, file: FileId, byte_offset: usize) -> Self {
+        Self {
+            source,
+            file,
+            lexer: Token::lexer(source),
+            comments: Vec::new(),
+            byte_offset,
         }
     }
 
@@ -264,7 +280,14 @@ impl<'a> Lexer<'a> {
             let start = self.byte_offset_to_line_col(byte_span.start);
             let end = self.byte_offset_to_line_col(byte_span.end);
 
-            let span = Span::with_bytes(start, end, self.file, byte_span.start, byte_span.end);
+            // Apply byte offset for sub-expression parsing (e.g., string interpolation)
+            let span = Span::with_bytes(
+                start,
+                end,
+                self.file,
+                byte_span.start + self.byte_offset,
+                byte_span.end + self.byte_offset,
+            );
 
             match token.ok()? {
                 Token::LineComment(text) => {

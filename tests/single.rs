@@ -101,6 +101,7 @@ mod fail {
         nullable_assign_to_nonnull,
         nullable_nil_to_nonnull,
         nullable_no_init,
+        string_interpolation_undefined,
         try_expr_no_error,
         try_no_return_error,
         type_mismatch,

@@ -342,11 +342,12 @@ log(level: "info", "msg1", "msg2")
 name := "alice"
 age := 30
 msg := "hello {name}, you are {age}"
-// Codegens to: fmt.Sprintf("hello %v, you are %v", name, age)
+// Expressions are also supported
+msg2 := "total: {len(items) * 2}"
 ```
 
 > [!TIP]
-> Variables only, no expressions. Use `{{` to escape literal braces.
+> Use `{{` and `}}` to escape literal braces.
 
 ## Go Interop and Imports
 

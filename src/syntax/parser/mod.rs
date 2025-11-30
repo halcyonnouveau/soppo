@@ -62,6 +62,22 @@ impl Parser {
         }
     }
 
+    /// Create a parser with a byte offset for all spans.
+    /// Used when parsing sub-expressions (e.g., string interpolation) that need
+    /// their spans to point to the correct location in the original source.
+    pub fn new_with_offset(source: &str, file: FileId, byte_offset: usize) -> Self {
+        let mut lexer = Lexer::new_with_offset(source, file, byte_offset);
+        let tokens = lexer.collect_all();
+        let comments = lexer.take_comments();
+
+        Self {
+            tokens,
+            pos: 0,
+            file,
+            comments,
+        }
+    }
+
     /// Peek at current token without consuming
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos).map(|(tok, _)| tok)

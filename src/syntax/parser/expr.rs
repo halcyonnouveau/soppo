@@ -1150,13 +1150,16 @@ impl Parser {
     fn parse_string_interpolation(&mut self, s: &str, span: Span) -> Result<Vec<StringPart>> {
         let mut parts = Vec::new();
         let mut current_literal = String::new();
-        let mut chars = s.chars().peekable();
+        let mut char_indices = s.char_indices().peekable();
 
-        while let Some(ch) = chars.next() {
+        // The string content starts after the opening quote
+        let string_content_byte_start = span.byte_start + 1;
+
+        while let Some((byte_pos, ch)) = char_indices.next() {
             if ch == '{' {
                 // Check for escaped brace: {{
-                if chars.peek() == Some(&'{') {
-                    chars.next();
+                if char_indices.peek().map(|(_, c)| *c) == Some('{') {
+                    char_indices.next();
                     current_literal.push('{');
                     continue;
                 }
@@ -1167,11 +1170,14 @@ impl Parser {
                     current_literal.clear();
                 }
 
+                // Track where the expression starts (after the '{')
+                let expr_start_byte = string_content_byte_start + byte_pos + 1;
+
                 // Extract the expression inside {}
                 let mut expr_str = String::new();
                 let mut brace_depth = 1;
 
-                for inner_ch in chars.by_ref() {
+                for (_, inner_ch) in char_indices.by_ref() {
                     if inner_ch == '{' {
                         brace_depth += 1;
                         expr_str.push(inner_ch);
@@ -1193,14 +1199,21 @@ impl Parser {
                     });
                 }
 
-                // Parse the expression
-                let mut expr_parser = Parser::new(&expr_str, self.file);
-                let expr = expr_parser.parse_expr()?;
+                // Parse the expression with byte offset so errors point to correct location
+                let mut expr_parser =
+                    Parser::new_with_offset(&expr_str, self.file, expr_start_byte);
+                let expr = expr_parser.parse_expr().map_err(|e| {
+                    // Remap parse errors to parent string span as fallback
+                    match e {
+                        SoppoError::Parse { message, .. } => SoppoError::Parse { message, span },
+                        other => other,
+                    }
+                })?;
                 parts.push(StringPart::Expr(Box::new(expr)));
             } else if ch == '}' {
                 // Check for escaped brace: }}
-                if chars.peek() == Some(&'}') {
-                    chars.next();
+                if char_indices.peek().map(|(_, c)| *c) == Some('}') {
+                    char_indices.next();
                     current_literal.push('}');
                     continue;
                 }

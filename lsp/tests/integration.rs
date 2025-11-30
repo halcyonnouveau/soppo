@@ -165,3 +165,28 @@ fn diagnostic_range_is_correct() {
         "Error should start at column 10 (0-indexed: 9)"
     );
 }
+
+/// Test that errors in string interpolation have correct range (not line 0)
+#[test]
+fn string_interpolation_error_has_correct_range() {
+    let code = r#"
+package main
+
+func main() {
+    msg := "hello {undefined_var}"
+}
+"#;
+    let diagnostics = check_document(code, "test.sop");
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected diagnostics for undefined variable in interpolation"
+    );
+
+    let diag = &diagnostics[0];
+    // The error should be on line 5 (0-indexed = 4), not line 0
+    assert!(
+        diag.range.start.line > 0,
+        "Error in string interpolation should not be at line 0, got line {}",
+        diag.range.start.line
+    );
+}

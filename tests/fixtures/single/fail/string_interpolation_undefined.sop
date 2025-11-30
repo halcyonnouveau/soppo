@@ -1,0 +1,8 @@
+package main
+
+import "fmt"
+
+func main() {
+    lines := 10
+    fmt.Println("Processed {undefined_func(lines)} lines")
+}
