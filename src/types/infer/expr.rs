@@ -236,8 +236,13 @@ impl Infer {
                 // Return proper slice/array type
                 if let Some(declared_ty) = declared_type {
                     Ok(declared_ty)
-                } else {
+                } else if ty.is_some() {
+                    // Explicit type without [] prefix - use array type
                     Ok(Type::array(elem_ty))
+                } else {
+                    // Implicit composite literal (no type specified) - use slice type
+                    // This handles cases like [][]int{{1, 2}, {3, 4}} where {1, 2} is implicit
+                    Ok(Type::slice(elem_ty))
                 }
             }
 
@@ -562,7 +567,7 @@ impl Infer {
                     let generic_subst: HashMap<String, Type> = type_def
                         .generics
                         .iter()
-                        .map(|g| (g.clone(), self.fresh_ty_var()))
+                        .map(|g| (g.name.clone(), self.fresh_ty_var()))
                         .collect();
 
                     // Find the variant
@@ -840,6 +845,21 @@ impl Infer {
                             span: func.span,
                         });
                     }
+
+                    // Validate type arg constraints
+                    for (generic_param, type_arg) in type_def.generics.iter().zip(type_args.iter())
+                    {
+                        let concrete_ty = self.resolve_type(type_arg);
+                        if !generic_param.satisfies(&concrete_ty) {
+                            return Err(SoppoError::ConstraintNotSatisfied {
+                                ty: concrete_ty.to_string(),
+                                constraint: generic_param.constraint.clone(),
+                                hint: Self::constraint_hint(&generic_param.constraint),
+                                span: type_arg.span,
+                            });
+                        }
+                    }
+
                     // Return the enum type - args are handled by codegen
                     return Ok(Type::simple(type_name));
                 }
@@ -1247,16 +1267,27 @@ impl Infer {
                     // Build substitution map: generic param name -> type
                     let mut subst = std::collections::HashMap::new();
                     if !type_args.is_empty() {
-                        // Explicit type args provided: use them
-                        for (generic_name, type_arg) in generics.iter().zip(type_args.iter()) {
+                        // Explicit type args provided: validate constraints and use them
+                        for (generic_param, type_arg) in generics.iter().zip(type_args.iter()) {
                             let concrete_ty = self.resolve_type(type_arg);
-                            subst.insert(generic_name.clone(), concrete_ty);
+
+                            // Validate constraint
+                            if !generic_param.satisfies(&concrete_ty) {
+                                return Err(SoppoError::ConstraintNotSatisfied {
+                                    ty: concrete_ty.to_string(),
+                                    constraint: generic_param.constraint.clone(),
+                                    hint: Self::constraint_hint(&generic_param.constraint),
+                                    span: type_arg.span,
+                                });
+                            }
+
+                            subst.insert(generic_param.name.clone(), concrete_ty);
                         }
                     } else {
                         // No explicit type args: create fresh type variables for inference
-                        for generic_name in &generics {
+                        for generic_param in &generics {
                             let ty_var = self.fresh_ty_var();
-                            subst.insert(generic_name.clone(), ty_var);
+                            subst.insert(generic_param.name.clone(), ty_var);
                         }
                     }
                     // Instantiate the function type

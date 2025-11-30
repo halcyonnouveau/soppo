@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::constraint_not_satisfied
+
+  × Type `[]int` does not satisfy constraint `comparable`
+    ╭─[generic_constraint_comparable.sop:16:18]
+ 15 │     slices := [][]int{{1, 2}, {3, 4}}
+ 16 │     _ = Contains[[]int](slices, []int{1, 2})
+    ·                  ┬
+    ·                  ╰── type argument does not satisfy `comparable`
+ 17 │ }
+    ╰────
+  help: slices, maps, and functions are not comparable

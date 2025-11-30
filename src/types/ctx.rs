@@ -54,7 +54,7 @@ pub struct Module {
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub name: String,
-    pub generics: Vec<String>,
+    pub generics: Vec<GenericParam>,
     pub kind: TypeDefKind,
 }
 
@@ -87,11 +87,68 @@ pub struct MethodSig {
     pub returns: Vec<Type>,
 }
 
+/// Generic type parameter with constraint
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParam {
+    pub name: String,
+    pub constraint: String,
+}
+
+impl GenericParam {
+    pub fn new(name: impl Into<String>, constraint: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            constraint: constraint.into(),
+        }
+    }
+
+    /// Check if a type satisfies this constraint
+    pub fn satisfies(&self, ty: &Type) -> bool {
+        match self.constraint.as_str() {
+            "any" => true,
+            "comparable" => Self::is_comparable(ty),
+            // Interface constraints would need more complex checking
+            _ => true, // Unknown constraints pass for now
+        }
+    }
+
+    /// Check if a type is comparable (supports == and !=)
+    /// In Go, slices, maps, and functions are NOT comparable
+    fn is_comparable(ty: &Type) -> bool {
+        match ty {
+            Type::Con { name, args, .. } => {
+                let ty_name = &name.name;
+
+                // Slices are not comparable
+                if ty_name.starts_with("[]") {
+                    return false;
+                }
+
+                // Maps are not comparable
+                if ty_name.starts_with("map[") {
+                    return false;
+                }
+
+                // Functions are not comparable
+                if ty_name.starts_with("func") {
+                    return false;
+                }
+
+                // Check type arguments recursively (e.g., [2][]int is not comparable)
+                args.iter().all(Self::is_comparable)
+            }
+            Type::Fun { .. } => false, // Functions are not comparable
+            Type::Var(_) => true,      // Type variables are assumed comparable
+            Type::Never => true,
+        }
+    }
+}
+
 /// Function definition in a module
 #[derive(Debug, Clone)]
 pub struct FuncDef {
     pub name: String,
-    pub generics: Vec<String>,
+    pub generics: Vec<GenericParam>,
     pub params: Vec<(String, Type)>,
     pub return_types: Vec<Type>,
 }
@@ -167,7 +224,11 @@ impl GlobalCtxt {
     pub fn register_type(&mut self, type_decl: &TypeDecl) {
         let type_def = TypeDef {
             name: type_decl.name.clone(),
-            generics: type_decl.generics.iter().map(|g| g.name.clone()).collect(),
+            generics: type_decl
+                .generics
+                .iter()
+                .map(|g| GenericParam::new(&g.name, &g.constraint))
+                .collect(),
             kind: match &type_decl.kind {
                 TypeKind::Alias { target } => TypeDefKind::Alias {
                     target: Type::from_ast(target),
@@ -210,7 +271,11 @@ impl GlobalCtxt {
     pub fn register_function(&mut self, func_decl: &FuncDecl) {
         let func_def = FuncDef {
             name: func_decl.name.clone(),
-            generics: func_decl.generics.iter().map(|g| g.name.clone()).collect(),
+            generics: func_decl
+                .generics
+                .iter()
+                .map(|g| GenericParam::new(&g.name, &g.constraint))
+                .collect(),
             params: func_decl
                 .params
                 .iter()
@@ -427,7 +492,9 @@ mod tests {
         let type_def = gs.lookup_type("Result").unwrap();
         assert_eq!(type_def.name, "Result");
         assert_eq!(type_def.generics.len(), 2);
-        assert_eq!(type_def.generics[0], "T");
-        assert_eq!(type_def.generics[1], "E");
+        assert_eq!(type_def.generics[0].name, "T");
+        assert_eq!(type_def.generics[0].constraint, "any");
+        assert_eq!(type_def.generics[1].name, "E");
+        assert_eq!(type_def.generics[1].constraint, "any");
     }
 }

@@ -1,0 +1,17 @@
+package main
+
+// Generic function requiring comparable types
+func Contains[T comparable](slice []T, item T) bool {
+    for _, v := range slice {
+        if v == item {
+            return true
+        }
+    }
+    return false
+}
+
+func main() {
+    // This should fail: []int is not comparable
+    slices := [][]int{{1, 2}, {3, 4}}
+    _ = Contains[[]int](slices, []int{1, 2})
+}

@@ -153,6 +153,16 @@ pub enum SoppoError {
         #[label("missing type arguments")]
         span: Span,
     },
+
+    #[error("Type `{ty}` does not satisfy constraint `{constraint}`")]
+    #[diagnostic(code(soppo::constraint_not_satisfied), help("{hint}"))]
+    ConstraintNotSatisfied {
+        ty: String,
+        constraint: String,
+        hint: String,
+        #[label("type argument does not satisfy `{constraint}`")]
+        span: Span,
+    },
 }
 
 fn format_cycle(cycle: &[(String, String)]) -> String {

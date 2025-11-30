@@ -113,6 +113,19 @@ impl Type {
         }
     }
 
+    /// Create a slice type with element type: []T
+    pub fn slice(element_type: Type) -> Self {
+        Type::Con {
+            name: Symbol {
+                module: ModuleId::empty(),
+                name: format!("[]{}", element_type),
+                span: Span::dummy(),
+            },
+            args: vec![element_type],
+            nullable: false,
+        }
+    }
+
     /// Create an anonymous struct type
     /// The name encodes the struct definition for codegen: "struct { Name1 Type1; Name2 Type2; ... }"
     pub fn anon_struct(fields: Vec<(String, Type)>) -> Self {

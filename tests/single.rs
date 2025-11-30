@@ -77,6 +77,7 @@ mod fail {
         assign_wrong_type,
         const_no_value,
         duration_string_mul,
+        generic_constraint_comparable,
         generic_unit_variant_no_type_args,
         go_unknown_function,
         go_wrong_arg_count,

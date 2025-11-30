@@ -1104,6 +1104,40 @@ impl Parser {
                 })
             }
 
+            // Implicit composite literal: {expr, expr, ...}
+            // Used inside array/slice literals like [][]int{{1, 2}, {3, 4}}
+            Token::LBrace => {
+                let mut elements = Vec::new();
+
+                if !matches!(self.peek(), Some(Token::RBrace)) {
+                    loop {
+                        elements.push(self.parse_expr()?);
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
+                        if matches!(self.peek(), Some(Token::RBrace)) {
+                            break;
+                        }
+                    }
+                }
+
+                let end_span = self.expect(Token::RBrace)?;
+
+                Ok(Expr {
+                    kind: ExprKind::ArrayLit {
+                        ty: None, // Type inferred from context
+                        elements,
+                    },
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
+            }
+
             _ => Err(SoppoError::Parse {
                 message: format!("Unexpected token: {:?}", tok),
                 span,

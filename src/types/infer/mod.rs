@@ -1377,6 +1377,14 @@ impl Infer {
         }
     }
 
+    /// Get a helpful hint message for a constraint violation
+    pub(super) fn constraint_hint(constraint: &str) -> String {
+        match constraint {
+            "comparable" => "slices, maps, and functions are not comparable".to_string(),
+            _ => format!("type must satisfy `{}`", constraint),
+        }
+    }
+
     /// Determine the nullability of an expression's result
     /// Returns NonNull for expressions that are guaranteed non-nil:
     /// - &expr (address-of)
