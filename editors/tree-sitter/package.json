@@ -1,0 +1,44 @@
+{
+  "name": "tree-sitter-soppo",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tree-sitter grammar for Soppo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/halcyonnouveau/soppo.git",
+    "directory": "editors/tree-sitter"
+  },
+  "license": "BSD-3-Clause",
+  "keywords": [
+    "tree-sitter",
+    "soppo",
+    "parser"
+  ],
+  "files": [
+    "grammar.ts",
+    "queries/*",
+    "src/**"
+  ],
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.10",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "generate": "bun build grammar.ts --outfile grammar.js --target node && tree-sitter generate",
+    "build": "bun run generate && tree-sitter build",
+    "build-wasm": "bun run generate && tree-sitter build --wasm",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.soppo",
+      "injection-regex": "^soppo$",
+      "file-types": [
+        "sop"
+      ],
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+[package]
+name = "soppo"
+version = "0.1.0"
+description = "Soppo language support for Zed"
+authors = ["Justin Duch"]
+repository = "https://github.com/halcyonnouveau/soppo"
+
+[grammars.soppo]
+repository = "https://github.com/halcyonnouveau/soppo"
+rev = "6b8ce09aa1a36a48dcd605456c8cdc6a22ebc47d"
+path = "editors/tree-sitter"

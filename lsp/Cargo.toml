@@ -1,0 +1,15 @@
+[package]
+name = "soppo-lsp"
+version = "0.1.0"
+edition = "2024"
+license = "BSD-3-Clause"
+description = "Language server for Soppo"
+
+[[bin]]
+name = "soppo-lsp"
+path = "src/main.rs"
+
+[dependencies]
+soppo = { path = ".." }
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }

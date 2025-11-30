@@ -2,3 +2,10 @@
 go = "1.25"
 bun = "latest"
 "cargo:cargo-insta" = "latest"
+
+[tasks.editor-sync]
+description = "Sync tree-sitter queries to editor extensions"
+run = """
+cp editors/tree-sitter/queries/*.scm editors/zed/languages/soppo/
+sed -i 's/^rev = .*/rev = "'"$(git rev-parse HEAD)"'"/' editors/zed/extension.toml
+"""
