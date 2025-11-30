@@ -2,7 +2,7 @@ app = 'soppo-playground'
 primary_region = 'syd'
 
 [build]
-dockerfile = "playground.Dockerfile"
+dockerfile = "Dockerfile.playground"
 
 [http_service]
 internal_port = 3000
