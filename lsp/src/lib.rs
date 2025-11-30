@@ -557,6 +557,7 @@ impl LanguageServer for Backend {
                     retrigger_characters: None,
                     work_done_progress_options: Default::default(),
                 }),
+                references_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -1081,6 +1082,141 @@ impl LanguageServer for Backend {
             active_signature: Some(0),
             active_parameter: Some(comma_count as u32),
         }))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        // Get the symbol at cursor position
+        let (text, symbols) = if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(fid) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&fid)
+            {
+                let open_docs = self.open_documents.read().await;
+                (open_docs.get(&path).cloned(), Some(symbols.clone()))
+            } else {
+                drop(ws_guard);
+                let docs = self.documents.read().await;
+                let doc = docs.get(&uri);
+                (
+                    doc.map(|d| d.text.clone()),
+                    doc.and_then(|d| d.symbols.clone()),
+                )
+            }
+        } else {
+            let docs = self.documents.read().await;
+            let doc = docs.get(&uri);
+            (
+                doc.map(|d| d.text.clone()),
+                doc.and_then(|d| d.symbols.clone()),
+            )
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+        let Some(symbols) = symbols else {
+            return Ok(None);
+        };
+
+        let offset = Self::position_to_byte_offset(&text, position);
+
+        // Find the symbol at cursor
+        let Some(symbol) = symbols.find_at(offset) else {
+            return Ok(None);
+        };
+
+        // Get the definition span - this uniquely identifies the symbol
+        let Some(def_span) = symbol.definition_span else {
+            return Ok(None);
+        };
+
+        let mut locations = Vec::new();
+
+        // Search in workspace mode if available
+        let ws_guard = self.workspace.read().await;
+        if let Some(ws) = ws_guard.as_ref() {
+            let open_docs = self.open_documents.read().await;
+
+            // Search all symbol tables in the workspace
+            for (fid, file_symbols) in &ws.symbol_tables {
+                let file_path = if let Some(path) = ws.file_registry.get_path(*fid) {
+                    path
+                } else {
+                    continue;
+                };
+
+                let file_uri = match Url::from_file_path(file_path) {
+                    Ok(uri) => uri,
+                    Err(_) => continue,
+                };
+
+                // Find all symbols that reference the same definition
+                for ((start, end), info) in file_symbols.all_symbols() {
+                    if let Some(info_def_span) = info.definition_span {
+                        // Check if this symbol references the same definition
+                        if info_def_span.file == def_span.file
+                            && info_def_span.byte_start == def_span.byte_start
+                            && info_def_span.byte_end == def_span.byte_end
+                        {
+                            // Skip the declaration itself unless include_declaration is true
+                            let is_declaration = *start == def_span.byte_start
+                                && *end == def_span.byte_end
+                                && *fid == def_span.file;
+
+                            if is_declaration && !include_declaration {
+                                continue;
+                            }
+
+                            // Get proper range from byte offsets
+                            let range = if let Some(text) = open_docs.get(file_path) {
+                                byte_offset_to_range(text, *start, *end)
+                            } else if let Ok(text) = std::fs::read_to_string(file_path) {
+                                byte_offset_to_range(&text, *start, *end)
+                            } else {
+                                Range::default()
+                            };
+
+                            locations.push(Location {
+                                uri: file_uri.clone(),
+                                range,
+                            });
+                        }
+                    }
+                }
+            }
+        } else {
+            // Single-file mode: only search current file
+            for ((start, end), info) in symbols.all_symbols() {
+                if let Some(info_def_span) = info.definition_span
+                    && info_def_span.byte_start == def_span.byte_start
+                    && info_def_span.byte_end == def_span.byte_end
+                {
+                    let is_declaration = *start == def_span.byte_start && *end == def_span.byte_end;
+
+                    if is_declaration && !include_declaration {
+                        continue;
+                    }
+
+                    let range = byte_offset_to_range(&text, *start, *end);
+
+                    locations.push(Location {
+                        uri: uri.clone(),
+                        range,
+                    });
+                }
+            }
+        }
+
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(locations))
+        }
     }
 }
 

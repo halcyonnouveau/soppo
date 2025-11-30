@@ -1,5 +1,6 @@
 mod completion;
 mod diagnostics;
+mod references;
 mod signature_help;
 mod symbols;
 
