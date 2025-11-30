@@ -12,7 +12,7 @@ func main() {
     println(y)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Valid code should have no diagnostics"
@@ -67,7 +67,7 @@ func main() {
     println(x + y)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Valid code should have no diagnostics"
@@ -119,7 +119,7 @@ func multiply(n int, times int) int {
     return result
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Valid code should have no diagnostics: {:?}",
@@ -181,7 +181,7 @@ func main() {
     println(z)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Valid code should have no diagnostics"
@@ -249,7 +249,7 @@ func main() {
     println(p.X)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Valid code should have no diagnostics: {:?}",

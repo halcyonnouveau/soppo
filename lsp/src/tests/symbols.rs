@@ -36,7 +36,7 @@ fn to_lsp_symbol_kind_converts_correctly() {
 }
 
 #[test]
-fn analyze_document_returns_symbols_for_valid_code() {
+fn analyse_document_returns_symbols_for_valid_code() {
     let code = r#"
 package main
 
@@ -45,7 +45,7 @@ func main() {
     println(x)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Valid code should have no diagnostics"
@@ -60,7 +60,7 @@ func main() {
 }
 
 #[test]
-fn analyze_document_returns_diagnostics_for_invalid_code() {
+fn analyse_document_returns_diagnostics_for_invalid_code() {
     let code = r#"
 package main
 
@@ -68,7 +68,7 @@ func main() {
     x := undefined_var
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         !diagnostics.is_empty(),
         "Invalid code should have diagnostics"
@@ -86,7 +86,7 @@ func main() {
     println(x)
 }
 "#;
-    let (_, symbols) = Backend::analyze_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop");
     let symbols = symbols.expect("Should have symbols");
 
     let x_usage_offset = code.rfind("(x)").unwrap() + 1;
@@ -108,7 +108,7 @@ func main() {
     println(x)
 }
 "#;
-    let (_, symbols) = Backend::analyze_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop");
     let symbols = symbols.expect("Should have symbols");
 
     let x_usage_offset = code.rfind("(x)").unwrap() + 1;
@@ -135,7 +135,7 @@ func add(a int, b int) int {
     return a + b
 }
 "#;
-    let (_, symbols) = Backend::analyze_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop");
     let symbols = symbols.expect("Should have symbols");
 
     let a_usage_offset = code.find("return a").unwrap() + 7;
@@ -167,7 +167,7 @@ func main() {
     println(x)
 }
 "#;
-    let (_, symbols) = Backend::analyze_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop");
     let symbols = symbols.expect("Should have symbols");
 
     let x_usage_offset = code.rfind("(x)").unwrap() + 1;
@@ -182,7 +182,7 @@ func main() {
 }
 
 #[test]
-fn analyze_document_includes_function_symbols() {
+fn analyse_document_includes_function_symbols() {
     let code = r#"
 package main
 
@@ -195,7 +195,7 @@ func main() {
     println(x)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -222,7 +222,7 @@ func main() {
 }
 
 #[test]
-fn analyze_document_includes_type_symbols() {
+fn analyse_document_includes_type_symbols() {
     let code = r#"
 package main
 
@@ -236,7 +236,7 @@ func main() {
     println(p.X)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -263,7 +263,7 @@ func main() {
 }
 
 #[test]
-fn analyze_document_includes_constant_symbols() {
+fn analyse_document_includes_constant_symbols() {
     let code = r#"
 package main
 
@@ -274,7 +274,7 @@ func main() {
     println(x)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -301,7 +301,7 @@ func main() {
 }
 
 #[test]
-fn analyze_document_symbols_in_scope() {
+fn analyse_document_symbols_in_scope() {
     let code = r#"
 package main
 
@@ -311,7 +311,7 @@ func main() {
     println(y)
 }
 "#;
-    let (_, symbols) = Backend::analyze_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop");
     let symbols = symbols.expect("Should have symbols");
 
     // Find the 'y' usage in println(y)

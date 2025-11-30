@@ -1,0 +1,30 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+func main() {
+    var x any = "hello"
+    // Type assertion - matches Go semantics
+    // Single-value form panics if assertion fails
+    s := x.(string)
+    fmt.Println("string:", s)
+    // Comma-ok form is safe (no panic)
+    val, ok := x.(string)
+    if ok {
+        fmt.Println("comma-ok string:", val)
+    }
+    // This would panic at runtime (x is string, not int):
+    // n := x.(int)
+    // Safe way to check:
+    n, ok := x.(int)
+    if ok {
+        fmt.Println("int:", n)
+    } else {
+        fmt.Println("not an int")
+    }
+}

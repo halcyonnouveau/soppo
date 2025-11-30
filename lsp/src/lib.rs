@@ -236,7 +236,7 @@ pub struct Backend {
     documents: Arc<RwLock<HashMap<Url, DocumentState>>>,
     /// Text content of open documents (may have unsaved changes)
     open_documents: Arc<RwLock<HashMap<PathBuf, String>>>,
-    /// Workspace state (initialized on first file open if project found)
+    /// Workspace state (initialised on first file open if project found)
     workspace: Arc<RwLock<Option<Workspace>>>,
 }
 
@@ -250,8 +250,8 @@ impl Backend {
         }
     }
 
-    /// Analyze a document, returning diagnostics and symbol table (single-file mode)
-    pub fn analyze_document(text: &str, filename: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
+    /// Analyse a document, returning diagnostics and symbol table (single-file mode)
+    pub fn analyse_document(text: &str, filename: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
         match typecheck_with_symbols(text, filename) {
             Ok(symbols) => (vec![], Some(symbols)),
             Err(report) => {
@@ -285,7 +285,7 @@ impl Backend {
 
     /// Try to discover a project from a file path and initialize workspace
     async fn try_init_workspace(&self, file_path: &Path) -> bool {
-        // Already initialized?
+        // Already initialised?
         if self.workspace.read().await.is_some() {
             return true;
         }
@@ -310,11 +310,12 @@ impl Backend {
         }
     }
 
-    /// Rebuild the workspace after a file change
-    async fn rebuild_workspace(&self) {
+    /// Rebuild the workspace after a file change.
+    /// Returns Ok(()) on success, or the error on failure.
+    async fn rebuild_workspace(&self) -> std::result::Result<(), miette::Report> {
         let ws_guard = self.workspace.read().await;
         let Some(ws) = ws_guard.as_ref() else {
-            return;
+            return Ok(());
         };
         let project_root = ws.project_root.clone();
         drop(ws_guard);
@@ -330,6 +331,7 @@ impl Backend {
                     global_ctxt: result.global_ctxt,
                     symbol_tables: result.symbol_tables,
                 });
+                Ok(())
             }
             Err(e) => {
                 self.client
@@ -338,6 +340,7 @@ impl Backend {
                         format!("Workspace rebuild failed: {}", e),
                     )
                     .await;
+                Err(e)
             }
         }
     }
@@ -355,14 +358,16 @@ impl Backend {
                 .await
                 .insert(path.clone(), text.clone());
 
-            // Try to initialize or use workspace
+            // Try to initialise or use workspace
             if self.try_init_workspace(path).await {
                 // Rebuild workspace
-                self.rebuild_workspace().await;
-
-                // Publish diagnostics from workspace
-                self.publish_workspace_diagnostics().await;
-                return;
+                if self.rebuild_workspace().await.is_ok() {
+                    // Publish diagnostics from workspace (success = clear diagnostics)
+                    self.publish_workspace_diagnostics().await;
+                    return;
+                }
+                // Workspace rebuild failed - fall through to single-file mode
+                // to show diagnostics for the current file
             }
         }
 
@@ -372,7 +377,7 @@ impl Backend {
             .and_then(|mut s| s.next_back())
             .unwrap_or("input.sop");
 
-        let (diagnostics, symbols) = Self::analyze_document(&text, filename);
+        let (diagnostics, symbols) = Self::analyse_document(&text, filename);
 
         // Update document state
         self.documents
@@ -386,15 +391,16 @@ impl Backend {
             .await;
     }
 
-    /// Publish diagnostics for all files in the workspace
+    /// Publish diagnostics for all files in the workspace.
+    /// Called when workspace typecheck succeeds - clears all diagnostics.
+    /// When workspace typecheck fails, we fall back to single-file mode which shows the error.
     async fn publish_workspace_diagnostics(&self) {
         let ws_guard = self.workspace.read().await;
         let Some(ws) = ws_guard.as_ref() else {
             return;
         };
 
-        // For now, if workspace typechecked successfully, clear diagnostics for all open files
-        // TODO: Collect and publish actual diagnostics per file
+        // Workspace typechecked successfully - clear diagnostics for all files
         for path in ws.file_registry.file_ids() {
             if let Some(file_path) = ws.file_registry.get_path(path)
                 && let Ok(uri) = Url::from_file_path(file_path)
@@ -566,7 +572,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "Soppo language server initialized")
+            .log_message(MessageType::INFO, "Soppo language server initialised")
             .await;
     }
 

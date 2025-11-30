@@ -510,8 +510,9 @@ impl Infer {
                     let inner_ty = Type::simple(&ty.name.replace('.', "_"));
                     Ok(Type::ptr(inner_ty).as_nullable())
                 } else {
-                    // Go interface assertion: return the actual type
-                    // TODO: Enforce comma-ok syntax requirement
+                    // Go interface assertion: return the target type directly
+                    // Matches Go semantics - panics at runtime if assertion fails
+                    // Use comma-ok syntax for safe assertions: v, ok := x.(Type)
                     let target_ty = self.resolve_type(ty);
                     Ok(target_ty)
                 }

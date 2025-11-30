@@ -309,3 +309,62 @@ func main() {
         diag.range.start.line
     );
 }
+
+#[test]
+fn analyse_document_returns_diagnostics_on_error() {
+    // This tests the fallback behavior - when workspace typecheck fails,
+    // the LSP falls back to single-file analysis using analyse_document
+    let code = r#"
+package main
+
+func main() {
+    x := undefined_var
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+
+    // Should have diagnostics for the error
+    assert!(
+        !diagnostics.is_empty(),
+        "Should have diagnostics for undefined variable"
+    );
+
+    // Should NOT have symbols when there's an error
+    assert!(
+        symbols.is_none(),
+        "Should not produce symbols when there's an error"
+    );
+
+    // Verify the diagnostic message is useful
+    assert!(
+        diagnostics[0]
+            .message
+            .to_lowercase()
+            .contains("cannot find value"),
+        "Diagnostic should mention undefined variable: {}",
+        diagnostics[0].message
+    );
+}
+
+#[test]
+fn analyse_document_clears_diagnostics_on_success() {
+    // When code is valid, diagnostics should be empty
+    let code = r#"
+package main
+
+func main() {
+    x := 42
+    println(x)
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+
+    // Should have NO diagnostics for valid code
+    assert!(
+        diagnostics.is_empty(),
+        "Valid code should have no diagnostics"
+    );
+
+    // Should have symbols
+    assert!(symbols.is_some(), "Valid code should produce symbols");
+}

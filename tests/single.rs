@@ -53,6 +53,7 @@ mod pass {
         struct_tags,
         try_operator,
         type_alias,
+        type_assert,
     );
 }
 
