@@ -1,7 +1,7 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
-    AssignOp, BinOp, Expr, ExprKind, Ident, Param, StringPart, Type, UnaryOp,
+    AssignOp, BinOp, Expr, ExprKind, Ident, Param, StringPart, TypeAnnotation, UnaryOp,
 };
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
@@ -552,7 +552,7 @@ impl Parser {
                                 end_span.byte_end,
                             ),
                             kind: ExprKind::StructLit {
-                                ty: Type {
+                                ty: TypeAnnotation {
                                     name: type_name,
                                     args: Vec::new(),
                                     span: expr.span,
@@ -742,7 +742,7 @@ impl Parser {
                 self.expect(Token::RBracket)?;
                 let val_ty = self.parse_type()?;
 
-                let map_ty = Type {
+                let map_ty = TypeAnnotation {
                     name: format!("map[{}]{}", key_ty.name, val_ty.name),
                     args: vec![key_ty, val_ty],
                     span,
@@ -870,7 +870,7 @@ impl Parser {
                     // []type{elements} - slice literal
                     let elem_ty = self.parse_type()?;
                     // Create a slice type with [] prefix
-                    let slice_ty = Type {
+                    let slice_ty = TypeAnnotation {
                         name: format!("[]{}", elem_ty.name),
                         args: elem_ty.args.clone(),
                         span: elem_ty.span,

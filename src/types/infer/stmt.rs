@@ -5,9 +5,9 @@ use crate::error::{Result, SoppoError};
 use crate::syntax::{
     BinOp, EnumVariant, Expr, ExprKind, PatternKind, SelectCaseKind, Stmt, StmtKind,
 };
-use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
 use crate::types::ty::Nullability;
+use crate::types::{SymbolKind, Type};
 
 /// Result of analysing a nil check condition
 #[derive(Debug)]
@@ -103,6 +103,18 @@ impl Infer {
                 let value_ty = self.infer_expr(value)?;
                 let value_ty_sub = self.substitute(value_ty.clone());
                 self.insert_var(ident.name.clone(), value_ty.clone(), Some(ident.span));
+
+                // Record variable definition for LSP
+                self.record_symbol(
+                    ident.span,
+                    ident.name.clone(),
+                    value_ty,
+                    Some(stmt.span),
+                    Some(ident.span),
+                    SymbolKind::Variable,
+                    None,
+                );
+
                 // Track nil state for pointer types
                 self.update_nil_state_for_assignment(&ident.name, value, &value_ty_sub);
                 Ok(Type::unit())
@@ -164,6 +176,11 @@ impl Infer {
             }
 
             StmtKind::VarDecl { ident, ty, value } => {
+                // Record type annotation for LSP if present
+                if let Some(t) = ty {
+                    self.record_type_annotation(t);
+                }
+
                 let (var_ty, init_expr) = match (ty, value) {
                     (Some(t), Some(expr)) => {
                         // var x type = value: unify declared with inferred
@@ -211,7 +228,19 @@ impl Infer {
                     }
                 };
                 let var_ty_sub = self.substitute(var_ty.clone());
-                self.insert_var(ident.name.clone(), var_ty, Some(ident.span));
+                self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span));
+
+                // Record variable definition for LSP
+                self.record_symbol(
+                    ident.span,
+                    ident.name.clone(),
+                    var_ty,
+                    Some(stmt.span),
+                    Some(ident.span),
+                    SymbolKind::Variable,
+                    None,
+                );
+
                 // Track nil state for nilable types
                 if let Some(expr) = init_expr {
                     self.update_nil_state_for_assignment(&ident.name, expr, &var_ty_sub);
@@ -227,6 +256,11 @@ impl Infer {
                 ty,
                 values,
             } => {
+                // Record type annotation for LSP if present
+                if let Some(t) = ty {
+                    self.record_type_annotation(t);
+                }
+
                 if values.is_empty() {
                     // var a, b, c type (zero values)
                     let declared_ty =

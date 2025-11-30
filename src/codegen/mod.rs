@@ -388,7 +388,7 @@ impl Codegen {
 
     /// Convert Soppo type to Go type, stripping the ? prefix for nullable types
     /// Go doesn't have nullable syntax - nullability is tracked by Soppo's type checker
-    pub(crate) fn go_type_from_ast(&self, ty: &crate::syntax::Type) -> String {
+    pub(crate) fn go_type_from_ast(&self, ty: &crate::syntax::TypeAnnotation) -> String {
         let name = &ty.name;
         // Strip ? prefix if present (nullable marker in Soppo syntax)
         let go_name = name.strip_prefix('?').unwrap_or(name);
@@ -416,7 +416,7 @@ impl Codegen {
 
     /// Generate nilable comment if the type is nullable
     /// Returns " //soppo:nilable" if nullable, empty string otherwise
-    pub(crate) fn nilable_comment(&self, ty: &crate::syntax::Type) -> &'static str {
+    pub(crate) fn nilable_comment(&self, ty: &crate::syntax::TypeAnnotation) -> &'static str {
         if ty.nullable { " //soppo:nilable" } else { "" }
     }
 

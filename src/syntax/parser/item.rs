@@ -613,8 +613,14 @@ impl Parser {
         Ok(ConstDecl {
             ident: Ident::new(name, name_span),
             ty,
+            span: Span::with_bytes(
+                start.start,
+                value.span.end,
+                self.file,
+                start.byte_start,
+                value.span.byte_end,
+            ),
             value,
-            span: start,
             doc_comment,
         })
     }
@@ -665,8 +671,14 @@ impl Parser {
         Ok(ConstDecl {
             ident: Ident::new(name, name_span),
             ty,
+            span: Span::with_bytes(
+                start.start,
+                value.span.end,
+                self.file,
+                start.byte_start,
+                value.span.byte_end,
+            ),
             value,
-            span: start,
             doc_comment,
         })
     }
@@ -741,8 +753,14 @@ impl Parser {
         Ok(ConstDecl {
             ident: Ident::new(name, name_span),
             ty,
+            span: Span::with_bytes(
+                start.start,
+                value.span.end,
+                self.file,
+                start.byte_start,
+                value.span.byte_end,
+            ),
             value,
-            span: start,
             doc_comment: None, // Grouped consts don't have individual doc comments
         })
     }

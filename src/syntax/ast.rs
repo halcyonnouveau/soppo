@@ -88,7 +88,7 @@ pub enum Decl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstDecl {
     pub ident: Ident,
-    pub ty: Option<Type>, // Optional - infer from value if not provided
+    pub ty: Option<TypeAnnotation>, // Optional - infer from value if not provided
     pub value: Expr,
     pub span: Span,
     pub doc_comment: Option<String>,
@@ -109,11 +109,11 @@ pub struct TypeDecl {
 pub enum TypeKind {
     /// Type alias: type X = Y (X is exactly Y)
     Alias {
-        target: Type,
+        target: TypeAnnotation,
     },
     /// Type definition: type X Y (X is a new distinct type based on Y)
     Definition {
-        target: Type,
+        target: TypeAnnotation,
     },
     Enum {
         variants: Vec<EnumVariant>,
@@ -131,7 +131,7 @@ pub enum TypeKind {
 pub struct InterfaceMethod {
     pub ident: Ident,
     pub params: Vec<Param>,
-    pub returns: Vec<Type>,
+    pub returns: Vec<TypeAnnotation>,
 }
 
 /// Generic type parameter
@@ -147,7 +147,7 @@ pub enum EnumVariant {
     /// Unit variant: Red
     Unit { ident: Ident },
     /// Single value variant: Text string
-    Single { ident: Ident, ty: Type },
+    Single { ident: Ident, ty: TypeAnnotation },
     /// Struct variant: Circle struct { Radius float64 }
     Struct { ident: Ident, fields: Vec<Field> },
 }
@@ -156,15 +156,15 @@ pub enum EnumVariant {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
     pub ident: Ident,
-    pub ty: Type,
+    pub ty: TypeAnnotation,
     pub tag: Option<String>,
 }
 
 /// Type annotation (before type checking)
 #[derive(Debug, Clone, PartialEq)]
-pub struct Type {
+pub struct TypeAnnotation {
     pub name: String,
-    pub args: Vec<Type>,
+    pub args: Vec<TypeAnnotation>,
     pub span: Span,
     pub nullable: bool, // true for ?*T, ?[]T, ?Interface
 }
@@ -176,7 +176,7 @@ pub struct FuncDecl {
     pub ident: Ident,
     pub generics: Vec<Generic>,
     pub params: Vec<Param>,
-    pub return_types: Vec<Type>, // Empty = no return, one = single, many = multi-value
+    pub return_types: Vec<TypeAnnotation>, // Empty = no return, one = single, many = multi-value
     pub body: Block,
     pub span: Span,
     pub doc_comment: Option<String>,
@@ -186,7 +186,7 @@ pub struct FuncDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub ident: Ident,
-    pub ty: Type,
+    pub ty: TypeAnnotation,
 }
 
 /// Block of statements
@@ -218,26 +218,26 @@ pub enum StmtKind {
     // var x = value, var x type, or var x type = value
     VarDecl {
         ident: Ident,
-        ty: Option<Type>, //infer from value if not provided
+        ty: Option<TypeAnnotation>, //infer from value if not provided
         value: Option<Expr>,
     },
     // var a, b, c type or var a, b = expr1, expr2
     MultiVarDecl {
         ident: Vec<Ident>,
-        ty: Option<Type>,  // shared type for all vars (var a, b, c int)
-        values: Vec<Expr>, // empty = zero value, or one value per name
+        ty: Option<TypeAnnotation>, // shared type for all vars (var a, b, c int)
+        values: Vec<Expr>,          // empty = zero value, or one value per name
     },
     // const x = value or const x type = value (inside functions)
     ConstDecl {
         ident: Ident,
-        ty: Option<Type>, // infer from value if not provided
+        ty: Option<TypeAnnotation>, // infer from value if not provided
         value: Expr,
     },
     // const a, b = expr1, expr2 or const a, b type = expr1, expr2
     MultiConstDecl {
         idents: Vec<Ident>,
-        ty: Option<Type>,  // shared type for all consts
-        values: Vec<Expr>, // one value per name (consts must have values)
+        ty: Option<TypeAnnotation>, // shared type for all consts
+        values: Vec<Expr>,          // one value per name (consts must have values)
     },
     // x = value or x.y = value (assignment)
     Assign {
@@ -359,7 +359,7 @@ pub enum ExprKind {
     },
     Call {
         func: Box<Expr>,
-        type_args: Vec<Type>,
+        type_args: Vec<TypeAnnotation>,
         args: Vec<(Option<(String, Span)>, Expr)>, // (name with span, value) - name is Some for named args
     },
     Field {
@@ -381,18 +381,18 @@ pub enum ExprKind {
     // Type assertion: x.(Type)
     TypeAssert {
         expr: Box<Expr>,
-        ty: Type,
+        ty: TypeAnnotation,
     },
     // Nil assertion: x.(!nil) - asserts pointer is non-nil
     NilAssert {
         expr: Box<Expr>,
     },
     ArrayLit {
-        ty: Option<Type>, // For [5]int{...} syntax
+        ty: Option<TypeAnnotation>, // For [5]int{...} syntax
         elements: Vec<Expr>,
     },
     StructLit {
-        ty: Type,                    // The struct type name
+        ty: TypeAnnotation,          // The struct type name
         fields: Vec<(String, Expr)>, // field_name: value pairs
     },
     // Anonymous struct literal: struct { X int; Y int }{X: 1, Y: 2}
@@ -401,7 +401,7 @@ pub enum ExprKind {
         fields: Vec<(String, Expr)>, // field_name: value pairs
     },
     MapLit {
-        ty: Type,                   // The map type: map[K]V
+        ty: TypeAnnotation,         // The map type: map[K]V
         entries: Vec<(Expr, Expr)>, // key: value pairs
     },
     Unary {
@@ -411,7 +411,7 @@ pub enum ExprKind {
     // Anonymous function: func(params) returnTypes { body }
     FuncLit {
         params: Vec<Param>,
-        return_types: Vec<Type>,
+        return_types: Vec<TypeAnnotation>,
         body: Block,
     },
     Block(Block),

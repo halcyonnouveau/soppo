@@ -823,11 +823,21 @@ impl Infer {
             }
 
             // Regular struct lookup
-            if let Some(type_def) = self.global_state.lookup_type(struct_name)
+            if let Some(type_def) = self.global_state.lookup_type(struct_name).cloned()
                 && let TypeDefKind::Struct { fields } = &type_def.kind
             {
                 // Check if the field exists
                 if let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field) {
+                    // Record field access for LSP
+                    self.record_symbol(
+                        *field_span,
+                        field.to_string(),
+                        field_ty.clone(),
+                        type_def.span, // Point to struct definition
+                        type_def.span, // No specific field span in TypeDef currently
+                        SymbolKind::Field,
+                        None,
+                    );
                     return Ok(field_ty.clone());
                 } else {
                     // Field not found - check if it might be a method
@@ -878,7 +888,7 @@ impl Infer {
     fn infer_call(
         &mut self,
         func: &Expr,
-        type_args: &[crate::syntax::Type],
+        type_args: &[crate::syntax::TypeAnnotation],
         args: &[(Option<(String, Span)>, Expr)],
         expr_span: &Span,
     ) -> Result<Type> {

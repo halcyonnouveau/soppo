@@ -1,8 +1,8 @@
 use super::Infer;
 use crate::error::{Result, SoppoError};
 use crate::syntax::{Block, ConstDecl, EnumVariant, FuncDecl, TypeDecl, TypeKind};
-use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
+use crate::types::{SymbolKind, Type};
 
 impl Infer {
     /// Infer the type of a block
@@ -76,8 +76,24 @@ impl Infer {
 
         // Store function type in outermost scope so it can be called
         if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(func.ident.name.clone(), (func_ty, Some(func.span)));
+            scope.insert(func.ident.name.clone(), (func_ty.clone(), Some(func.span)));
         }
+
+        // Record function definition for LSP
+        let kind = if func.receiver.is_some() {
+            SymbolKind::Method
+        } else {
+            SymbolKind::Function
+        };
+        self.record_symbol(
+            func.ident.span,
+            func.ident.name.clone(),
+            func_ty,
+            Some(func.span),
+            Some(func.ident.span),
+            kind,
+            func.doc_comment.clone(),
+        );
 
         // Register function in global state so it can be looked up for method calls
         self.global_state.register_function(func);
@@ -121,6 +137,9 @@ impl Infer {
                 Some(receiver.ident.span),
             );
 
+            // Record type annotation for LSP
+            self.record_type_annotation(&receiver.ty);
+
             // Set nil state for nilable receivers based on nullability
             // Non-nullable nilable receivers (e.g., *T not ?*T) are trusted to be non-nil
             if Self::is_nilable_type(&receiver_ty) && !receiver_ty.is_nullable() {
@@ -140,6 +159,9 @@ impl Infer {
                 Some(param.ident.span),
             );
 
+            // Record type annotation for LSP
+            self.record_type_annotation(&param.ty);
+
             // Set nil state for nilable parameters based on nullability
             // Non-nullable nilable params are trusted to be non-nil
             if Self::is_nilable_type(&param_ty) && !param_ty.is_nullable() {
@@ -150,13 +172,19 @@ impl Infer {
             }
         }
 
+        // Record return type annotations for LSP
+        for ret_ty in &func.return_types {
+            self.record_type_annotation(ret_ty);
+        }
+
         // Infer body type
         let body_ty = self.infer_block(&func.body)?;
 
         // Check against declared return type (for single return)
         if func.return_types.len() == 1 {
             let declared_ret_ty = self.resolve_type(&func.return_types[0]);
-            self.unify(&body_ty, &declared_ret_ty, &func.span)?;
+            // Point to return type annotation for better error messages
+            self.unify(&body_ty, &declared_ret_ty, &func.return_types[0].span)?;
         }
 
         self.pop_scope();
@@ -190,15 +218,42 @@ impl Infer {
         if let Some(scope) = self.scopes.first_mut() {
             scope.insert(
                 const_decl.ident.name.clone(),
-                (const_ty, Some(const_decl.span)),
+                (const_ty.clone(), Some(const_decl.span)),
             );
         }
+
+        // Record type annotation for LSP if present
+        if let Some(ty) = &const_decl.ty {
+            self.record_type_annotation(ty);
+        }
+
+        // Record constant definition for LSP
+        self.record_symbol(
+            const_decl.ident.span,
+            const_decl.ident.name.clone(),
+            const_ty,
+            Some(const_decl.span),
+            Some(const_decl.ident.span),
+            SymbolKind::Constant,
+            const_decl.doc_comment.clone(),
+        );
 
         Ok(())
     }
 
     /// Type check an enum/struct declaration
     pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> Result<()> {
+        // Record type definition for LSP
+        self.record_symbol(
+            type_decl.ident.span,
+            type_decl.ident.name.clone(),
+            Type::simple(&type_decl.ident.name),
+            Some(type_decl.span),
+            Some(type_decl.ident.span),
+            SymbolKind::Type,
+            type_decl.doc_comment.clone(),
+        );
+
         match &type_decl.kind {
             TypeKind::Alias { .. } => {
                 // Type aliases don't need special type checking

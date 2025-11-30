@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::syntax::{ModuleId, Span, Symbol, Type as AstType};
+use crate::syntax::{ModuleId, Span, Symbol, TypeAnnotation as AstType};
 
 /// Nullability state for pointer types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

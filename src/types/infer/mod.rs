@@ -11,7 +11,9 @@ use super::symbols::{SymbolInfo, SymbolKind, SymbolTable};
 use super::ty::{Nullability, Type};
 use crate::error::SoppoError;
 use crate::go::{GoCache, Project, parse_go_type};
-use crate::syntax::{Expr, ExprKind, Import, ModuleId, Span, Symbol, Type as AstType, UnaryOp};
+use crate::syntax::{
+    Expr, ExprKind, Import, ModuleId, Span, Symbol, TypeAnnotation as AstType, UnaryOp,
+};
 
 /// Result of looking up a symbol in a Soppo module.
 /// Contains: (type, definition_span, name_span, doc_comment)
@@ -208,6 +210,62 @@ impl Infer {
                 doc_comment,
             },
         );
+    }
+
+    /// Record a type annotation as a symbol for LSP hover/goto-definition
+    /// This handles type references in declarations like `var x int`, `func(a string)`, etc.
+    /// Recursively processes composite types like `*MyType`, `[]MyType`, `map[K]V`, etc.
+    pub(super) fn record_type_annotation(&mut self, ty: &crate::syntax::TypeAnnotation) {
+        let type_name = &ty.name;
+
+        // For composite types (pointer, slice, map, channel, variadic, func),
+        // the inner types are stored in args - process them recursively
+        // The main type name (e.g., "*MyType") doesn't need recording since it's not a definition
+        let is_composite = type_name.starts_with('*')
+            || type_name.starts_with("[]")
+            || type_name.starts_with("map[")
+            || type_name.starts_with("chan ")
+            || type_name.starts_with("...")
+            || type_name.starts_with("func(")
+            || type_name.starts_with("struct {");
+
+        if is_composite {
+            // Recurse into inner types
+            for arg in &ty.args {
+                self.record_type_annotation(arg);
+            }
+            return;
+        }
+
+        // Skip built-in/primitive types (no definition to go to)
+        if is_primitive_type(type_name) {
+            return;
+        }
+
+        // Handle qualified types like pkg.Type - extract the base type name
+        let base_name = if let Some(dot_idx) = type_name.find('.') {
+            &type_name[dot_idx + 1..]
+        } else {
+            type_name.as_str()
+        };
+
+        // Look up user-defined type
+        if let Some(type_def) = self.global_state.lookup_type(base_name).cloned() {
+            self.record_symbol(
+                ty.span,
+                type_name.clone(),
+                Type::simple(base_name),
+                type_def.span,
+                type_def.name_span,
+                SymbolKind::Type,
+                type_def.doc_comment,
+            );
+        }
+
+        // Also recurse into generic type arguments (e.g., Option[MyType])
+        for arg in &ty.args {
+            self.record_type_annotation(arg);
+        }
     }
 
     /// Process imports and add package names to scope

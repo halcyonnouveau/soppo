@@ -1,6 +1,6 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
-use crate::syntax::ast::Type;
+use crate::syntax::ast::TypeAnnotation;
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
@@ -8,7 +8,7 @@ impl Parser {
     /// Parse a type annotation
     /// Supports: T, []T, [N]T, *T, map[K]V, chan T, T[A, B], ...T (variadic)
     /// Also supports nullable prefix: ?*T, ?[]T, ?Interface
-    pub(super) fn parse_type(&mut self) -> Result<Type> {
+    pub(super) fn parse_type(&mut self) -> Result<TypeAnnotation> {
         let start_span = self.peek_span();
 
         // Check for nullable prefix: ?
@@ -23,7 +23,7 @@ impl Parser {
                 });
             }
             let elem_ty = self.parse_type()?;
-            return Ok(Type {
+            return Ok(TypeAnnotation {
                 name: format!("...{}", elem_ty.name),
                 args: vec![elem_ty],
                 span: start_span,
@@ -36,7 +36,7 @@ impl Parser {
             if self.consume(&Token::RBracket) {
                 // []T - slice
                 let elem_ty = self.parse_type()?;
-                return Ok(Type {
+                return Ok(TypeAnnotation {
                     name: format!("[]{}", elem_ty.name),
                     args: vec![elem_ty],
                     span: start_span,
@@ -56,7 +56,7 @@ impl Parser {
                 }
                 self.expect(Token::RBracket)?;
                 let elem_ty = self.parse_type()?;
-                return Ok(Type {
+                return Ok(TypeAnnotation {
                     name: format!("[]{}", elem_ty.name), // Treat arrays as slices for simplicity
                     args: vec![elem_ty],
                     span: start_span,
@@ -68,7 +68,7 @@ impl Parser {
         // Pointer type: *T or ?*T
         if self.consume(&Token::Star) {
             let pointee_ty = self.parse_type()?;
-            return Ok(Type {
+            return Ok(TypeAnnotation {
                 name: format!("*{}", pointee_ty.name),
                 args: vec![pointee_ty],
                 span: start_span,
@@ -107,7 +107,7 @@ impl Parser {
             self.expect(Token::RBrace)?;
 
             let struct_name = format!("struct {{ {} }}", field_strs.join("; "));
-            return Ok(Type {
+            return Ok(TypeAnnotation {
                 name: struct_name,
                 args: vec![],
                 span: start_span,
@@ -180,7 +180,7 @@ impl Parser {
             let mut all_types = param_types;
             all_types.extend(return_types);
 
-            return Ok(Type {
+            return Ok(TypeAnnotation {
                 name: format!("func({}){}", params_str, returns_str),
                 args: all_types,
                 span: start_span,
@@ -238,7 +238,7 @@ impl Parser {
             let key_ty = self.parse_type()?;
             self.expect(Token::RBracket)?;
             let val_ty = self.parse_type()?;
-            return Ok(Type {
+            return Ok(TypeAnnotation {
                 name: format!("map[{}]{}", key_ty.name, val_ty.name),
                 args: vec![key_ty, val_ty],
                 span,
@@ -249,7 +249,7 @@ impl Parser {
         // Channel type: chan T - can be nullable
         if name == "chan" {
             let elem_ty = self.parse_type()?;
-            return Ok(Type {
+            return Ok(TypeAnnotation {
                 name: format!("chan {}", elem_ty.name),
                 args: vec![elem_ty],
                 span,
@@ -282,7 +282,7 @@ impl Parser {
         // We'll validate this in the type checker since we don't know if a name is an interface here
         // For now, allow ? on any named type (type checker will validate)
 
-        Ok(Type {
+        Ok(TypeAnnotation {
             name,
             args,
             span,
