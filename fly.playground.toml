@@ -1,5 +1,5 @@
 app = 'soppo-playground'
-primary_region = 'syd'
+primary_region = 'iad'
 
 [build]
 dockerfile = 'Dockerfile.playground'

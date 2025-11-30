@@ -9,7 +9,7 @@ use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
 use crate::types::ty::Nullability;
 
-/// Result of analyzing a nil check condition
+/// Result of analysing a nil check condition
 #[derive(Debug)]
 pub(super) struct NilCheck {
     /// The expression key being checked (e.g., "user" or "user.profile")
