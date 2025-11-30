@@ -1,8 +1,9 @@
 [package]
 name = "soppo-lsp"
 version = { workspace = true }
-edition = "2024"
-license = "BSD-3-Clause"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 description = "Language server for Soppo"
 
 [[bin]]

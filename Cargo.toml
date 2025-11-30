@@ -4,6 +4,9 @@ exclude = ["editors/zed"]
 
 [workspace.package]
 version = "0.3.0"
+edition = "2024"
+license = "BSD-3-Clause"
+repository = "https://github.com/halcyonnouveau/soppo"
 
 [workspace.dependencies]
 soppo = { path = ".", version = "0.3.0" }
@@ -11,9 +14,9 @@ soppo = { path = ".", version = "0.3.0" }
 [package]
 name = "soppo"
 version = { workspace = true }
-edition = "2024"
-license = "BSD-3-Clause"
-repository = "https://github.com/halcyonnouveau/soppo"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 description = "Compiler for Soppo, a Go superset with enums, pattern matching, and nil safety"
 keywords = ["compiler", "go", "golang", "language"]
 categories = ["compilers", "development-tools"]
