@@ -8,7 +8,7 @@ repository = "https://github.com/halcyonnouveau/soppo"
 
 [grammars.soppo]
 repository = "https://github.com/halcyonnouveau/soppo"
-rev = "6aebb5397cda04d267c41403f31e8e3042184250"
+rev = "9fb6e13e214d741326ee412b6625624d2a38b6d6"
 path = "editors/tree-sitter"
 
 [language_servers.soppo-lsp]
