@@ -22,6 +22,8 @@ I think AI tools are useful for writing code (see [this blog post](https://quaso
 
 And because of that, I think this project brings great shame to Australia. And that's super weird for me to say because I am not particularly patriotic or nationalistic, so this normally isn't a thing I care about. I guess it could also be the association with dingoes.
 
+Also this is called a manifesto as a reference to the "[Dingo Manifesto](https://github.com/MadAppGang/dingo/blob/main/MANIFESTO.md)", I for some reason read the entire thing, and... well it's conceptually *fine*, but there's a limit to the amount of LLM slop one can read before it becomes a brain damaging cognitohazard. I most certainly went over that limit.
+
 Okay enough of the shit, what's up with Dingo? I think I can just go through the README and point to things I don't like. Hopefully you can withstand the rancid stench of Claudisms that infest it and all other documentation in the project. If not, maybe just leave now.
 
 > Think TypeScript, but for Go.
