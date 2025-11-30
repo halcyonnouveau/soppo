@@ -210,6 +210,20 @@ And as a result:
 3. No reliable transforms: regex can't count braces, can't handle nesting, can't know if it's in a string - and it's on the critical path
 4. No tooling foundation: can't build a formatter, linter, or proper LSP (not just relying on `gopls`) because there's no Dingo AST to work with (also yes I'm aware of the "source maps", but like... source maps? really?)
 
+> Update 2025-11-30:
+>
+> So it turns out Dingo has recently migrated away from using regex to a proper tokeniser (only for enums right now, but I'm assuming the idea is to do it for all Dingo features). This is a step in the right direction and is good. Doesn't change the fundamental problems with the architecture though.
+>
+> But I've also looked at this `ai-docs/AST_MIGRATION.md` document in the repo, and it kinda looks like they want to move towards a more traditional compiler? There's a "Target Architecture" section with a diagram that looks like this:
+>
+> `Dingo Parser -> Dingo AST -> Go Codegen`
+>
+> Like that's basically the standard architecture I've been talking about. So if it is moving towards this, fair enough I guess? Most of my critiques at that point will become invalid.
+>
+> I just don't understand why it wasn't done like this in the first place. It's not like it's much slower to prove out or anything (I mean... just look at Soppo), and it's going to take a lot longer to fix (and thus cost more... because AI) than just doing it right the first time. 
+>
+> Anyway, I think I'm done trying to read this code ever again - it genuinely hurts my brain.
+
 If this were a human writing it, I'd tell them to read one of the canonical books on this stuff ["Crafting Interpreters"](https://craftinginterpreters.com/) to actually understand how things like this are supposed to be made.
 
 I'm completely speculating here, but I think Dingo's architecture emerged because Claude started using regex first as it's simple and handles most syntax transforms, along with using Go's parser because why bother making your own?
