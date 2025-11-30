@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/halcyonnouveau/soppo/compare/v0.3.1...v0.4.0) - 2025-11-30
+
+### Fixed
+
+- *(lsp)* better span precision
+
+### Refactor
+
+- *(lsp)* ident for better spans
+
 ## [0.3.1](https://github.com/halcyonnouveau/soppo/compare/v0.3.0...v0.3.1) - 2025-11-30
 
 ### Fixed
