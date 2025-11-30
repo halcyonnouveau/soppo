@@ -1,7 +1,62 @@
 use std::cell::Cell;
+use std::fmt;
 
 use super::lexer::Comment;
 use super::source::Span;
+
+/// An identifier with its source location
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ident {
+    pub name: String,
+    pub span: Span,
+}
+
+impl Ident {
+    pub fn new(name: impl Into<String>, span: Span) -> Self {
+        Self {
+            name: name.into(),
+            span,
+        }
+    }
+
+    /// Create a dummy ident for testing or generated code
+    pub fn dummy(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            span: Span::dummy(),
+        }
+    }
+}
+
+impl fmt::Display for Ident {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl AsRef<str> for Ident {
+    fn as_ref(&self) -> &str {
+        &self.name
+    }
+}
+
+impl PartialEq<str> for Ident {
+    fn eq(&self, other: &str) -> bool {
+        self.name == other
+    }
+}
+
+impl PartialEq<&str> for Ident {
+    fn eq(&self, other: &&str) -> bool {
+        self.name == *other
+    }
+}
+
+impl PartialEq<String> for Ident {
+    fn eq(&self, other: &String) -> bool {
+        self.name == *other
+    }
+}
 
 /// A complete source file
 #[derive(Debug, Clone)]
@@ -32,19 +87,21 @@ pub enum Decl {
 /// Constant declaration
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstDecl {
-    pub name: String,
+    pub ident: Ident,
     pub ty: Option<Type>, // Optional - infer from value if not provided
     pub value: Expr,
     pub span: Span,
+    pub doc_comment: Option<String>,
 }
 
 /// Type declaration (enum, struct, alias)
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
-    pub name: String,
+    pub ident: Ident,
     pub generics: Vec<Generic>,
     pub kind: TypeKind,
     pub span: Span,
+    pub doc_comment: Option<String>,
 }
 
 /// Kind of type declaration
@@ -72,42 +129,35 @@ pub enum TypeKind {
 /// Interface method signature
 #[derive(Debug, Clone, PartialEq)]
 pub struct InterfaceMethod {
-    pub name: String,
+    pub ident: Ident,
     pub params: Vec<Param>,
     pub returns: Vec<Type>,
-    pub span: Span,
 }
 
 /// Generic type parameter
 #[derive(Debug, Clone, PartialEq)]
 pub struct Generic {
-    pub name: String,
+    pub ident: Ident,
     pub constraint: String, // e.g., "any", "comparable"
-    pub span: Span,
 }
 
 /// Enum variant
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnumVariant {
     /// Unit variant: Red
-    Unit { name: String, span: Span },
+    Unit { ident: Ident },
     /// Single value variant: Text string
-    Single { name: String, ty: Type, span: Span },
+    Single { ident: Ident, ty: Type },
     /// Struct variant: Circle struct { Radius float64 }
-    Struct {
-        name: String,
-        fields: Vec<Field>,
-        span: Span,
-    },
+    Struct { ident: Ident, fields: Vec<Field> },
 }
 
 /// Struct field
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
-    pub name: String,
+    pub ident: Ident,
     pub ty: Type,
     pub tag: Option<String>,
-    pub span: Span,
 }
 
 /// Type annotation (before type checking)
@@ -123,20 +173,20 @@ pub struct Type {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncDecl {
     pub receiver: Option<Param>,
-    pub name: String,
+    pub ident: Ident,
     pub generics: Vec<Generic>,
     pub params: Vec<Param>,
     pub return_types: Vec<Type>, // Empty = no return, one = single, many = multi-value
     pub body: Block,
     pub span: Span,
+    pub doc_comment: Option<String>,
 }
 
 /// Function parameter
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
-    pub name: String,
+    pub ident: Ident,
     pub ty: Type,
-    pub span: Span,
 }
 
 /// Block of statements
@@ -157,35 +207,35 @@ pub struct Stmt {
 pub enum StmtKind {
     // x := value (short declaration with inference)
     Decl {
-        name: String,
+        ident: Ident,
         value: Expr,
     },
     // x, y := value or x, y := expr1, expr2 (multi-value short declaration)
     MultiDecl {
-        names: Vec<String>,
+        ident: Vec<Ident>,
         values: Vec<Expr>, // 1 value (multi-return) or N values (one per name)
     },
     // var x = value, var x type, or var x type = value
     VarDecl {
-        name: String,
+        ident: Ident,
         ty: Option<Type>, //infer from value if not provided
         value: Option<Expr>,
     },
     // var a, b, c type or var a, b = expr1, expr2
     MultiVarDecl {
-        names: Vec<String>,
+        ident: Vec<Ident>,
         ty: Option<Type>,  // shared type for all vars (var a, b, c int)
         values: Vec<Expr>, // empty = zero value, or one value per name
     },
     // const x = value or const x type = value (inside functions)
     ConstDecl {
-        name: String,
+        ident: Ident,
         ty: Option<Type>, // infer from value if not provided
         value: Expr,
     },
     // const a, b = expr1, expr2 or const a, b type = expr1, expr2
     MultiConstDecl {
-        names: Vec<String>,
+        idents: Vec<Ident>,
         ty: Option<Type>,  // shared type for all consts
         values: Vec<Expr>, // one value per name (consts must have values)
     },
@@ -223,9 +273,9 @@ pub enum StmtKind {
     },
     // for key := range collection or for key, value := range collection
     ForRange {
-        key: String,           // First variable (index/key)
-        value: Option<String>, // Second variable (value) - None for single-var form
-        collection: Expr,      // The collection being ranged over
+        key: Ident,           // First variable (index/key)
+        value: Option<Ident>, // Second variable (value) - None for single-var form
+        collection: Expr,     // The collection being ranged over
         body: Block,
     },
     If {
@@ -438,11 +488,11 @@ pub enum SelectCaseKind {
     /// <-ch (receive and discard)
     Recv { channel: Expr },
     /// v := <-ch (receive with declaration)
-    RecvDecl { name: String, channel: Expr },
+    RecvDecl { ident: Ident, channel: Expr },
     /// v, ok := <-ch (receive with ok check)
     RecvDeclOk {
-        name: String,
-        ok_name: String,
+        ident: Ident,
+        ok_ident: Ident,
         channel: Expr,
     },
     /// ch <- value (send)
@@ -467,7 +517,7 @@ pub enum PatternKind {
     /// Literal value: 42, "hello", true
     Literal(Literal),
     /// Variant with data extraction: Result.Ok(value)
-    Destructor { name: String, binding: String },
+    Destructor { name: String, binding: Ident },
     /// Struct destructuring: Shape.Circle{radius: r, ...} or Point{x: 0, y}
     StructDestructor {
         name: String,                        // e.g., "Shape.Circle" or "Point"
@@ -482,7 +532,7 @@ pub enum PatternKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldPattern {
     /// Bind field value to a variable: `field: binding` or just `field`
-    Bind(String),
+    Bind(Ident),
     /// Match field against a literal: `field: 42`
     Literal(Literal),
 }

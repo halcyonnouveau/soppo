@@ -1,7 +1,7 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
-    ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Import,
+    ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Ident, Import,
     InterfaceMethod, Param, TypeDecl, TypeKind,
 };
 use crate::syntax::lexer::Token;
@@ -32,9 +32,8 @@ impl Parser {
         let ty = self.parse_type()?;
 
         Ok(Param {
-            name,
+            ident: Ident::new(name, name_span),
             ty,
-            span: name_span,
         })
     }
 
@@ -46,7 +45,7 @@ impl Parser {
             return Ok(params);
         }
 
-        let mut pending_names: Vec<(String, Span)> = Vec::new();
+        let mut pending_names: Vec<Ident> = Vec::new();
 
         loop {
             // Parse name
@@ -67,7 +66,7 @@ impl Parser {
             };
 
             self.validate_identifier(&name, &name_span)?;
-            pending_names.push((name, name_span));
+            pending_names.push(Ident::new(name, name_span));
 
             if self.consume(&Token::Comma) {
                 // Could be more names in the group, or end of a param group
@@ -79,11 +78,10 @@ impl Parser {
             let ty = self.parse_type()?;
 
             // Assign type to all pending names
-            for (name, span) in pending_names.drain(..) {
+            for name in pending_names.drain(..) {
                 params.push(Param {
-                    name,
+                    ident: name,
                     ty: ty.clone(),
-                    span,
                 });
             }
 
@@ -145,9 +143,8 @@ impl Parser {
                 };
 
                 generics.push(Generic {
-                    name,
+                    ident: Ident::new(name, span),
                     constraint,
-                    span,
                 });
 
                 if !self.consume(&Token::Comma) {
@@ -163,6 +160,7 @@ impl Parser {
     /// Parse function declaration
     pub fn parse_func_decl(&mut self) -> Result<FuncDecl> {
         let start_span = self.expect(Token::Func)?;
+        let doc_comment = self.get_doc_comment(start_span.start.line);
 
         // Check for receiver: func (r: Type) name() or func name()
         let receiver = if self.consume(&Token::LParen) {
@@ -227,7 +225,7 @@ impl Parser {
 
         Ok(FuncDecl {
             receiver,
-            name,
+            ident: Ident::new(name, name_span),
             generics,
             params,
             return_types,
@@ -239,12 +237,14 @@ impl Parser {
                 start_span.byte_start,
                 body.span.byte_end,
             ),
+            doc_comment,
         })
     }
 
     /// Parse type declaration (enum or struct)
     pub(super) fn parse_type_decl(&mut self) -> Result<TypeDecl> {
         let start_span = self.expect(Token::Type)?;
+        let doc_comment = self.get_doc_comment(start_span.start.line);
 
         let (name, name_span) = match self.advance() {
             Some((Token::Ident(name), span)) => (name, span),
@@ -335,7 +335,7 @@ impl Parser {
         };
 
         Ok(TypeDecl {
-            name,
+            ident: Ident::new(name, name_span),
             generics,
             kind,
             span: Span::with_bytes(
@@ -345,6 +345,7 @@ impl Parser {
                 start_span.byte_start,
                 end_span.byte_end,
             ),
+            doc_comment,
         })
     }
 
@@ -388,24 +389,16 @@ impl Parser {
                 self.skip_terminators();
             }
 
-            let end_span = self.expect(Token::RBrace)?;
+            let _ = self.expect(Token::RBrace)?;
 
             Ok(EnumVariant::Struct {
-                name,
+                ident: Ident::new(name, name_span),
                 fields,
-                span: Span::with_bytes(
-                    name_span.start,
-                    end_span.end,
-                    self.file,
-                    name_span.byte_start,
-                    end_span.byte_end,
-                ),
             })
         } else if self.is_terminator() {
             // Terminator after variant name - unit variant (like Go struct embedded field on its own line)
             Ok(EnumVariant::Unit {
-                name,
-                span: name_span,
+                ident: Ident::new(name, name_span),
             })
         } else if matches!(
             self.peek(),
@@ -415,15 +408,13 @@ impl Parser {
             let ty = self.parse_type()?;
 
             Ok(EnumVariant::Single {
-                name,
+                ident: Ident::new(name, name_span),
                 ty,
-                span: name_span,
             })
         } else {
             // Unit variant
             Ok(EnumVariant::Unit {
-                name,
-                span: name_span,
+                ident: Ident::new(name, name_span),
             })
         }
     }
@@ -432,7 +423,7 @@ impl Parser {
     /// Returns a Vec because `X, Y int` produces multiple Field entries
     pub fn parse_fields(&mut self) -> Result<Vec<Field>> {
         // Collect all field names (comma-separated)
-        let mut names: Vec<(String, Span)> = Vec::new();
+        let mut names: Vec<Ident> = Vec::new();
 
         // Parse first name
         let (first_name, first_span) = match self.advance() {
@@ -450,7 +441,7 @@ impl Parser {
                 });
             }
         };
-        names.push((first_name, first_span));
+        names.push(Ident::new(first_name, first_span));
 
         // Parse additional comma-separated names
         while self.consume(&Token::Comma) {
@@ -469,7 +460,7 @@ impl Parser {
                     });
                 }
             };
-            names.push((name, span));
+            names.push(Ident::new(name, span));
         }
 
         // Parse the type (shared by all names)
@@ -491,11 +482,10 @@ impl Parser {
         // Create a Field for each name
         let fields = names
             .into_iter()
-            .map(|(name, span)| Field {
-                name,
+            .map(|name| Field {
+                ident: name,
                 ty: ty.clone(),
                 tag: tag.clone(),
-                span,
             })
             .collect();
 
@@ -526,7 +516,7 @@ impl Parser {
         let end_span = self.expect(Token::RParen)?;
 
         // Parse optional return type(s)
-        let (returns, final_span) = if matches!(
+        let (returns, _final_span) = if matches!(
             self.peek(),
             Some(Token::Newline) | Some(Token::RBrace) | None
         ) {
@@ -553,16 +543,9 @@ impl Parser {
         };
 
         Ok(InterfaceMethod {
-            name,
+            ident: Ident::new(name, name_span),
             params,
             returns,
-            span: Span::with_bytes(
-                name_span.start,
-                final_span.end,
-                self.file,
-                name_span.byte_start,
-                final_span.byte_end,
-            ),
         })
     }
 
@@ -586,6 +569,7 @@ impl Parser {
     /// Parse a const declaration: const NAME = VALUE or const NAME TYPE = VALUE
     fn parse_const_decl(&mut self) -> Result<ConstDecl> {
         let start = self.expect(Token::Const)?;
+        let doc_comment = self.get_doc_comment(start.start.line);
 
         let (name, name_span) = match self.advance() {
             Some((Token::Ident(name), span)) => (name, span),
@@ -627,16 +611,19 @@ impl Parser {
         let value = self.parse_expr()?;
 
         Ok(ConstDecl {
-            name,
+            ident: Ident::new(name, name_span),
             ty,
             value,
             span: start,
+            doc_comment,
         })
     }
 
     /// Parse a const declaration after the 'const' keyword has been consumed
-    fn parse_const_after_keyword(&mut self) -> Result<ConstDecl> {
+    /// doc_comment_line is the line number where 'const' appeared (for doc comment lookup)
+    fn parse_const_after_keyword(&mut self, doc_comment_line: usize) -> Result<ConstDecl> {
         let start = self.peek_span();
+        let doc_comment = self.get_doc_comment(doc_comment_line);
 
         let (name, name_span) = match self.advance() {
             Some((Token::Ident(name), span)) => (name, span),
@@ -676,10 +663,11 @@ impl Parser {
         let value = self.parse_expr()?;
 
         Ok(ConstDecl {
-            name,
+            ident: Ident::new(name, name_span),
             ty,
             value,
             span: start,
+            doc_comment,
         })
     }
 
@@ -751,10 +739,11 @@ impl Parser {
         };
 
         Ok(ConstDecl {
-            name,
+            ident: Ident::new(name, name_span),
             ty,
             value,
             span: start,
+            doc_comment: None, // Grouped consts don't have individual doc comments
         })
     }
 
@@ -861,7 +850,7 @@ impl Parser {
 
             // Check for grouped const: const ( ... )
             if self.peek() == Some(&Token::Const) {
-                self.advance(); // consume 'const'
+                let (_, const_span) = self.advance().unwrap(); // consume 'const'
                 if self.consume(&Token::LParen) {
                     // Grouped const block - use ConstBlock for iota support
                     let mut block_consts = Vec::new();
@@ -877,7 +866,7 @@ impl Parser {
                 } else {
                     // Single const - need to parse it, but we already consumed 'const'
                     // So call a helper that doesn't expect 'const' at the start
-                    let const_decl = self.parse_const_after_keyword()?;
+                    let const_decl = self.parse_const_after_keyword(const_span.start.line)?;
                     decls.push(Decl::Const(const_decl));
                     continue;
                 }
@@ -906,11 +895,11 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let func = parser.parse_func_decl().expect("failed to parse function");
 
-        assert_eq!(func.name, "add");
+        assert_eq!(func.ident, "add");
         assert_eq!(func.params.len(), 2);
-        assert_eq!(func.params[0].name, "x");
+        assert_eq!(func.params[0].ident, "x");
         assert_eq!(func.params[0].ty.name, "int");
-        assert_eq!(func.params[1].name, "y");
+        assert_eq!(func.params[1].ident, "y");
         assert_eq!(func.return_types.len(), 1);
         assert_eq!(func.return_types[0].name, "int");
         assert_eq!(func.body.stmts.len(), 1);
@@ -924,9 +913,9 @@ mod tests {
             .parse_func_decl()
             .expect("failed to parse generic function");
 
-        assert_eq!(func.name, "identity");
+        assert_eq!(func.ident, "identity");
         assert_eq!(func.generics.len(), 1);
-        assert_eq!(func.generics[0].name, "T");
+        assert_eq!(func.generics[0].ident, "T");
         assert_eq!(func.generics[0].constraint, "any");
         assert_eq!(func.params[0].ty.name, "T");
     }
@@ -940,11 +929,11 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let type_decl = parser.parse_type_decl().expect("failed to parse enum type");
 
-        assert_eq!(type_decl.name, "Result");
+        assert_eq!(type_decl.ident, "Result");
         assert_eq!(type_decl.generics.len(), 2);
-        assert_eq!(type_decl.generics[0].name, "T");
+        assert_eq!(type_decl.generics[0].ident, "T");
         assert_eq!(type_decl.generics[0].constraint, "any");
-        assert_eq!(type_decl.generics[1].name, "E");
+        assert_eq!(type_decl.generics[1].ident, "E");
         assert_eq!(type_decl.generics[1].constraint, "any");
 
         match type_decl.kind {
@@ -952,7 +941,9 @@ mod tests {
                 assert_eq!(variants.len(), 2);
 
                 match &variants[0] {
-                    EnumVariant::Single { name, ty, .. } => {
+                    EnumVariant::Single {
+                        ident: name, ty, ..
+                    } => {
                         assert_eq!(name, "Ok");
                         assert_eq!(ty.name, "T");
                     }
@@ -960,7 +951,9 @@ mod tests {
                 }
 
                 match &variants[1] {
-                    EnumVariant::Single { name, ty, .. } => {
+                    EnumVariant::Single {
+                        ident: name, ty, ..
+                    } => {
                         assert_eq!(name, "Err");
                         assert_eq!(ty.name, "E");
                     }
@@ -1001,7 +994,7 @@ mod tests {
             .parse_func_decl()
             .expect("failed to parse function with semicolons");
 
-        assert_eq!(func.name, "add");
+        assert_eq!(func.ident, "add");
         assert_eq!(func.body.stmts.len(), 2);
     }
 

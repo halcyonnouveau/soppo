@@ -604,6 +604,36 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
+        // Helper to format hover content with optional doc comment
+        fn format_hover(symbol: &soppo::types::SymbolInfo) -> String {
+            use soppo::types::SymbolKind;
+
+            // Format header based on symbol kind (Go-style)
+            let header = match symbol.kind {
+                SymbolKind::Variable => format!("var {} {}", symbol.name, symbol.ty),
+                SymbolKind::Parameter => format!("{} {}", symbol.name, symbol.ty),
+                SymbolKind::Constant => format!("const {} {}", symbol.name, symbol.ty),
+                SymbolKind::Type => format!("type {} {}", symbol.name, symbol.ty),
+                SymbolKind::Field => format!("{} {}", symbol.name, symbol.ty),
+                SymbolKind::Variant => symbol.name.clone(),
+                SymbolKind::Function | SymbolKind::Method => {
+                    // Type displays as "func(...) ret", so strip the "func" prefix
+                    let ty_str = symbol.ty.to_string();
+                    if let Some(rest) = ty_str.strip_prefix("func") {
+                        format!("func {}{}", symbol.name, rest)
+                    } else {
+                        format!("func {} {}", symbol.name, ty_str)
+                    }
+                }
+            };
+            let mut content = format!("```soppo\n{}\n```", header);
+            if let Some(ref doc) = symbol.doc_comment {
+                content.push_str("\n\n---\n\n");
+                content.push_str(doc);
+            }
+            content
+        }
+
         // Try workspace mode first
         if let Some(path) = Self::uri_to_path(&uri) {
             let ws_guard = self.workspace.read().await;
@@ -616,11 +646,10 @@ impl LanguageServer for Backend {
                 if let Some(text) = open_docs.get(&path) {
                     let offset = Self::position_to_byte_offset(text, position);
                     if let Some(symbol) = symbols.find_at(offset) {
-                        let content = format!("```soppo\n{}: {}\n```", symbol.name, symbol.ty);
                         return Ok(Some(Hover {
                             contents: HoverContents::Markup(MarkupContent {
                                 kind: MarkupKind::Markdown,
-                                value: content,
+                                value: format_hover(symbol),
                             }),
                             range: None,
                         }));
@@ -644,12 +673,10 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let content = format!("```soppo\n{}: {}\n```", symbol.name, symbol.ty);
-
         Ok(Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: content,
+                value: format_hover(symbol),
             }),
             range: None,
         }))
@@ -676,6 +703,9 @@ impl LanguageServer for Backend {
                     if let Some(symbol) = symbols.find_at(offset)
                         && let Some(def_span) = symbol.definition_span
                     {
+                        // Use name_span for highlighting if available, otherwise fall back to def_span
+                        let highlight_span = symbol.name_span.unwrap_or(def_span);
+
                         // Check if definition is in a different file
                         let def_uri = if def_span.file != file_id {
                             // Cross-file: look up the path
@@ -692,7 +722,7 @@ impl LanguageServer for Backend {
                         if let Some(def_uri) = def_uri {
                             return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                                 uri: def_uri,
-                                range: span_to_range(def_span),
+                                range: span_to_range(highlight_span),
                             })));
                         }
                     }
@@ -719,10 +749,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        // Use name_span for highlighting if available, otherwise fall back to def_span
+        let highlight_span = symbol.name_span.unwrap_or(def_span);
+
         // In single-file mode, assume definition is in the same file
         let location = Location {
             uri: uri.clone(),
-            range: span_to_range(def_span),
+            range: span_to_range(highlight_span),
         };
 
         Ok(Some(GotoDefinitionResponse::Scalar(location)))
@@ -1075,8 +1108,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        // Format the signature
-        let signature_label = format!("{}: {}", func_info.name, func_info.ty);
+        // Format the signature in Go style: func name(params) return
+        let ty_str = func_info.ty.to_string();
+        let signature_label = if let Some(rest) = ty_str.strip_prefix("func") {
+            format!("func {}{}", func_info.name, rest)
+        } else {
+            format!("func {} {}", func_info.name, ty_str)
+        };
 
         Ok(Some(SignatureHelp {
             signatures: vec![SignatureInformation {

@@ -98,7 +98,7 @@ impl Parser {
                     } else {
                         field.ty.name.clone()
                     };
-                    field_strs.push(format!("{} {}", field.name, ty_str));
+                    field_strs.push(format!("{} {}", field.ident, ty_str));
                 }
 
                 // Skip terminators between fields

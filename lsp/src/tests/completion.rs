@@ -75,6 +75,8 @@ fn func_def_to_type_no_params_no_return() {
         params: vec![],
         return_types: vec![],
         span: None,
+        name_span: None,
+        doc_comment: None,
     };
     let result = Backend::func_def_to_type(&func_def);
     assert_eq!(result, "func()");
@@ -91,6 +93,8 @@ fn func_def_to_type_with_params_and_return() {
         ],
         return_types: vec![Type::simple("int")],
         span: None,
+        name_span: None,
+        doc_comment: None,
     };
     let result = Backend::func_def_to_type(&func_def);
     assert_eq!(result, "func(a int, b int) int");
@@ -107,6 +111,8 @@ fn func_def_to_type_multiple_returns() {
         ],
         return_types: vec![Type::simple("int"), Type::simple("int")],
         span: None,
+        name_span: None,
+        doc_comment: None,
     };
     let result = Backend::func_def_to_type(&func_def);
     assert_eq!(result, "func(a int, b int) (int, int)");

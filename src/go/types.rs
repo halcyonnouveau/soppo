@@ -31,7 +31,7 @@ pub fn parse_go_type(s: &str) -> Type {
         let inner_ty = parse_go_type(inner);
         let inner_name = inner_ty.to_string();
         return Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: format!("[]{}", inner_name),
                 span: Span::dummy(),
@@ -46,7 +46,7 @@ pub fn parse_go_type(s: &str) -> Type {
         let inner_ty = parse_go_type(inner);
         let inner_name = inner_ty.to_string();
         return Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: format!("...{}", inner_name),
                 span: Span::dummy(),
@@ -72,7 +72,7 @@ pub fn parse_go_type(s: &str) -> Type {
         let key_ty = parse_go_type(key);
         let val_ty = parse_go_type(value);
         return Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: format!("map[{}]{}", key_ty, val_ty),
                 span: Span::dummy(),
@@ -86,7 +86,7 @@ pub fn parse_go_type(s: &str) -> Type {
     if let Some(inner) = s.strip_prefix("chan ") {
         let inner_ty = parse_go_type(inner);
         return Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: format!("chan {}", inner_ty),
                 span: Span::dummy(),
@@ -139,7 +139,7 @@ pub fn parse_go_type(s: &str) -> Type {
         let pkg = &s[..dot_pos];
         let name = &s[dot_pos + 1..];
         return Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::new(pkg),
                 name: name.to_string(),
                 span: Span::dummy(),
@@ -210,29 +210,35 @@ fn parse_func_type(s: &str) -> Type {
         parse_go_type(rest)
     };
 
-    Type::fun(params, ret)
+    Type::fun_named(params, ret)
 }
 
 /// Parse a parameter list like "a int, b string" or "int, string"
-fn parse_param_list(s: &str) -> Vec<Type> {
+/// Returns (name, type) pairs where name is Some if provided
+fn parse_param_list(s: &str) -> Vec<(Option<String>, Type)> {
     if s.trim().is_empty() {
         return vec![];
     }
 
     let parts = split_type_list(s);
-    let mut types = Vec::new();
+    let mut params = Vec::new();
 
     for part in parts {
         let part = part.trim();
         // Parameters can be "name type" or just "type"
-        // Take the last space-separated token as the type
         let tokens: Vec<&str> = part.split_whitespace().collect();
-        if let Some(ty_str) = tokens.last() {
-            types.push(parse_go_type(ty_str));
+        if tokens.len() >= 2 {
+            // Has name: "name type"
+            let name = tokens[0].to_string();
+            let ty_str = tokens[tokens.len() - 1];
+            params.push((Some(name), parse_go_type(ty_str)));
+        } else if let Some(ty_str) = tokens.last() {
+            // Just type
+            params.push((None, parse_go_type(ty_str)));
         }
     }
 
-    types
+    params
 }
 
 /// Split a comma-separated type list, respecting brackets
@@ -285,7 +291,7 @@ fn make_type_with_module(name: &str, args: Vec<Type>) -> Type {
         let pkg = &name[..dot_pos];
         let type_name = &name[dot_pos + 1..];
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::new(pkg),
                 name: type_name.to_string(),
                 span: Span::dummy(),
@@ -295,7 +301,7 @@ fn make_type_with_module(name: &str, args: Vec<Type>) -> Type {
         }
     } else {
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: name.to_string(),
                 span: Span::dummy(),
@@ -380,15 +386,16 @@ mod tests {
     #[test]
     fn test_function() {
         // External Go function types are nullable by default
-        assert_eq!(parse_go_type("func()").to_string(), "?fn() -> ()");
-        assert_eq!(parse_go_type("func(int)").to_string(), "?fn(int) -> ()");
+        assert_eq!(parse_go_type("func()").to_string(), "?func()");
+        assert_eq!(parse_go_type("func(int)").to_string(), "?func(int)");
         assert_eq!(
             parse_go_type("func(int) string").to_string(),
-            "?fn(int) -> string"
+            "?func(int) string"
         );
+        // Named parameters are preserved
         assert_eq!(
             parse_go_type("func(a int, b string) bool").to_string(),
-            "?fn(int, string) -> bool"
+            "?func(a int, b string) bool"
         );
     }
 
@@ -396,7 +403,9 @@ mod tests {
     fn test_qualified() {
         let ty = parse_go_type("fmt.Stringer");
         match ty {
-            Type::Con { name, args, .. } => {
+            Type::Con {
+                sym: name, args, ..
+            } => {
                 assert_eq!(name.module.0, "fmt");
                 assert_eq!(name.name, "Stringer");
                 assert!(args.is_empty());

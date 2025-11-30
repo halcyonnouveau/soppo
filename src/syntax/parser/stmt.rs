@@ -2,7 +2,9 @@ use std::cell::Cell;
 
 use super::Parser;
 use crate::error::{Result, SoppoError};
-use crate::syntax::ast::{Block, Expr, ExprKind, SelectCase, SelectCaseKind, Stmt, StmtKind};
+use crate::syntax::ast::{
+    Block, Expr, ExprKind, Ident, SelectCase, SelectCaseKind, Stmt, StmtKind,
+};
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
@@ -92,13 +94,13 @@ impl Parser {
                     && self.consume(&Token::Comma)
                 {
                     // Multi-value: collect more identifiers
-                    let mut names = vec![first_name.clone()];
+                    let mut names = vec![Ident::new(first_name.clone(), first_target.span)];
                     let mut targets = vec![first_target.clone()];
 
                     loop {
                         let target = self.parse_expr()?;
                         if let ExprKind::Ident(name) = &target.kind {
-                            names.push(name.clone());
+                            names.push(Ident::new(name.clone(), target.span));
                             targets.push(target);
                         } else {
                             return Err(SoppoError::Parse {
@@ -116,7 +118,7 @@ impl Parser {
                     if self.consume(&Token::ColonAssign) {
                         // Multi-value declaration: a, b := f() or a, b := expr1, expr2
                         for name in &names {
-                            self.validate_identifier(name, &first_target.span)?;
+                            self.validate_identifier(&name.name, &name.span)?;
                         }
                         let mut values = vec![self.parse_expr()?];
                         while self.consume(&Token::Comma) {
@@ -142,7 +144,10 @@ impl Parser {
                                 first_target.span.byte_start,
                                 end_span.byte_end,
                             ),
-                            kind: StmtKind::MultiDecl { names, values },
+                            kind: StmtKind::MultiDecl {
+                                ident: names,
+                                values,
+                            },
                         });
                     } else if self.consume(&Token::Assign) {
                         // Multi-value assignment: a, b = f() or a, b = expr1, expr2
@@ -186,16 +191,20 @@ impl Parser {
                     // target must be a simple identifier
                     if let ExprKind::Ident(name) = first_target.kind {
                         self.validate_identifier(&name, &first_target.span)?;
+                        let name_span = first_target.span;
                         let value = self.parse_expr()?;
                         Ok(Stmt {
                             span: Span::with_bytes(
-                                first_target.span.start,
+                                name_span.start,
                                 value.span.end,
                                 self.file,
-                                first_target.span.byte_start,
+                                name_span.byte_start,
                                 value.span.byte_end,
                             ),
-                            kind: StmtKind::Decl { name, value },
+                            kind: StmtKind::Decl {
+                                ident: Ident::new(name, name_span),
+                                value,
+                            },
                         })
                     } else {
                         Err(SoppoError::Parse {
@@ -307,7 +316,7 @@ impl Parser {
                 // Check for multi-var declaration (comma after first name)
                 if self.consume(&Token::Comma) {
                     // Multi-var: var a, b, c type or var a, b = 1, 2
-                    let mut names = vec![first_name];
+                    let mut names = vec![Ident::new(first_name, first_name_span)];
 
                     // Parse remaining names
                     loop {
@@ -327,7 +336,7 @@ impl Parser {
                             }
                         };
                         self.validate_identifier(&name, &name_span)?;
-                        names.push(name);
+                        names.push(Ident::new(name, name_span));
 
                         if !self.consume(&Token::Comma) {
                             break;
@@ -404,7 +413,11 @@ impl Parser {
                             start_span.byte_start,
                             end_span.byte_end,
                         ),
-                        kind: StmtKind::MultiVarDecl { names, ty, values },
+                        kind: StmtKind::MultiVarDecl {
+                            ident: names,
+                            ty,
+                            values,
+                        },
                     })
                 } else {
                     // Single var declaration
@@ -452,7 +465,7 @@ impl Parser {
                             end_span.byte_end,
                         ),
                         kind: StmtKind::VarDecl {
-                            name: first_name,
+                            ident: Ident::new(first_name, first_name_span),
                             ty,
                             value,
                         },
@@ -487,7 +500,7 @@ impl Parser {
                 // Check for multi-const declaration (comma after first name)
                 if self.consume(&Token::Comma) {
                     // Multi-const: const a, b = 1, 2 or const a, b type = 1, 2
-                    let mut names = vec![first_name];
+                    let mut names = vec![Ident::new(first_name, first_name_span)];
 
                     // Parse remaining names
                     loop {
@@ -507,7 +520,7 @@ impl Parser {
                             }
                         };
                         self.validate_identifier(&name, &name_span)?;
-                        names.push(name);
+                        names.push(Ident::new(name, name_span));
 
                         if !self.consume(&Token::Comma) {
                             break;
@@ -580,7 +593,11 @@ impl Parser {
                             start_span.byte_start,
                             end_span.byte_end,
                         ),
-                        kind: StmtKind::MultiConstDecl { names, ty, values },
+                        kind: StmtKind::MultiConstDecl {
+                            idents: names,
+                            ty,
+                            values,
+                        },
                     })
                 } else {
                     // Single const declaration
@@ -623,7 +640,7 @@ impl Parser {
                             end_span.byte_end,
                         ),
                         kind: StmtKind::ConstDecl {
-                            name: first_name,
+                            ident: Ident::new(first_name, first_name_span),
                             ty,
                             value,
                         },
@@ -668,28 +685,42 @@ impl Parser {
                 // We need to look ahead to see if we have: ident [, ident] := range
                 let saved_pos = self.pos;
 
-                // Helper to get identifier or underscore as a name
-                let get_name = |token: &Token| -> Option<String> {
-                    match token {
-                        Token::Ident(name) => Some(name.clone()),
-                        Token::Underscore => Some("_".to_string()),
-                        _ => None,
+                // Try to parse range loop
+                let first_ident: Option<Ident> = match self.peek() {
+                    Some(Token::Ident(name)) => {
+                        let name = name.clone();
+                        let span = self.peek_span();
+                        self.advance();
+                        Some(Ident::new(name, span))
                     }
+                    Some(Token::Underscore) => {
+                        let span = self.peek_span();
+                        self.advance();
+                        Some(Ident::new("_", span))
+                    }
+                    _ => None,
                 };
 
-                // Try to parse range loop
-                if let Some(first_name) = self.peek().and_then(&get_name) {
-                    self.advance();
-
+                if let Some(first_name) = first_ident {
                     // Check for second variable: for x, y := range or for _, y := range
-                    let second_name = if self.consume(&Token::Comma) {
-                        if let Some(second) = self.peek().and_then(get_name) {
-                            self.advance();
-                            Some(second)
-                        } else {
-                            // Not a valid range pattern, backtrack
-                            self.pos = saved_pos;
-                            None
+                    let second_name: Option<Ident> = if self.consume(&Token::Comma) {
+                        match self.peek() {
+                            Some(Token::Ident(name)) => {
+                                let name = name.clone();
+                                let span = self.peek_span();
+                                self.advance();
+                                Some(Ident::new(name, span))
+                            }
+                            Some(Token::Underscore) => {
+                                let span = self.peek_span();
+                                self.advance();
+                                Some(Ident::new("_", span))
+                            }
+                            _ => {
+                                // Not a valid range pattern, backtrack
+                                self.pos = saved_pos;
+                                None
+                            }
                         }
                     } else {
                         None
@@ -813,17 +844,20 @@ impl Parser {
                 let saved_pos = self.pos;
 
                 // Try to parse identifier(s) followed by :=
-                let mut names: Vec<String> = Vec::new();
+                let mut names: Vec<Ident> = Vec::new();
 
                 // First identifier or underscore
                 match self.peek() {
                     Some(Token::Ident(name)) => {
-                        names.push(name.clone());
+                        let name = name.clone();
+                        let span = self.peek_span();
                         self.advance();
+                        names.push(Ident::new(name, span));
                     }
                     Some(Token::Underscore) => {
-                        names.push("_".to_string());
+                        let span = self.peek_span();
                         self.advance();
+                        names.push(Ident::new("_", span));
                     }
                     _ => {}
                 }
@@ -832,12 +866,15 @@ impl Parser {
                 while !names.is_empty() && self.consume(&Token::Comma) {
                     match self.peek() {
                         Some(Token::Ident(name)) => {
-                            names.push(name.clone());
+                            let name = name.clone();
+                            let span = self.peek_span();
                             self.advance();
+                            names.push(Ident::new(name, span));
                         }
                         Some(Token::Underscore) => {
-                            names.push("_".to_string());
+                            let span = self.peek_span();
                             self.advance();
+                            names.push(Ident::new("_", span));
                         }
                         _ => {
                             // Comma but no identifier - backtrack
@@ -874,7 +911,7 @@ impl Parser {
                         } else {
                             // Implicit condition: x != nil
                             // Use the first name as the variable to check
-                            let name = names[0].clone();
+                            let name = names[0].name.clone();
                             Expr {
                                 kind: ExprKind::Binary {
                                     op: crate::syntax::BinOp::Ne,
@@ -901,11 +938,14 @@ impl Parser {
                             ),
                             kind: if names.len() == 1 && values.len() == 1 {
                                 StmtKind::Decl {
-                                    name: names.into_iter().next().unwrap(),
+                                    ident: names.into_iter().next().unwrap(),
                                     value: values.into_iter().next().unwrap(),
                                 }
                             } else {
-                                StmtKind::MultiDecl { names, values }
+                                StmtKind::MultiDecl {
+                                    ident: names,
+                                    values,
+                                }
                             },
                         };
 
@@ -1321,34 +1361,37 @@ impl Parser {
 
         // Must be a receive with declaration
         // Check for second variable (v, ok := <-ch)
-        let (first_name, second_name) = if let ExprKind::Ident(name) = &first_expr.kind {
-            let first_name = name.clone();
-            if self.consume(&Token::Comma) {
-                // v, ok := <-ch
-                match self.advance() {
-                    Some((Token::Ident(second), _)) => (first_name, Some(second)),
-                    Some((tok, span)) => {
-                        return Err(SoppoError::Parse {
-                            message: format!("Expected identifier after ',', found {:?}", tok),
-                            span,
-                        });
+        let (first_name, second_name): (Ident, Option<Ident>) =
+            if let ExprKind::Ident(name) = &first_expr.kind {
+                let first_name = Ident::new(name.clone(), first_expr.span);
+                if self.consume(&Token::Comma) {
+                    // v, ok := <-ch
+                    match self.advance() {
+                        Some((Token::Ident(second), span)) => {
+                            (first_name, Some(Ident::new(second, span)))
+                        }
+                        Some((tok, span)) => {
+                            return Err(SoppoError::Parse {
+                                message: format!("Expected identifier after ',', found {:?}", tok),
+                                span,
+                            });
+                        }
+                        None => {
+                            return Err(SoppoError::Parse {
+                                message: "Expected identifier after ','".to_string(),
+                                span: Span::dummy(),
+                            });
+                        }
                     }
-                    None => {
-                        return Err(SoppoError::Parse {
-                            message: "Expected identifier after ','".to_string(),
-                            span: Span::dummy(),
-                        });
-                    }
+                } else {
+                    (first_name, None)
                 }
             } else {
-                (first_name, None)
-            }
-        } else {
-            return Err(SoppoError::Parse {
-                message: "Expected identifier in select case".to_string(),
-                span: first_expr.span,
-            });
-        };
+                return Err(SoppoError::Parse {
+                    message: "Expected identifier in select case".to_string(),
+                    span: first_expr.span,
+                });
+            };
 
         // Expect := <-ch
         self.expect(Token::ColonAssign)?;
@@ -1363,13 +1406,13 @@ impl Parser {
 
         let kind = if let Some(ok_name) = second_name {
             SelectCaseKind::RecvDeclOk {
-                name: first_name,
-                ok_name,
+                ident: first_name,
+                ok_ident: ok_name,
                 channel,
             }
         } else {
             SelectCaseKind::RecvDecl {
-                name: first_name,
+                ident: first_name,
                 channel,
             }
         };
@@ -1425,7 +1468,7 @@ mod tests {
         let stmt = parser.parse_stmt().unwrap();
 
         match stmt.kind {
-            StmtKind::Decl { name, value } => {
+            StmtKind::Decl { ident: name, value } => {
                 assert_eq!(name, "x");
                 assert!(matches!(value.kind, ExprKind::Integer(42)));
             }
@@ -1530,7 +1573,10 @@ mod tests {
 
                 // First case: v := <-ch (RecvDecl)
                 match &cases[0].kind {
-                    SelectCaseKind::RecvDecl { name, channel } => {
+                    SelectCaseKind::RecvDecl {
+                        ident: name,
+                        channel,
+                    } => {
                         assert_eq!(name, "v");
                         assert!(matches!(&channel.kind, ExprKind::Ident(s) if s == "ch"));
                     }

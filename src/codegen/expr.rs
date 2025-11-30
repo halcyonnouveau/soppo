@@ -6,25 +6,25 @@ impl Codegen {
     pub(crate) fn gen_expr(&mut self, expr: &Expr) {
         match &expr.kind {
             ExprKind::Integer(n) => {
-                self.emit(&n.to_string());
+                self.emit(n.to_string());
             }
 
             ExprKind::Float(f) => {
                 let s = f.to_string();
                 // Ensure we have a decimal point for Go
                 if !s.contains('.') && !s.contains('e') && !s.contains('E') {
-                    self.emit(&format!("{}.0", s));
+                    self.emit(format!("{}.0", s));
                 } else {
                     self.emit(&s);
                 }
             }
 
             ExprKind::String(s) => {
-                self.emit(&format!("\"{}\"", s));
+                self.emit(format!("\"{}\"", s));
             }
 
             ExprKind::Rune(r) => {
-                self.emit(&format!("'{}'", r));
+                self.emit(format!("'{}'", r));
             }
 
             ExprKind::StringInterpolation(parts) => {
@@ -37,7 +37,7 @@ impl Codegen {
                     match part {
                         crate::syntax::StringPart::Literal(s) => {
                             // Escape % characters for fmt.Sprintf
-                            self.emit(&s.replace('%', "%%"));
+                            self.emit(s.replace('%', "%%"));
                         }
                         crate::syntax::StringPart::Expr(expr) => {
                             self.emit("%v");
@@ -70,7 +70,7 @@ impl Codegen {
             ExprKind::Binary { op, left, right } => {
                 self.emit("(");
                 self.gen_expr(left);
-                self.emit(&format!(" {} ", self.go_binop(op)));
+                self.emit(format!(" {} ", self.go_binop(op)));
                 self.gen_expr(right);
                 self.emit(")");
             }
@@ -130,7 +130,7 @@ impl Codegen {
                     // Check if it's a registered local enum type
                     if self.global_state.is_local_enum(type_name) {
                         // Enum values: Colour.Red → ColourRed (var or function)
-                        self.emit(&format!("{}{}", type_name, field));
+                        self.emit(format!("{}{}", type_name, field));
                     } else {
                         // Regular field access (like fmt.Printf)
                         self.emit(type_name);
@@ -147,7 +147,7 @@ impl Codegen {
                     if let ExprKind::Ident(pkg_name) = &inner_expr.kind {
                         if self.global_state.is_soppo_enum(pkg_name, type_name) {
                             // Cross-package enum: types.Status.Active → types.StatusActive
-                            self.emit(&format!("{}.{}{}", pkg_name, type_name, field));
+                            self.emit(format!("{}.{}{}", pkg_name, type_name, field));
                         } else {
                             // Regular nested field access
                             self.gen_expr(expr);
@@ -236,14 +236,14 @@ impl Codegen {
                     } else {
                         // Array literal: [size]type{elements}
                         self.emit("[");
-                        self.emit(&elements.len().to_string());
+                        self.emit(elements.len().to_string());
                         self.emit("]");
                         self.emit(self.go_type(type_name));
                     }
                 } else {
                     // No type - infer as array with size
                     self.emit("[");
-                    self.emit(&elements.len().to_string());
+                    self.emit(elements.len().to_string());
                     self.emit("]");
                 }
                 self.emit("{");
@@ -282,7 +282,7 @@ impl Codegen {
                     if i > 0 {
                         self.emit("; ");
                     }
-                    self.emit(&field.name);
+                    self.emit(&field.ident);
                     self.emit(" ");
                     self.emit(self.go_type(&field.ty.name));
                 }
@@ -351,7 +351,7 @@ impl Codegen {
                     if i > 0 {
                         self.emit(", ");
                     }
-                    self.emit(&param.name);
+                    self.emit(&param.ident);
                     self.emit(" ");
                     self.emit(self.go_type(&param.ty.name));
                 }

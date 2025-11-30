@@ -56,8 +56,12 @@ pub struct TypeDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub kind: TypeDefKind,
-    /// Source location of this definition (for go-to-definition)
+    /// Source location of this definition (full declaration span)
     pub span: Option<Span>,
+    /// Source location of just the type name (for goto-definition highlighting)
+    pub name_span: Option<Span>,
+    /// Documentation comment for this type
+    pub doc_comment: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,7 +122,9 @@ impl GenericParam {
     /// In Go, slices, maps, and functions are NOT comparable
     fn is_comparable(ty: &Type) -> bool {
         match ty {
-            Type::Con { name, args, .. } => {
+            Type::Con {
+                sym: name, args, ..
+            } => {
                 let ty_name = &name.name;
 
                 // Slices are not comparable
@@ -139,8 +145,8 @@ impl GenericParam {
                 // Check type arguments recursively (e.g., [2][]int is not comparable)
                 args.iter().all(Self::is_comparable)
             }
-            Type::Fun { .. } => false, // Functions are not comparable
-            Type::Var(_) => true,      // Type variables are assumed comparable
+            Type::Func { .. } => false, // Functions are not comparable
+            Type::Var(_) => true,       // Type variables are assumed comparable
             Type::Never => true,
         }
     }
@@ -153,8 +159,12 @@ pub struct FuncDef {
     pub generics: Vec<GenericParam>,
     pub params: Vec<(String, Type)>,
     pub return_types: Vec<Type>,
-    /// Source location of this definition (for go-to-definition)
+    /// Source location of this definition (full declaration span)
     pub span: Option<Span>,
+    /// Source location of just the function name (for goto-definition highlighting)
+    pub name_span: Option<Span>,
+    /// Documentation comment for this function
+    pub doc_comment: Option<String>,
 }
 
 /// Constant definition in a module
@@ -162,8 +172,12 @@ pub struct FuncDef {
 pub struct ConstDef {
     pub name: String,
     pub ty: Type,
-    /// Source location of this definition (for go-to-definition)
+    /// Source location of this definition (full declaration span)
     pub span: Option<Span>,
+    /// Source location of just the constant name (for goto-definition highlighting)
+    pub name_span: Option<Span>,
+    /// Documentation comment for this constant
+    pub doc_comment: Option<String>,
 }
 
 impl GlobalCtxt {
@@ -229,11 +243,11 @@ impl GlobalCtxt {
     /// Register a type definition
     pub fn register_type(&mut self, type_decl: &TypeDecl) {
         let type_def = TypeDef {
-            name: type_decl.name.clone(),
+            name: type_decl.ident.name.clone(),
             generics: type_decl
                 .generics
                 .iter()
-                .map(|g| GenericParam::new(&g.name, &g.constraint))
+                .map(|g| GenericParam::new(&g.ident.name, &g.constraint))
                 .collect(),
             kind: match &type_decl.kind {
                 TypeKind::Alias { target } => TypeDefKind::Alias {
@@ -248,18 +262,18 @@ impl GlobalCtxt {
                 TypeKind::Struct { fields } => TypeDefKind::Struct {
                     fields: fields
                         .iter()
-                        .map(|f| (f.name.clone(), Type::from_ast(&f.ty)))
+                        .map(|f| (f.ident.name.clone(), Type::from_ast(&f.ty)))
                         .collect(),
                 },
                 TypeKind::Interface { methods } => TypeDefKind::Interface {
                     methods: methods
                         .iter()
                         .map(|m| MethodSig {
-                            name: m.name.clone(),
+                            name: m.ident.name.clone(),
                             params: m
                                 .params
                                 .iter()
-                                .map(|p| (p.name.clone(), Type::from_ast(&p.ty)))
+                                .map(|p| (p.ident.name.clone(), Type::from_ast(&p.ty)))
                                 .collect(),
                             returns: m.returns.iter().map(Type::from_ast).collect(),
                         })
@@ -267,29 +281,33 @@ impl GlobalCtxt {
                 },
             },
             span: Some(type_decl.span),
+            name_span: Some(type_decl.ident.span),
+            doc_comment: type_decl.doc_comment.clone(),
         };
 
         self.current_module_mut()
             .types
-            .insert(type_decl.name.clone(), type_def);
+            .insert(type_decl.ident.name.clone(), type_def);
     }
 
     /// Register a function definition
     pub fn register_function(&mut self, func_decl: &FuncDecl) {
         let func_def = FuncDef {
-            name: func_decl.name.clone(),
+            name: func_decl.ident.name.clone(),
             generics: func_decl
                 .generics
                 .iter()
-                .map(|g| GenericParam::new(&g.name, &g.constraint))
+                .map(|g| GenericParam::new(&g.ident.name, &g.constraint))
                 .collect(),
             params: func_decl
                 .params
                 .iter()
-                .map(|p| (p.name.clone(), Type::from_ast(&p.ty)))
+                .map(|p| (p.ident.name.clone(), Type::from_ast(&p.ty)))
                 .collect(),
             return_types: func_decl.return_types.iter().map(Type::from_ast).collect(),
             span: Some(func_decl.span),
+            name_span: Some(func_decl.ident.span),
+            doc_comment: func_decl.doc_comment.clone(),
         };
 
         // If this is a method (has receiver), register it by receiver type
@@ -308,7 +326,7 @@ impl GlobalCtxt {
                 .methods
                 .entry(base_type.to_string())
                 .or_default()
-                .insert(func_decl.name.clone(), func_def.clone());
+                .insert(func_decl.ident.name.clone(), func_def.clone());
 
             // Insert for Go form if different
             if go_form != base_type {
@@ -316,26 +334,28 @@ impl GlobalCtxt {
                     .methods
                     .entry(go_form)
                     .or_default()
-                    .insert(func_decl.name.clone(), func_def.clone());
+                    .insert(func_decl.ident.name.clone(), func_def.clone());
             }
         }
 
         self.current_module_mut()
             .functions
-            .insert(func_decl.name.clone(), func_def);
+            .insert(func_decl.ident.name.clone(), func_def);
     }
 
     /// Register a constant definition
     pub fn register_constant(&mut self, const_decl: &ConstDecl, ty: Type) {
         let const_def = ConstDef {
-            name: const_decl.name.clone(),
+            name: const_decl.ident.name.clone(),
             ty,
             span: Some(const_decl.span),
+            name_span: Some(const_decl.ident.span),
+            doc_comment: const_decl.doc_comment.clone(),
         };
 
         self.current_module_mut()
             .constants
-            .insert(const_decl.name.clone(), const_def);
+            .insert(const_decl.ident.name.clone(), const_def);
     }
 
     /// Lookup a type definition in current module
@@ -454,17 +474,18 @@ impl Default for GlobalCtxt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::{Generic, Span};
+    use crate::syntax::{Generic, Ident, Span};
 
     #[test]
     fn test_register_type() {
         let mut gs = GlobalCtxt::new();
 
         let type_decl = TypeDecl {
-            name: "Colour".to_string(),
+            ident: Ident::dummy("Colour"),
             generics: vec![],
             kind: TypeKind::Enum { variants: vec![] },
             span: Span::dummy(),
+            doc_comment: None,
         };
 
         gs.register_type(&type_decl);
@@ -479,21 +500,20 @@ mod tests {
         let mut gs = GlobalCtxt::new();
 
         let type_decl = TypeDecl {
-            name: "Result".to_string(),
+            ident: Ident::dummy("Result"),
             generics: vec![
                 Generic {
-                    name: "T".to_string(),
+                    ident: Ident::dummy("T"),
                     constraint: "any".to_string(),
-                    span: Span::dummy(),
                 },
                 Generic {
-                    name: "E".to_string(),
+                    ident: Ident::dummy("E"),
                     constraint: "any".to_string(),
-                    span: Span::dummy(),
                 },
             ],
             kind: TypeKind::Enum { variants: vec![] },
             span: Span::dummy(),
+            doc_comment: None,
         };
 
         gs.register_type(&type_decl);

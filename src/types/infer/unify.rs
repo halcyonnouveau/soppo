@@ -9,7 +9,7 @@ impl Infer {
     fn resolve_alias(&self, ty: Type) -> Type {
         match &ty {
             Type::Con {
-                name,
+                sym: name,
                 args: _,
                 nullable,
             } => {
@@ -39,7 +39,7 @@ impl Infer {
         // Check if either type is `any` (Go's interface{})
         // any accepts any type, so unification always succeeds
         let is_any = |ty: &Type| -> bool {
-            matches!(ty, Type::Con { name, .. } if name.name == "any" || name.name == "?any" || name.name == "interface{}")
+            matches!(ty, Type::Con { sym, .. } if sym.name == "any" || sym.name == "?any" || sym.name == "interface{}")
         };
 
         if is_any(&t1) || is_any(&t2) {
@@ -47,7 +47,7 @@ impl Infer {
         }
 
         // Check if expected type is "error" which is a built-in interface
-        if matches!(&t1, Type::Con { name, .. } if name.name == "error" || name.name == "?error") {
+        if matches!(&t1, Type::Con { sym, .. } if sym.name == "error" || sym.name == "?error") {
             return Ok(());
         }
 
@@ -88,12 +88,12 @@ impl Infer {
             // Compatible numeric types: allow int/int8/int16/etc. to unify
             (
                 Type::Con {
-                    name: n1,
+                    sym: n1,
                     args: a1,
                     nullable: nullable1,
                 },
                 Type::Con {
-                    name: n2,
+                    sym: n2,
                     args: a2,
                     nullable: nullable2,
                 },
@@ -112,12 +112,12 @@ impl Infer {
             // Pointer types: unify underlying types even if names differ (e.g., *T vs *?0)
             (
                 Type::Con {
-                    name: n1,
+                    sym: n1,
                     args: a1,
                     nullable: nullable1,
                 },
                 Type::Con {
-                    name: n2,
+                    sym: n2,
                     args: a2,
                     nullable: nullable2,
                 },
@@ -142,12 +142,12 @@ impl Infer {
             // Slice types: unify element types even if names differ (e.g., []T vs []?0)
             (
                 Type::Con {
-                    name: n1,
+                    sym: n1,
                     args: a1,
                     nullable: nullable1,
                 },
                 Type::Con {
-                    name: n2,
+                    sym: n2,
                     args: a2,
                     nullable: nullable2,
                 },
@@ -170,12 +170,12 @@ impl Infer {
             // Channel types: unify element types even if names differ (e.g., chan T vs chan ?0)
             (
                 Type::Con {
-                    name: n1,
+                    sym: n1,
                     args: a1,
                     nullable: nullable1,
                 },
                 Type::Con {
-                    name: n2,
+                    sym: n2,
                     args: a2,
                     nullable: nullable2,
                 },
@@ -201,12 +201,12 @@ impl Infer {
             // Same constructor: unify arguments
             (
                 Type::Con {
-                    name: n1,
+                    sym: n1,
                     args: a1,
                     nullable: nullable1,
                 },
                 Type::Con {
-                    name: n2,
+                    sym: n2,
                     args: a2,
                     nullable: nullable2,
                 },
@@ -242,14 +242,14 @@ impl Infer {
                 Ok(())
             }
 
-            // Functions: unify args and return
+            // Functions: unify args and return (ignoring parameter names)
             (
-                Type::Fun {
+                Type::Func {
                     args: a1,
                     ret: r1,
                     nullable: nullable1,
                 },
-                Type::Fun {
+                Type::Func {
                     args: a2,
                     ret: r2,
                     nullable: nullable2,
@@ -264,17 +264,17 @@ impl Infer {
                     });
                 }
                 // Check if a1 (expected) has a variadic last parameter
-                let has_variadic = a1.last().is_some_and(|last| {
-                    matches!(last, Type::Con { name, .. } if name.name == "variadic" || name.name.starts_with("..."))
+                let has_variadic = a1.last().is_some_and(|(_, last_ty)| {
+                    matches!(last_ty, Type::Con { sym, .. } if sym.name == "variadic" || sym.name.starts_with("..."))
                 });
 
                 if has_variadic {
                     // Variadic function: check non-variadic params match, then variadic can consume 0+
                     let fixed_params = &a1[..a1.len() - 1];
-                    let variadic_param = a1.last().expect("checked above");
+                    let (_, variadic_param_ty) = a1.last().expect("checked above");
 
                     // Extract the variadic element type
-                    let variadic_elem = if let Type::Con { args, .. } = variadic_param {
+                    let variadic_elem = if let Type::Con { args, .. } = variadic_param_ty {
                         args.first().cloned().unwrap_or(Type::simple("any"))
                     } else {
                         Type::simple("any")
@@ -292,20 +292,20 @@ impl Infer {
                         });
                     }
 
-                    // Unify fixed params
-                    for (arg1, arg2) in fixed_params.iter().zip(a2.iter()) {
-                        self.unify(arg1, arg2, span)?;
+                    // Unify fixed params (ignoring names)
+                    for ((_, ty1), (_, ty2)) in fixed_params.iter().zip(a2.iter()) {
+                        self.unify(ty1, ty2, span)?;
                     }
 
                     // Unify remaining args against variadic element type
-                    for arg2 in a2.iter().skip(fixed_params.len()) {
+                    for (_, ty2) in a2.iter().skip(fixed_params.len()) {
                         // For "any" type (or nullable any), any argument is valid
                         let is_any = match &variadic_elem {
-                            Type::Con { name, .. } => name.name == "any",
+                            Type::Con { sym: name, .. } => name.name == "any",
                             _ => false,
                         };
                         if !is_any {
-                            self.unify(&variadic_elem, arg2, span)?;
+                            self.unify(&variadic_elem, ty2, span)?;
                         }
                     }
                 } else {
@@ -320,8 +320,9 @@ impl Infer {
                             span: *span,
                         });
                     }
-                    for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                        self.unify(arg1, arg2, span)?;
+                    // Unify types, ignoring parameter names
+                    for ((_, ty1), (_, ty2)) in a1.iter().zip(a2.iter()) {
+                        self.unify(ty1, ty2, span)?;
                     }
                 }
                 self.unify(r1, r2, span)?;
@@ -349,20 +350,23 @@ impl Infer {
                 }
             }
             Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable,
             } => Type::Con {
-                name,
+                sym: name,
                 args: args.into_iter().map(|a| self.substitute(a)).collect(),
                 nullable,
             },
-            Type::Fun {
+            Type::Func {
                 args,
                 ret,
                 nullable,
-            } => Type::Fun {
-                args: args.into_iter().map(|a| self.substitute(a)).collect(),
+            } => Type::Func {
+                args: args
+                    .into_iter()
+                    .map(|(name, ty)| (name, self.substitute(ty)))
+                    .collect(),
                 ret: Box::new(self.substitute(*ret)),
                 nullable,
             },
@@ -398,7 +402,9 @@ pub fn occurs(var: i32, ty: &Type) -> bool {
     match ty {
         Type::Var(v) => *v == var,
         Type::Con { args, .. } => args.iter().any(|arg| occurs(var, arg)),
-        Type::Fun { args, ret, .. } => args.iter().any(|arg| occurs(var, arg)) || occurs(var, ret),
+        Type::Func { args, ret, .. } => {
+            args.iter().any(|(_, arg_ty)| occurs(var, arg_ty)) || occurs(var, ret)
+        }
         Type::Never => false,
     }
 }
@@ -428,7 +434,7 @@ mod tests {
 
         // In constructor args
         let nested = Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: "List".to_string(),
                 span: Span::dummy(),

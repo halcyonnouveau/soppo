@@ -13,8 +13,8 @@ impl Codegen {
     /// Generate a statement inline (no indent, no newline) - for C-style for loop parts
     pub(crate) fn gen_stmt_inline(&mut self, stmt: &Stmt) {
         match &stmt.kind {
-            StmtKind::Decl { name, value } => {
-                self.emit(&format!("{} := ", name));
+            StmtKind::Decl { ident: name, value } => {
+                self.emit(format!("{} := ", name));
                 self.gen_expr(value);
             }
             StmtKind::Assign { target, value } => {
@@ -51,16 +51,25 @@ impl Codegen {
         let stmt_line = stmt.span.start.line;
 
         match &stmt.kind {
-            StmtKind::Decl { name, value } => {
+            StmtKind::Decl { ident: name, value } => {
                 self.emit_indent();
-                self.emit(&format!("{} := ", name));
+                self.emit(format!("{} := ", name));
                 self.gen_expr(value);
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::MultiDecl { names, values } => {
+            StmtKind::MultiDecl {
+                ident: names,
+                values,
+            } => {
                 self.emit_indent();
-                self.emit(&names.join(", "));
+                self.emit(
+                    names
+                        .iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
                 self.emit(" := ");
 
                 // Check for comma-ok idiom: v, ok := expr
@@ -83,21 +92,25 @@ impl Codegen {
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::VarDecl { name, ty, value } => {
+            StmtKind::VarDecl {
+                ident: name,
+                ty,
+                value,
+            } => {
                 self.emit_indent();
                 match (ty, value) {
                     (Some(t), Some(expr)) => {
                         // var x type = value
-                        self.emit(&format!("var {} {} = ", name, self.go_type(&t.name)));
+                        self.emit(format!("var {} {} = ", name, self.go_type(&t.name)));
                         self.gen_expr(expr);
                     }
                     (Some(t), None) => {
                         // var x type (zero value)
-                        self.emit(&format!("var {} {}", name, self.go_type(&t.name)));
+                        self.emit(format!("var {} {}", name, self.go_type(&t.name)));
                     }
                     (None, Some(expr)) => {
                         // var x = value (type inference)
-                        self.emit(&format!("var {} = ", name));
+                        self.emit(format!("var {} = ", name));
                         self.gen_expr(expr);
                     }
                     // INVARIANT: type checker ensures var has type or value
@@ -106,36 +119,41 @@ impl Codegen {
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::ConstDecl { name, ty, value } => {
+            StmtKind::ConstDecl {
+                ident: name,
+                ty,
+                value,
+            } => {
                 self.emit_indent();
                 if let Some(t) = ty {
                     // const x type = value
-                    self.emit(&format!("const {} {} = ", name, self.go_type(&t.name)));
+                    self.emit(format!("const {} {} = ", name, self.go_type(&t.name)));
                 } else {
                     // const x = value (type inference)
-                    self.emit(&format!("const {} = ", name));
+                    self.emit(format!("const {} = ", name));
                 }
                 self.gen_expr(value);
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::MultiVarDecl { names, ty, values } => {
+            StmtKind::MultiVarDecl {
+                ident: names,
+                ty,
+                values,
+            } => {
                 self.emit_indent();
+                let names_str = names
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 if values.is_empty() {
                     // var a, b, c type (zero values)
                     let ty = ty.as_ref().expect("MultiVarDecl without values needs type");
-                    self.emit(&format!(
-                        "var {} {}",
-                        names.join(", "),
-                        self.go_type(&ty.name)
-                    ));
+                    self.emit(format!("var {} {}", names_str, self.go_type(&ty.name)));
                 } else if let Some(t) = ty {
                     // var a, b type = expr1, expr2
-                    self.emit(&format!(
-                        "var {} {} = ",
-                        names.join(", "),
-                        self.go_type(&t.name)
-                    ));
+                    self.emit(format!("var {} {} = ", names_str, self.go_type(&t.name)));
                     for (i, val) in values.iter().enumerate() {
                         if i > 0 {
                             self.emit(", ");
@@ -144,7 +162,7 @@ impl Codegen {
                     }
                 } else {
                     // var a, b = expr1, expr2
-                    self.emit(&format!("var {} = ", names.join(", ")));
+                    self.emit(format!("var {} = ", names_str));
                     for (i, val) in values.iter().enumerate() {
                         if i > 0 {
                             self.emit(", ");
@@ -155,18 +173,23 @@ impl Codegen {
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::MultiConstDecl { names, ty, values } => {
+            StmtKind::MultiConstDecl {
+                idents: names,
+                ty,
+                values,
+            } => {
                 self.emit_indent();
+                let names_str = names
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 if let Some(t) = ty {
                     // const a, b type = expr1, expr2
-                    self.emit(&format!(
-                        "const {} {} = ",
-                        names.join(", "),
-                        self.go_type(&t.name)
-                    ));
+                    self.emit(format!("const {} {} = ", names_str, self.go_type(&t.name)));
                 } else {
                     // const a, b = expr1, expr2
-                    self.emit(&format!("const {} = ", names.join(", ")));
+                    self.emit(format!("const {} = ", names_str));
                 }
                 for (i, val) in values.iter().enumerate() {
                     if i > 0 {
@@ -206,7 +229,7 @@ impl Codegen {
             StmtKind::CompoundAssign { target, op, value } => {
                 self.emit_indent();
                 self.gen_expr(target);
-                self.emit(&format!(" {} ", self.go_assign_op(op)));
+                self.emit(format!(" {} ", self.go_assign_op(op)));
                 self.gen_expr(value);
                 self.emit_stmt_end(stmt_line);
             }
@@ -294,13 +317,22 @@ impl Codegen {
                 if let Some(init_stmt) = init {
                     // Generate the init statement inline (without indent/newline)
                     match &init_stmt.kind {
-                        StmtKind::Decl { name, value } => {
+                        StmtKind::Decl { ident: name, value } => {
                             self.emit(name);
                             self.emit(" := ");
                             self.gen_expr(value);
                         }
-                        StmtKind::MultiDecl { names, values } => {
-                            self.emit(&names.join(", "));
+                        StmtKind::MultiDecl {
+                            ident: names,
+                            values,
+                        } => {
+                            self.emit(
+                                names
+                                    .iter()
+                                    .map(|n| n.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            );
                             self.emit(" := ");
                             for (i, v) in values.iter().enumerate() {
                                 if i > 0 {
@@ -366,17 +398,20 @@ impl Codegen {
                             self.gen_expr(channel);
                             self.emit(":\n");
                         }
-                        SelectCaseKind::RecvDecl { name, channel } => {
-                            self.emit(&format!("case {} := <-", name));
+                        SelectCaseKind::RecvDecl {
+                            ident: name,
+                            channel,
+                        } => {
+                            self.emit(format!("case {} := <-", name));
                             self.gen_expr(channel);
                             self.emit(":\n");
                         }
                         SelectCaseKind::RecvDeclOk {
-                            name,
-                            ok_name,
+                            ident: name,
+                            ok_ident: ok_name,
                             channel,
                         } => {
-                            self.emit(&format!("case {}, {} := <-", name, ok_name));
+                            self.emit(format!("case {}, {} := <-", name, ok_name));
                             self.gen_expr(channel);
                             self.emit(":\n");
                         }
@@ -453,7 +488,7 @@ impl Codegen {
 
                 // Generate error check: if err != nil { ... }
                 self.emit_indent();
-                self.emit(&format!("if {} != nil ", err_var));
+                self.emit(format!("if {} != nil ", err_var));
                 self.emit("{\n");
                 self.indent();
 
@@ -462,7 +497,7 @@ impl Codegen {
                     if let Some(name) = error_name {
                         // Bind error to the named variable
                         self.emit_indent();
-                        self.emit(&format!("{} := {}\n", name, err_var));
+                        self.emit(format!("{} := {}\n", name, err_var));
                     }
                     // Emit handler body
                     for handler_stmt in &block.stmts {
@@ -481,7 +516,7 @@ impl Codegen {
                         .map(|ty| self.zero_value(ty))
                         .collect();
 
-                    self.emit(&zero_values.join(", "));
+                    self.emit(zero_values.join(", "));
 
                     // Add error variable
                     if !zero_values.is_empty() {
@@ -510,21 +545,30 @@ impl Codegen {
     /// Transforms: f()      -> _, _err := f() (with appropriate number of _ for multi-return)
     fn gen_try_inner_stmt(&mut self, stmt: &Stmt, err_var: &str, discard_count: usize) {
         match &stmt.kind {
-            StmtKind::Decl { name, value } => {
+            StmtKind::Decl { ident: name, value } => {
                 // x := f() -> x, _err := f()
-                self.emit(&format!("{}, {} := ", name, err_var));
+                self.emit(format!("{}, {} := ", name, err_var));
                 self.gen_expr(value);
             }
-            StmtKind::MultiDecl { names, values } if values.len() == 1 => {
+            StmtKind::MultiDecl {
+                ident: names,
+                values,
+            } if values.len() == 1 => {
                 // x, y := f() -> x, y, _err := f()
-                self.emit(&names.join(", "));
-                self.emit(&format!(", {} := ", err_var));
+                self.emit(
+                    names
+                        .iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                self.emit(format!(", {} := ", err_var));
                 self.gen_expr(&values[0]);
             }
             StmtKind::Assign { target, value } => {
                 // x = f() -> x, _err = f()
                 self.gen_expr(target);
-                self.emit(&format!(", {} = ", err_var));
+                self.emit(format!(", {} = ", err_var));
                 self.gen_expr(value);
             }
             StmtKind::MultiAssign { targets, values } if values.len() == 1 => {
@@ -535,7 +579,7 @@ impl Codegen {
                     }
                     self.gen_expr(target);
                 }
-                self.emit(&format!(", {} = ", err_var));
+                self.emit(format!(", {} = ", err_var));
                 self.gen_expr(&values[0]);
             }
             StmtKind::Expr(expr) => {
@@ -544,9 +588,9 @@ impl Codegen {
                 // f() -> _, _, _err := f() for (T, U, error) returns
                 if discard_count > 0 {
                     let blanks = vec!["_"; discard_count].join(", ");
-                    self.emit(&format!("{}, {} := ", blanks, err_var));
+                    self.emit(format!("{}, {} := ", blanks, err_var));
                 } else {
-                    self.emit(&format!("{} := ", err_var));
+                    self.emit(format!("{} := ", err_var));
                 }
                 self.gen_expr(expr);
             }
@@ -624,11 +668,11 @@ impl Codegen {
                                 self.emit(" && ");
                             }
                             self.gen_expr(scrutinee_expr);
-                            self.emit(&format!(".{} == ", field_name));
+                            self.emit(format!(".{} == ", field_name));
                             match lit {
-                                Literal::Integer(n) => self.emit(&format!("{}", n)),
-                                Literal::String(s) => self.emit(&format!("\"{}\"", s)),
-                                Literal::Bool(b) => self.emit(&format!("{}", b)),
+                                Literal::Integer(n) => self.emit(format!("{}", n)),
+                                Literal::String(s) => self.emit(format!("\"{}\"", s)),
+                                Literal::Bool(b) => self.emit(format!("{}", b)),
                             }
                         }
                     }
@@ -645,11 +689,11 @@ impl Codegen {
                     for (field_name, field_pattern) in fields {
                         if let FieldPattern::Bind(binding_name) = field_pattern {
                             self.emit_indent();
-                            self.emit(&format!("{} := ", binding_name));
+                            self.emit(format!("{} := ", binding_name));
                             self.gen_expr(scrutinee_expr);
-                            self.emit(&format!(".{}\n", field_name));
+                            self.emit(format!(".{}\n", field_name));
                             self.emit_indent();
-                            self.emit(&format!("_ = {}\n", binding_name));
+                            self.emit(format!("_ = {}\n", binding_name));
                         }
                     }
                 }
@@ -741,10 +785,10 @@ impl Codegen {
                 if let PatternKind::Destructor { binding, .. } = &first_pattern.kind {
                     // __v is already the concrete type from the switch statement
                     self.emit_indent();
-                    self.emit(&format!("{} := __v.Value\n", binding));
+                    self.emit(format!("{} := __v.Value\n", binding));
                     // Add blank assignment to avoid unused variable warnings
                     self.emit_indent();
-                    self.emit(&format!("_ = {}\n", binding));
+                    self.emit(format!("_ = {}\n", binding));
                 }
 
                 // Extract pattern bindings for struct destructor patterns
@@ -754,10 +798,10 @@ impl Codegen {
                         // Only emit bindings, not literal matches
                         if let FieldPattern::Bind(binding_name) = field_pattern {
                             self.emit_indent();
-                            self.emit(&format!("{} := __v.{}\n", binding_name, field_name));
+                            self.emit(format!("{} := __v.{}\n", binding_name, field_name));
                             // Add blank assignment to avoid unused variable warnings
                             self.emit_indent();
-                            self.emit(&format!("_ = {}\n", binding_name));
+                            self.emit(format!("_ = {}\n", binding_name));
                         }
                     }
                 }

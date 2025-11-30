@@ -13,9 +13,15 @@ pub struct SymbolInfo {
     /// The symbol's inferred type
     pub ty: Type,
     /// Where this symbol is defined (None for builtins/externals)
+    /// This covers the entire declaration (e.g., `func foo(x int) int`)
     pub definition_span: Option<Span>,
+    /// Where the symbol's name is located (for goto-definition highlighting)
+    /// This covers just the identifier (e.g., `foo` in `func foo(x int) int`)
+    pub name_span: Option<Span>,
     /// The kind of symbol
     pub kind: SymbolKind,
+    /// Documentation comment for this symbol
+    pub doc_comment: Option<String>,
 }
 
 /// What kind of symbol this is
@@ -124,7 +130,9 @@ mod tests {
                 name: "foo".to_string(),
                 ty: Type::simple("int"),
                 definition_span: Some(make_span(10, 15)),
+                name_span: Some(make_span(10, 15)),
                 kind: SymbolKind::Variable,
+                doc_comment: None,
             },
         );
 
@@ -156,7 +164,9 @@ mod tests {
                 name: "a".to_string(),
                 ty: Type::simple("int"),
                 definition_span: None,
+                name_span: None,
                 kind: SymbolKind::Variable,
+                doc_comment: None,
             },
         );
 
@@ -166,7 +176,9 @@ mod tests {
                 name: "b".to_string(),
                 ty: Type::simple("string"),
                 definition_span: None,
+                name_span: None,
                 kind: SymbolKind::Function,
+                doc_comment: None,
             },
         );
 

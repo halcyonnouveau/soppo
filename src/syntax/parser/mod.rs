@@ -190,4 +190,46 @@ impl Parser {
             Ok(())
         }
     }
+
+    /// Find doc comments that immediately precede the given span.
+    /// Doc comments are comments ending on the line immediately before the declaration,
+    /// or consecutive comment lines leading up to that line.
+    fn get_doc_comment(&self, decl_start_line: usize) -> Option<String> {
+        if decl_start_line == 0 {
+            return None;
+        }
+
+        // Collect all comments that are on consecutive lines ending right before decl
+        let mut doc_lines: Vec<&str> = Vec::new();
+        let mut expected_line = decl_start_line - 1;
+
+        // Sort comments by line (descending) to process from closest to decl
+        let mut relevant_comments: Vec<_> = self
+            .comments
+            .iter()
+            .filter(|c| c.span.end.line < decl_start_line)
+            .collect();
+        relevant_comments.sort_by(|a, b| b.span.end.line.cmp(&a.span.end.line));
+
+        for comment in relevant_comments {
+            if comment.span.end.line == expected_line {
+                // Strip comment markers and trim
+                let text = comment.text.trim();
+                let text = text.strip_prefix("//").unwrap_or(text).trim();
+                doc_lines.push(text);
+                expected_line = comment.span.start.line.saturating_sub(1);
+            } else if comment.span.end.line < expected_line {
+                // Gap between comments and decl - stop looking
+                break;
+            }
+        }
+
+        if doc_lines.is_empty() {
+            None
+        } else {
+            // Reverse to get comments in top-to-bottom order
+            doc_lines.reverse();
+            Some(doc_lines.join("\n"))
+        }
+    }
 }

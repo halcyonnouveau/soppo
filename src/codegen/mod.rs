@@ -173,8 +173,8 @@ impl Codegen {
     }
 
     /// Emit text without newline
-    pub(crate) fn emit(&mut self, text: &str) {
-        self.output.push_str(text);
+    pub(crate) fn emit(&mut self, text: impl AsRef<str>) {
+        self.output.push_str(text.as_ref());
     }
 
     /// Emit current indentation
@@ -200,7 +200,7 @@ impl Codegen {
     pub(crate) fn format_generic_params(&self, generics: &[Generic]) -> String {
         generics
             .iter()
-            .map(|g| format!("{} {}", g.name, g.constraint))
+            .map(|g| format!("{} {}", g.ident, g.constraint))
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -209,7 +209,7 @@ impl Codegen {
     pub(crate) fn format_generic_names(&self, generics: &[Generic]) -> String {
         generics
             .iter()
-            .map(|g| g.name.as_str())
+            .map(|g| g.ident.name.as_str())
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -243,18 +243,24 @@ impl Codegen {
 
         // Enum name with generics (Soppo-style, just names)
         let generic_names = self.format_generic_name_brackets(&type_decl.generics);
-        self.emit_line(&format!("{}{} {{", type_decl.name, generic_names));
+        self.emit_line(&format!("{}{} {{", type_decl.ident, generic_names));
 
         // Variants
         for variant in variants {
             match variant {
-                EnumVariant::Unit { name, .. } => {
+                EnumVariant::Unit { ident: name, .. } => {
                     self.emit_line(&format!("    {}", name));
                 }
-                EnumVariant::Single { name, ty, .. } => {
+                EnumVariant::Single {
+                    ident: name, ty, ..
+                } => {
                     self.emit_line(&format!("    {} {}", name, self.go_type(&ty.name)));
                 }
-                EnumVariant::Struct { name, fields, .. } => {
+                EnumVariant::Struct {
+                    ident: name,
+                    fields,
+                    ..
+                } => {
                     self.emit_line(&format!("    {} {{", name));
                     for field in fields {
                         let tag = field
@@ -264,7 +270,7 @@ impl Codegen {
                             .unwrap_or_default();
                         self.emit_line(&format!(
                             "        {} {}{}",
-                            field.name,
+                            field.ident,
                             self.go_type(&field.ty.name),
                             tag
                         ));
@@ -423,7 +429,7 @@ impl Codegen {
     ///   }
     pub(crate) fn emit_struct_field_with_anon_struct(
         &mut self,
-        field_name: &str,
+        field_name: impl AsRef<str>,
         go_type: &str,
         tag: &str,
         nilable_comment: &str,
@@ -435,7 +441,11 @@ impl Codegen {
             .unwrap_or("");
 
         // Emit opening line with nilable comment if applicable
-        self.emit_line(&format!("{} *struct {{{}", field_name, nilable_comment));
+        self.emit_line(&format!(
+            "{} *struct {{{}",
+            field_name.as_ref(),
+            nilable_comment
+        ));
         self.indent();
 
         // Parse and emit each field, handling inner nilable types

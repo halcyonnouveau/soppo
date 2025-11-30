@@ -42,7 +42,7 @@ impl Infer {
                             "Cannot define method on enum type `{}`. \
                                  Define methods on enum variants instead: \
                                  `func (v {}.VariantName) {}(...)`",
-                            base_name, base_name, func.name
+                            base_name, base_name, func.ident
                         ),
                         span: receiver.ty.span,
                     });
@@ -53,10 +53,10 @@ impl Infer {
         // Build function type from signature
         // Use resolve_type to properly handle qualified types like *http.Request
         let func_ty = {
-            let param_tys: Vec<Type> = func
+            let param_tys: Vec<(Option<String>, Type)> = func
                 .params
                 .iter()
-                .map(|p| self.resolve_type(&p.ty))
+                .map(|p| (Some(p.ident.name.clone()), self.resolve_type(&p.ty)))
                 .collect();
             let ret_ty = if func.return_types.is_empty() {
                 Type::unit()
@@ -71,12 +71,12 @@ impl Infer {
                         .collect(),
                 )
             };
-            Type::fun(param_tys, ret_ty)
+            Type::fun_named(param_tys, ret_ty)
         };
 
         // Store function type in outermost scope so it can be called
         if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(func.name.clone(), (func_ty, Some(func.span)));
+            scope.insert(func.ident.name.clone(), (func_ty, Some(func.span)));
         }
 
         // Register function in global state so it can be looked up for method calls
@@ -94,7 +94,8 @@ impl Infer {
         let old_generic_params = std::mem::take(&mut self.generic_params);
         for generic in &func.generics {
             let ty_var = self.fresh_ty_var();
-            self.generic_params.insert(generic.name.clone(), ty_var);
+            self.generic_params
+                .insert(generic.ident.name.clone(), ty_var);
         }
 
         // Set expected return types for this function
@@ -115,16 +116,16 @@ impl Infer {
         if let Some(receiver) = &func.receiver {
             let receiver_ty = self.resolve_type(&receiver.ty);
             self.insert_var(
-                receiver.name.clone(),
+                receiver.ident.name.clone(),
                 receiver_ty.clone(),
-                Some(receiver.span),
+                Some(receiver.ident.span),
             );
 
             // Set nil state for nilable receivers based on nullability
             // Non-nullable nilable receivers (e.g., *T not ?*T) are trusted to be non-nil
             if Self::is_nilable_type(&receiver_ty) && !receiver_ty.is_nullable() {
                 self.set_nil_state(
-                    receiver.name.clone(),
+                    receiver.ident.name.clone(),
                     crate::types::ty::Nullability::NonNull,
                 );
             }
@@ -133,12 +134,19 @@ impl Infer {
         // Add parameters to scope
         for param in &func.params {
             let param_ty = self.resolve_type(&param.ty);
-            self.insert_var(param.name.clone(), param_ty.clone(), Some(param.span));
+            self.insert_var(
+                param.ident.name.clone(),
+                param_ty.clone(),
+                Some(param.ident.span),
+            );
 
             // Set nil state for nilable parameters based on nullability
             // Non-nullable nilable params are trusted to be non-nil
             if Self::is_nilable_type(&param_ty) && !param_ty.is_nullable() {
-                self.set_nil_state(param.name.clone(), crate::types::ty::Nullability::NonNull);
+                self.set_nil_state(
+                    param.ident.name.clone(),
+                    crate::types::ty::Nullability::NonNull,
+                );
             }
         }
 
@@ -180,7 +188,10 @@ impl Infer {
 
         // Add constant to the global scope
         if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(const_decl.name.clone(), (const_ty, Some(const_decl.span)));
+            scope.insert(
+                const_decl.ident.name.clone(),
+                (const_ty, Some(const_decl.span)),
+            );
         }
 
         Ok(())
@@ -211,37 +222,40 @@ impl Infer {
                 let old_generic_params = std::mem::take(&mut self.generic_params);
                 for generic in &type_decl.generics {
                     let ty_var = self.fresh_ty_var();
-                    self.generic_params.insert(generic.name.clone(), ty_var);
+                    self.generic_params
+                        .insert(generic.ident.name.clone(), ty_var);
                 }
 
                 // Register each variant as a constructor function
                 for variant in variants {
                     match variant {
-                        EnumVariant::Unit { name, span } => {
+                        EnumVariant::Unit { ident, .. } => {
                             // Unit variants are just values of the enum type
                             // They act like constructors with no arguments
-                            let enum_ty = Type::simple(&type_decl.name);
+                            let enum_ty = Type::simple(&type_decl.ident.name);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope.insert(name.clone(), (enum_ty, Some(*span)));
+                                scope.insert(ident.name.clone(), (enum_ty, Some(ident.span)));
                             }
                         }
-                        EnumVariant::Single { name, ty, span } => {
+                        EnumVariant::Single { ident, ty, .. } => {
                             // Single value variants are functions: T -> EnumType
                             let value_ty = self.resolve_type(ty);
-                            let enum_ty = Type::simple(&type_decl.name);
+                            let enum_ty = Type::simple(&type_decl.ident.name);
                             let constructor_ty = Type::fun(vec![value_ty], enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope.insert(name.clone(), (constructor_ty, Some(*span)));
+                                scope
+                                    .insert(ident.name.clone(), (constructor_ty, Some(ident.span)));
                             }
                         }
-                        EnumVariant::Struct { name, fields, span } => {
+                        EnumVariant::Struct { ident, fields, .. } => {
                             // Struct variants are functions: (field1, field2, ...) -> EnumType
                             let field_tys: Vec<Type> =
                                 fields.iter().map(|f| self.resolve_type(&f.ty)).collect();
-                            let enum_ty = Type::simple(&type_decl.name);
+                            let enum_ty = Type::simple(&type_decl.ident.name);
                             let constructor_ty = Type::fun(field_tys, enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope.insert(name.clone(), (constructor_ty, Some(*span)));
+                                scope
+                                    .insert(ident.name.clone(), (constructor_ty, Some(ident.span)));
                             }
                         }
                     }
@@ -259,13 +273,14 @@ impl Infer {
                 let old_generic_params = std::mem::take(&mut self.generic_params);
                 for generic in &type_decl.generics {
                     let ty_var = self.fresh_ty_var();
-                    self.generic_params.insert(generic.name.clone(), ty_var);
+                    self.generic_params
+                        .insert(generic.ident.name.clone(), ty_var);
                 }
 
                 // Store field types for later field access validation
                 let field_types: Vec<(String, Type)> = fields
                     .iter()
-                    .map(|f| (f.name.clone(), self.resolve_type(&f.ty)))
+                    .map(|f| (f.ident.name.clone(), self.resolve_type(&f.ty)))
                     .collect();
 
                 // Update the registered type with actual field types
@@ -273,7 +288,7 @@ impl Infer {
                     .global_state
                     .current_module_mut()
                     .types
-                    .get_mut(&type_decl.name)
+                    .get_mut(&type_decl.ident.name)
                 {
                     type_def.kind = TypeDefKind::Struct {
                         fields: field_types,

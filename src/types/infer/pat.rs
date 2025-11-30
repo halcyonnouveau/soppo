@@ -32,27 +32,25 @@ impl Infer {
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
                 // Try to find the actual type from the enum variant
-                if let Type::Con {
-                    name: type_name, ..
-                } = scrutinee_ty
+                if let Type::Con { sym: type_name, .. } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
                     && let TypeDefKind::Enum { variants } = &type_def.kind
                 {
                     for variant in variants {
                         if let EnumVariant::Single {
-                            name: vname, ty, ..
+                            ident: vname, ty, ..
                         } = variant
-                            && vname == variant_name
+                            && vname.name == variant_name
                         {
                             let binding_ty = Type::simple(&ty.name);
-                            self.insert_var(binding.clone(), binding_ty, Some(pattern.span));
+                            self.insert_var(binding.name.clone(), binding_ty, Some(binding.span));
                             return Ok(());
                         }
                     }
                 }
                 // Fallback to fresh type variable if we can't determine the type
                 let binding_ty = self.fresh_ty_var();
-                self.insert_var(binding.clone(), binding_ty, Some(pattern.span));
+                self.insert_var(binding.name.clone(), binding_ty, Some(binding.span));
                 Ok(())
             }
             PatternKind::StructDestructor {
@@ -68,9 +66,7 @@ impl Infer {
                 let mut found_type = false;
 
                 // Look up the type - could be an enum variant or a regular struct
-                if let Type::Con {
-                    name: type_name, ..
-                } = scrutinee_ty
+                if let Type::Con { sym: type_name, .. } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
                 {
                     match &type_def.kind {
@@ -78,21 +74,21 @@ impl Infer {
                             // Enum struct variant
                             for variant in variants {
                                 if let EnumVariant::Struct {
-                                    name: vname,
+                                    ident: vname,
                                     fields: variant_fields,
                                     ..
                                 } = variant
-                                    && vname == variant_name
+                                    && vname.name == variant_name
                                 {
                                     found_type = true;
                                     for (field_name, field_pattern) in fields {
-                                        if let FieldPattern::Bind(binding_name) = field_pattern
+                                        if let FieldPattern::Bind(binding_ident) = field_pattern
                                             && let Some(field) = variant_fields
                                                 .iter()
-                                                .find(|f| &f.name == field_name)
+                                                .find(|f| &f.ident.name == field_name)
                                         {
                                             let field_ty = Type::simple(&field.ty.name);
-                                            bindings.push((binding_name.clone(), field_ty));
+                                            bindings.push((binding_ident.name.clone(), field_ty));
                                         }
                                         // Literals don't create bindings
                                     }
@@ -106,11 +102,11 @@ impl Infer {
                             // Regular struct matching
                             found_type = true;
                             for (field_name, field_pattern) in fields {
-                                if let FieldPattern::Bind(binding_name) = field_pattern
+                                if let FieldPattern::Bind(binding_ident) = field_pattern
                                     && let Some((_, field_ty)) =
                                         struct_fields.iter().find(|(name, _)| name == field_name)
                                 {
-                                    bindings.push((binding_name.clone(), field_ty.clone()));
+                                    bindings.push((binding_ident.name.clone(), field_ty.clone()));
                                 }
                                 // Literals don't create bindings
                             }
@@ -127,9 +123,13 @@ impl Infer {
                 } else {
                     // Fallback: add bindings with fresh type variables
                     for (_field_name, field_pattern) in fields {
-                        if let FieldPattern::Bind(binding_name) = field_pattern {
+                        if let FieldPattern::Bind(binding_ident) = field_pattern {
                             let binding_ty = self.fresh_ty_var();
-                            self.insert_var(binding_name.clone(), binding_ty, Some(pattern.span));
+                            self.insert_var(
+                                binding_ident.name.clone(),
+                                binding_ty,
+                                Some(binding_ident.span),
+                            );
                         }
                     }
                 }
@@ -161,9 +161,7 @@ impl Infer {
             PatternKind::Destructor { name, binding } => {
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
-                let binding_ty = if let Type::Con {
-                    name: type_name, ..
-                } = scrutinee_ty
+                let binding_ty = if let Type::Con { sym: type_name, .. } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
                     && let TypeDefKind::Enum { variants } = &type_def.kind
                 {
@@ -171,9 +169,9 @@ impl Infer {
                         .iter()
                         .find_map(|variant| {
                             if let EnumVariant::Single {
-                                name: vname, ty, ..
+                                ident: vname, ty, ..
                             } = variant
-                                && vname == variant_name
+                                && vname.name == variant_name
                             {
                                 Some(Type::simple(&ty.name))
                             } else {
@@ -185,7 +183,7 @@ impl Infer {
                     self.fresh_ty_var()
                 };
 
-                bindings.insert(binding.clone(), binding_ty);
+                bindings.insert(binding.name.clone(), binding_ty);
             }
             PatternKind::StructDestructor {
                 name,
@@ -194,29 +192,27 @@ impl Infer {
             } => {
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
-                if let Type::Con {
-                    name: type_name, ..
-                } = scrutinee_ty
+                if let Type::Con { sym: type_name, .. } = scrutinee_ty
                     && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
                 {
                     match &type_def.kind {
                         TypeDefKind::Enum { variants } => {
                             for variant in variants {
                                 if let EnumVariant::Struct {
-                                    name: vname,
+                                    ident: vname,
                                     fields: variant_fields,
                                     ..
                                 } = variant
-                                    && vname == variant_name
+                                    && vname.name == variant_name
                                 {
                                     for (field_name, field_pattern) in fields {
-                                        if let FieldPattern::Bind(binding_name) = field_pattern
+                                        if let FieldPattern::Bind(binding_ident) = field_pattern
                                             && let Some(field) = variant_fields
                                                 .iter()
-                                                .find(|f| &f.name == field_name)
+                                                .find(|f| &f.ident.name == field_name)
                                         {
                                             let field_ty = Type::simple(&field.ty.name);
-                                            bindings.insert(binding_name.clone(), field_ty);
+                                            bindings.insert(binding_ident.name.clone(), field_ty);
                                         }
                                     }
                                     break;
@@ -227,11 +223,11 @@ impl Infer {
                             fields: struct_fields,
                         } => {
                             for (field_name, field_pattern) in fields {
-                                if let FieldPattern::Bind(binding_name) = field_pattern
+                                if let FieldPattern::Bind(binding_ident) = field_pattern
                                     && let Some((_, field_ty)) =
                                         struct_fields.iter().find(|(name, _)| name == field_name)
                                 {
-                                    bindings.insert(binding_name.clone(), field_ty.clone());
+                                    bindings.insert(binding_ident.name.clone(), field_ty.clone());
                                 }
                             }
                         }
@@ -241,9 +237,9 @@ impl Infer {
 
                 // Fallback for any bindings not found
                 for (_field_name, field_pattern) in fields {
-                    if let FieldPattern::Bind(binding_name) = field_pattern {
+                    if let FieldPattern::Bind(binding_ident) = field_pattern {
                         bindings
-                            .entry(binding_name.clone())
+                            .entry(binding_ident.name.clone())
                             .or_insert_with(|| self.fresh_ty_var());
                     }
                 }

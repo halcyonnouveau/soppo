@@ -1,6 +1,8 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
-use crate::syntax::ast::{AssignOp, BinOp, Expr, ExprKind, Param, StringPart, Type, UnaryOp};
+use crate::syntax::ast::{
+    AssignOp, BinOp, Expr, ExprKind, Ident, Param, StringPart, Type, UnaryOp,
+};
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
@@ -1051,9 +1053,8 @@ impl Parser {
 
                         let param_ty = self.parse_type()?;
                         params.push(Param {
-                            name: param_name,
+                            ident: Ident::new(param_name, param_span),
                             ty: param_ty,
-                            span: param_span,
                         });
 
                         if !self.consume(&Token::Comma) {

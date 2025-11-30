@@ -54,12 +54,15 @@ impl Infer {
                         })?;
 
                 // Record the symbol for LSP features
+                // For variable references, name_span is the same as def_span (variable name location)
                 self.record_symbol(
                     expr.span,
                     name.clone(),
                     ty.clone(),
                     def_span,
+                    def_span, // name_span same as def_span for variables
                     SymbolKind::Variable,
+                    None, // Variables don't have doc comments
                 );
 
                 Ok(ty)
@@ -198,15 +201,15 @@ impl Infer {
                     return Ok(elem_ty);
                 }
 
-                if let Type::Con { name, args, .. } = &container_ty {
+                if let Type::Con { sym, args, .. } = &container_ty {
                     // Array indexing: array or [N]T - index is int
-                    if name.name == "array" && args.len() == 1 {
+                    if sym.name == "array" && args.len() == 1 {
                         self.unify(&index_ty, &Type::simple("int"), &index.span)?;
                         return Ok(args[0].clone());
                     }
 
                     // String indexing - index is int, result is byte
-                    if name.name == "string" {
+                    if sym.name == "string" {
                         self.unify(&index_ty, &Type::simple("int"), &index.span)?;
                         return Ok(Type::simple("byte"));
                     }
@@ -268,7 +271,9 @@ impl Infer {
                         ty.name.clone(),
                         Type::simple(&ty.name),
                         type_def.span,
+                        type_def.name_span,
                         SymbolKind::Type,
+                        type_def.doc_comment.clone(),
                     );
 
                     if let TypeDefKind::Struct { fields: field_defs } = &type_def.kind {
@@ -314,7 +319,7 @@ impl Infer {
                         // Check if it's a cross-package enum variant
                         if self.global_state.is_soppo_enum(pkg_name, type_name) {
                             return Ok(Type::Con {
-                                name: Symbol {
+                                sym: Symbol {
                                     module: ModuleId::new(pkg_name),
                                     name: type_name.to_string(),
                                     span: Span::dummy(),
@@ -326,7 +331,7 @@ impl Infer {
 
                         // Return qualified type with module info (for Go packages)
                         return Ok(Type::Con {
-                            name: Symbol {
+                            sym: Symbol {
                                 module: ModuleId::new(pkg_name),
                                 name: type_name.to_string(),
                                 span: Span::dummy(),
@@ -392,7 +397,7 @@ impl Infer {
                 // Add parameters to scope - use resolve_type for proper qualified type handling
                 for param in params {
                     let param_ty = self.resolve_type(&param.ty);
-                    self.insert_var(param.name.clone(), param_ty, Some(param.span));
+                    self.insert_var(param.ident.name.clone(), param_ty, Some(param.ident.span));
                 }
 
                 // Set expected return types for this function
@@ -431,7 +436,7 @@ impl Infer {
                 // Build a map of field names to types from the definition
                 let field_types: std::collections::HashMap<String, Type> = field_defs
                     .iter()
-                    .map(|f| (f.name.clone(), self.resolve_type(&f.ty)))
+                    .map(|f| (f.ident.name.clone(), self.resolve_type(&f.ty)))
                     .collect();
 
                 // Type check each field value against its declared type
@@ -455,7 +460,7 @@ impl Infer {
                 // For type checking, we use a structural anonymous type
                 let field_type_list: Vec<(String, Type)> = field_defs
                     .iter()
-                    .map(|f| (f.name.clone(), self.resolve_type(&f.ty)))
+                    .map(|f| (f.ident.name.clone(), self.resolve_type(&f.ty)))
                     .collect();
 
                 Ok(Type::anon_struct(field_type_list))
@@ -547,38 +552,50 @@ impl Infer {
             // For Soppo imports, look up from GlobalCtxt
             if self.is_soppo_import(name) {
                 // Try to look up as a function first
-                if let Some((func_ty, def_span)) = self.lookup_soppo_function(name, field) {
+                if let Some((func_ty, def_span, name_span, doc_comment)) =
+                    self.lookup_soppo_function(name, field)
+                {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
                         field.to_string(),
                         func_ty.clone(),
                         def_span,
+                        name_span,
                         SymbolKind::Function,
+                        doc_comment,
                     );
                     return Ok(func_ty);
                 }
                 // Try to look up as a type
-                if let Some((ty, def_span)) = self.lookup_soppo_type(name, field) {
+                if let Some((ty, def_span, name_span, doc_comment)) =
+                    self.lookup_soppo_type(name, field)
+                {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
                         field.to_string(),
                         ty.clone(),
                         def_span,
+                        name_span,
                         SymbolKind::Type,
+                        doc_comment,
                     );
                     return Ok(ty);
                 }
                 // Try to look up as a constant
-                if let Some((ty, def_span)) = self.lookup_soppo_constant(name, field) {
+                if let Some((ty, def_span, name_span, doc_comment)) =
+                    self.lookup_soppo_constant(name, field)
+                {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
                         field.to_string(),
                         ty.clone(),
                         def_span,
-                        SymbolKind::Variable,
+                        name_span,
+                        SymbolKind::Constant,
+                        doc_comment,
                     );
                     return Ok(ty);
                 }
@@ -620,17 +637,15 @@ impl Infer {
                     // Find the variant
                     for variant in variants {
                         let variant_name = match variant {
-                            EnumVariant::Unit { name, .. } => name,
-                            EnumVariant::Single { name, .. } => name,
-                            EnumVariant::Struct { name, .. } => name,
+                            EnumVariant::Unit { ident, .. } => &ident.name,
+                            EnumVariant::Single { ident, .. } => &ident.name,
+                            EnumVariant::Struct { ident, .. } => &ident.name,
                         };
 
                         if variant_name == field {
                             // Found the variant
                             return match variant {
-                                EnumVariant::Unit {
-                                    name: variant_name, ..
-                                } => {
+                                EnumVariant::Unit { ident, .. } => {
                                     // Unit variant: for non-generic enums, return the enum type directly
                                     // For generic enums, error - they must be accessed via call syntax
                                     // with type args: Option.None[int]
@@ -641,7 +656,7 @@ impl Infer {
                                         // This generates invalid Go (can't reference generic func without instantiation)
                                         Err(SoppoError::GenericUnitVariant {
                                             enum_name: type_name.clone(),
-                                            variant_name: variant_name.clone(),
+                                            variant_name: ident.name.clone(),
                                             span: *field_span,
                                         })
                                     }
@@ -709,8 +724,8 @@ impl Infer {
         }
 
         // Handle built-in error type's Error() method
-        if let Type::Con { name, .. } = &expr_ty
-            && name.name == "error"
+        if let Type::Con { sym, .. } = &expr_ty
+            && sym.name == "error"
             && field == "Error"
         {
             // error.Error() returns string
@@ -721,10 +736,10 @@ impl Infer {
         // For pointer types like *User, extract the inner type name (User)
         // Also extract the module name if present (for Go package types)
         let (struct_name, module_name): (Option<String>, Option<String>) =
-            if let Type::Con { name, args, .. } = &expr_ty {
-                if name.name.starts_with('*') && args.len() == 1 {
+            if let Type::Con { sym, args, .. } = &expr_ty {
+                if sym.name.starts_with('*') && args.len() == 1 {
                     // Pointer type: extract inner type name from args or strip prefix
-                    if let Type::Con { name: inner, .. } = &args[0] {
+                    if let Type::Con { sym: inner, .. } = &args[0] {
                         let mod_name = if inner.module.0.is_empty() {
                             None
                         } else {
@@ -732,15 +747,15 @@ impl Infer {
                         };
                         (Some(inner.name.clone()), mod_name)
                     } else {
-                        (Some(name.name[1..].to_string()), None)
+                        (Some(sym.name[1..].to_string()), None)
                     }
                 } else {
-                    let mod_name = if name.module.0.is_empty() {
+                    let mod_name = if sym.module.0.is_empty() {
                         None
                     } else {
-                        Some(name.module.0.clone())
+                        Some(sym.module.0.clone())
                     };
-                    (Some(name.name.clone()), mod_name)
+                    (Some(sym.name.clone()), mod_name)
                 }
             } else {
                 (None, None)
@@ -772,20 +787,20 @@ impl Infer {
                     // Find the variant
                     for variant in variants {
                         let (v_name, v_fields) = match variant {
-                            EnumVariant::Unit { name, .. } => (name.as_str(), None),
-                            EnumVariant::Single { name, ty, .. } => {
+                            EnumVariant::Unit { ident, .. } => (ident.name.as_str(), None),
+                            EnumVariant::Single { ident, ty, .. } => {
                                 // Single variants have a "Value" field
                                 (
-                                    name.as_str(),
+                                    ident.name.as_str(),
                                     Some(vec![("Value".to_string(), Type::from_ast(ty))]),
                                 )
                             }
-                            EnumVariant::Struct { name, fields, .. } => {
+                            EnumVariant::Struct { ident, fields, .. } => {
                                 let fs: Vec<_> = fields
                                     .iter()
-                                    .map(|f| (f.name.clone(), Type::from_ast(&f.ty)))
+                                    .map(|f| (f.ident.name.clone(), Type::from_ast(&f.ty)))
                                     .collect();
-                                (name.as_str(), Some(fs))
+                                (ident.name.as_str(), Some(fs))
                             }
                         };
 
@@ -880,8 +895,8 @@ impl Infer {
         {
             // Check if this is a unit variant of a generic enum
             for variant in variants {
-                if let EnumVariant::Unit { name, .. } = variant
-                    && name == variant_name
+                if let EnumVariant::Unit { ident, .. } = variant
+                    && ident.name == *variant_name
                     && !type_def.generics.is_empty()
                 {
                     // This is a generic unit variant call
@@ -920,8 +935,8 @@ impl Infer {
                 let channel_ty = self.infer_expr(&args[0].1)?;
                 let channel_ty = self.substitute(channel_ty);
                 // Verify it's a channel type
-                if let Type::Con { name, .. } = &channel_ty
-                    && !name.name.starts_with("chan ")
+                if let Type::Con { sym, .. } = &channel_ty
+                    && !sym.name.starts_with("chan ")
                 {
                     return Err(SoppoError::Type {
                         message: format!("close requires a channel argument, got {}", channel_ty),
@@ -961,7 +976,7 @@ impl Infer {
                 let valid = Self::is_slice_type(&arg_ty)
                     || Self::is_map_type(&arg_ty)
                     || Self::is_channel_type(&arg_ty)
-                    || matches!(&arg_ty, Type::Con { name, .. } if name.name == "string" || name.name == "array" || name.name.starts_with("["));
+                    || matches!(&arg_ty, Type::Con { sym, .. } if sym.name == "string" || sym.name == "array" || sym.name.starts_with("["));
                 if !valid {
                     return Err(SoppoError::Type {
                         message: format!(
@@ -981,7 +996,7 @@ impl Infer {
                 // Verify it's a valid type for cap
                 let valid = Self::is_slice_type(&arg_ty)
                     || Self::is_channel_type(&arg_ty)
-                    || matches!(&arg_ty, Type::Con { name, .. } if name.name == "array" || name.name.starts_with("["));
+                    || matches!(&arg_ty, Type::Con { sym, .. } if sym.name == "array" || sym.name.starts_with("["));
                 if !valid {
                     return Err(SoppoError::Type {
                         message: format!("cap requires array, slice, or channel; got {}", arg_ty),
@@ -1026,7 +1041,7 @@ impl Infer {
                 let dst_is_slice = Self::is_slice_type(&dst_ty);
                 let src_is_slice = Self::is_slice_type(&src_ty);
                 let src_is_string =
-                    matches!(&src_ty, Type::Con { name, .. } if name.name == "string");
+                    matches!(&src_ty, Type::Con { sym, .. } if sym.name == "string");
 
                 if !dst_is_slice {
                     return Err(SoppoError::Type {
@@ -1045,9 +1060,9 @@ impl Infer {
                 }
                 // For string source, dst must be []byte
                 if src_is_string
-                    && let Type::Con { name, .. } = &dst_ty
-                    && name.name != "[]byte"
-                    && name.name != "[]uint8"
+                    && let Type::Con { sym, .. } = &dst_ty
+                    && sym.name != "[]byte"
+                    && sym.name != "[]uint8"
                 {
                     return Err(SoppoError::Type {
                         message: format!("cannot copy string to {}; need []byte", dst_ty),
@@ -1114,10 +1129,10 @@ impl Infer {
                 let c_ty = self.infer_expr(&args[0].1)?;
                 let c_ty = self.substitute(c_ty);
                 match &c_ty {
-                    Type::Con { name, .. }
-                        if name.name == "complex128" || name.name == "complex64" =>
+                    Type::Con { sym, .. }
+                        if sym.name == "complex128" || sym.name == "complex64" =>
                     {
-                        let result = if name.name == "complex128" {
+                        let result = if sym.name == "complex128" {
                             "float64"
                         } else {
                             "float32"
@@ -1138,10 +1153,10 @@ impl Infer {
                 let c_ty = self.infer_expr(&args[0].1)?;
                 let c_ty = self.substitute(c_ty);
                 match &c_ty {
-                    Type::Con { name, .. }
-                        if name.name == "complex128" || name.name == "complex64" =>
+                    Type::Con { sym, .. }
+                        if sym.name == "complex128" || sym.name == "complex64" =>
                     {
-                        let result = if name.name == "complex128" {
+                        let result = if sym.name == "complex128" {
                             "float64"
                         } else {
                             "float32"
@@ -1218,14 +1233,18 @@ impl Infer {
         {
             // For Soppo imports, look up the function from GlobalCtxt
             if self.is_soppo_import(pkg_name) {
-                if let Some((func_ty, def_span)) = self.lookup_soppo_function(pkg_name, name) {
+                if let Some((func_ty, def_span, name_span, doc_comment)) =
+                    self.lookup_soppo_function(pkg_name, name)
+                {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
                         name.clone(),
                         func_ty.clone(),
                         def_span,
+                        name_span,
                         SymbolKind::Function,
+                        doc_comment,
                     );
 
                     // Found the function - infer args and check against signature
@@ -1235,7 +1254,7 @@ impl Infer {
                     }
 
                     // Extract param types and return type from func_ty
-                    if let Type::Fun {
+                    if let Type::Func {
                         args: param_tys,
                         ret,
                         ..
@@ -1255,7 +1274,9 @@ impl Infer {
                         }
 
                         // Check each argument type
-                        for (param_ty, (arg_ty, arg_span)) in param_tys.iter().zip(arg_tys.iter()) {
+                        for ((_, param_ty), (arg_ty, arg_span)) in
+                            param_tys.iter().zip(arg_tys.iter())
+                        {
                             self.unify(param_ty, arg_ty, arg_span)?;
                         }
 
@@ -1264,14 +1285,18 @@ impl Infer {
                 }
 
                 // Try type conversion: pkg.Type(value)
-                if let Some((ty, def_span)) = self.lookup_soppo_type(pkg_name, name) {
+                if let Some((ty, def_span, name_span, doc_comment)) =
+                    self.lookup_soppo_type(pkg_name, name)
+                {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
                         name.clone(),
                         ty.clone(),
                         def_span,
+                        name_span,
                         SymbolKind::Type,
+                        doc_comment,
                     );
 
                     if args.len() != 1 {
@@ -1488,7 +1513,7 @@ impl Infer {
 
         // Check function call with detailed error spans
         match &func_ty {
-            Type::Fun {
+            Type::Func {
                 args: param_tys,
                 ret,
                 ..
@@ -1503,14 +1528,14 @@ impl Infer {
                 };
 
                 // Check if last param is variadic
-                let has_variadic = param_tys.last().is_some_and(|last| {
-                    matches!(last, Type::Con { name, .. } if name.name == "variadic" || name.name.starts_with("..."))
+                let has_variadic = param_tys.last().is_some_and(|(_, last_ty)| {
+                    matches!(last_ty, Type::Con { sym, .. } if sym.name == "variadic" || sym.name.starts_with("..."))
                 });
 
                 if has_variadic {
                     let fixed_params = &param_tys[..param_tys.len() - 1];
-                    let variadic_param = param_tys.last().expect("checked above");
-                    let variadic_elem = if let Type::Con { args, .. } = variadic_param {
+                    let (_, variadic_param_ty) = param_tys.last().expect("checked above");
+                    let variadic_elem = if let Type::Con { args, .. } = variadic_param_ty {
                         args.first().cloned().unwrap_or(Type::simple("any"))
                     } else {
                         Type::simple("any")
@@ -1529,7 +1554,7 @@ impl Infer {
                     }
 
                     // Check fixed params
-                    for (param_ty, (arg_ty, arg_span, is_nil)) in
+                    for ((_, param_ty), (arg_ty, arg_span, is_nil)) in
                         fixed_params.iter().zip(arg_tys.iter())
                     {
                         check_nil_arg(param_ty, *arg_span, *is_nil)?;
@@ -1540,7 +1565,7 @@ impl Infer {
                     for (arg_ty, arg_span, is_nil) in arg_tys.iter().skip(fixed_params.len()) {
                         // For "any" type (or nullable any), any argument is valid
                         let is_any = match &variadic_elem {
-                            Type::Con { name, .. } => name.name == "any",
+                            Type::Con { sym, .. } => sym.name == "any",
                             _ => false,
                         };
                         if !is_any {
@@ -1562,7 +1587,7 @@ impl Infer {
                     }
 
                     // Check each argument type
-                    for (param_ty, (arg_ty, arg_span, is_nil)) in
+                    for ((_, param_ty), (arg_ty, arg_span, is_nil)) in
                         param_tys.iter().zip(arg_tys.iter())
                     {
                         check_nil_arg(param_ty, *arg_span, *is_nil)?;
@@ -1719,8 +1744,8 @@ mod tests {
         let ty = infer.infer_expr(&expr).unwrap();
 
         // Should be array[int]
-        if let Type::Con { name, args, .. } = ty {
-            assert_eq!(name.name, "array");
+        if let Type::Con { sym, args, .. } = ty {
+            assert_eq!(sym.name, "array");
             assert_eq!(args.len(), 1);
             assert_eq!(args[0], Type::simple("int"));
         } else {

@@ -16,14 +16,15 @@ pub enum Nullability {
 pub enum Type {
     /// Concrete type constructor: int, string, Option[T]
     Con {
-        name: Symbol,
+        sym: Symbol,
         args: Vec<Type>,
         nullable: bool, // true for ?*T, ?[]T, ?Interface
     },
 
-    /// Function type: fn(int, string) -> bool
-    Fun {
-        args: Vec<Type>,
+    /// Function type: func(a int, b string) bool
+    /// Parameter names are optional (None for anonymous params)
+    Func {
+        args: Vec<(Option<String>, Type)>,
         ret: Box<Type>,
         nullable: bool, // true for ?func types
     },
@@ -44,7 +45,7 @@ impl Type {
     /// Create a simple type from a string (for built-in types)
     pub fn simple(name: &str) -> Self {
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: name.to_string(),
                 span: Span::dummy(),
@@ -57,7 +58,7 @@ impl Type {
     /// Create a generic type with string name and type arguments
     pub fn generic(name: &str, args: Vec<Type>) -> Self {
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: name.to_string(),
                 span: Span::dummy(),
@@ -82,9 +83,18 @@ impl Type {
         Type::Var(id)
     }
 
-    /// Create a function type
+    /// Create a function type with unnamed parameters
     pub fn fun(args: Vec<Type>, ret: Type) -> Self {
-        Type::Fun {
+        Type::Func {
+            args: args.into_iter().map(|ty| (None, ty)).collect(),
+            ret: Box::new(ret),
+            nullable: false,
+        }
+    }
+
+    /// Create a function type with named parameters
+    pub fn fun_named(args: Vec<(Option<String>, Type)>, ret: Type) -> Self {
+        Type::Func {
             args,
             ret: Box::new(ret),
             nullable: false,
@@ -94,7 +104,7 @@ impl Type {
     /// Create a generic type with arguments
     pub fn con_with_args(name: Symbol, args: Vec<Type>) -> Self {
         Type::Con {
-            name,
+            sym: name,
             args,
             nullable: false,
         }
@@ -103,7 +113,7 @@ impl Type {
     /// Create an array type with element type
     pub fn array(element_type: Type) -> Self {
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: "array".to_string(),
                 span: Span::dummy(),
@@ -116,7 +126,7 @@ impl Type {
     /// Create a slice type with element type: []T
     pub fn slice(element_type: Type) -> Self {
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: format!("[]{}", element_type),
                 span: Span::dummy(),
@@ -136,7 +146,7 @@ impl Type {
             .join("; ");
         let name = format!("struct {{ {} }}", fields_str);
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name,
                 span: Span::dummy(),
@@ -154,11 +164,11 @@ impl Type {
     /// Create a pointer type with explicit nullability
     pub fn ptr_nullable(inner: Type, nullable: bool) -> Self {
         let inner_name = match &inner {
-            Type::Con { name, .. } => name.name.clone(),
+            Type::Con { sym: name, .. } => name.name.clone(),
             _ => "?".to_string(),
         };
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: format!("*{}", inner_name),
                 span: Span::dummy(),
@@ -177,7 +187,7 @@ impl Type {
         }
 
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: ast_ty.name.clone(),
                 span: ast_ty.span,
@@ -191,7 +201,7 @@ impl Type {
     pub fn is_nullable(&self) -> bool {
         match self {
             Type::Con { nullable, .. } => *nullable,
-            Type::Fun { nullable, .. } => *nullable,
+            Type::Func { nullable, .. } => *nullable,
             Type::Var(_) => false, // Type variables are not inherently nullable
             Type::Never => false,
         }
@@ -201,19 +211,19 @@ impl Type {
     pub fn as_nullable(self) -> Self {
         match self {
             Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable: _,
             } => Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable: true,
             },
-            Type::Fun {
+            Type::Func {
                 args,
                 ret,
                 nullable: _,
-            } => Type::Fun {
+            } => Type::Func {
                 args,
                 ret,
                 nullable: true,
@@ -226,19 +236,19 @@ impl Type {
     pub fn as_non_nullable(self) -> Self {
         match self {
             Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable: _,
             } => Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable: false,
             },
-            Type::Fun {
+            Type::Func {
                 args,
                 ret,
                 nullable: _,
-            } => Type::Fun {
+            } => Type::Func {
                 args,
                 ret,
                 nullable: false,
@@ -251,7 +261,7 @@ impl Type {
     /// This includes: pointers, slices, maps, channels, interfaces, funcs
     pub fn is_nilable_kind(&self) -> bool {
         match self {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 let n = &name.name;
                 n.starts_with('*')           // pointer
                     || n.starts_with("[]")   // slice
@@ -261,7 +271,7 @@ impl Type {
                     || n == "any"            // any/interface{}
                     || n == "interface{}" // explicit interface
             }
-            Type::Fun { .. } => true, // function types can be nil
+            Type::Func { .. } => true, // function types can be nil
             Type::Var(_) => false,
             Type::Never => false,
         }
@@ -271,7 +281,7 @@ impl Type {
     /// These are always implicitly nilable in Go
     pub fn is_go_interface(&self) -> bool {
         match self {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 let n = &name.name;
                 n == "error" || n == "any" || n == "interface{}"
             }
@@ -284,7 +294,7 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable,
             } => {
@@ -308,7 +318,7 @@ impl fmt::Display for Type {
                     write!(f, "{}{}[{}]", prefix, name.name, args_str)
                 }
             }
-            Type::Fun {
+            Type::Func {
                 args,
                 ret,
                 nullable,
@@ -316,10 +326,22 @@ impl fmt::Display for Type {
                 let prefix = if *nullable { "?" } else { "" };
                 let args_str = args
                     .iter()
-                    .map(|a| a.to_string())
+                    .map(|(name, ty)| {
+                        if let Some(n) = name {
+                            format!("{} {}", n, ty)
+                        } else {
+                            ty.to_string()
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
-                write!(f, "{}fn({}) -> {}", prefix, args_str, ret)
+                // Format return type: nothing for unit, parens for multiple
+                let ret_str = if ret.as_ref() == &Type::unit() {
+                    String::new()
+                } else {
+                    format!(" {}", ret)
+                };
+                write!(f, "{}func({}){}", prefix, args_str, ret_str)
             }
             Type::Var(v) => write!(f, "?{}", v),
             Type::Never => write!(f, "!"),
@@ -354,11 +376,26 @@ mod tests {
 
     #[test]
     fn test_function_type() {
+        // Unnamed parameters
         let func = Type::fun(
             vec![Type::simple("int"), Type::simple("string")],
             Type::simple("bool"),
         );
-        assert_eq!(func.to_string(), "fn(int, string) -> bool");
+        assert_eq!(func.to_string(), "func(int, string) bool");
+
+        // Named parameters
+        let func_named = Type::fun_named(
+            vec![
+                (Some("a".to_string()), Type::simple("int")),
+                (Some("b".to_string()), Type::simple("string")),
+            ],
+            Type::simple("bool"),
+        );
+        assert_eq!(func_named.to_string(), "func(a int, b string) bool");
+
+        // No return type
+        let func_void = Type::fun(vec![Type::simple("int")], Type::unit());
+        assert_eq!(func_void.to_string(), "func(int)");
     }
 
     #[test]

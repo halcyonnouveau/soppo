@@ -13,6 +13,10 @@ use crate::error::SoppoError;
 use crate::go::{GoCache, Project, parse_go_type};
 use crate::syntax::{Expr, ExprKind, Import, ModuleId, Span, Symbol, Type as AstType, UnaryOp};
 
+/// Result of looking up a symbol in a Soppo module.
+/// Contains: (type, definition_span, name_span, doc_comment)
+type LookupResult = Option<(Type, Option<Span>, Option<Span>, Option<String>)>;
+
 /// Check if a type name is a Go primitive/built-in type
 pub(crate) fn is_primitive_type(ty: &str) -> bool {
     matches!(
@@ -174,13 +178,24 @@ impl Infer {
     }
 
     /// Record a symbol at the given span
+    ///
+    /// - `span`: The span of the symbol reference (where it's used)
+    /// - `name`: The symbol's name
+    /// - `ty`: The symbol's type
+    /// - `definition_span`: The full declaration span (e.g., entire `func foo(x int) int`)
+    /// - `name_span`: Just the identifier span (e.g., just `foo`) for goto-definition highlighting
+    /// - `kind`: The kind of symbol
+    /// - `doc_comment`: Optional documentation comment
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn record_symbol(
         &mut self,
         span: Span,
         name: String,
         ty: Type,
         definition_span: Option<Span>,
+        name_span: Option<Span>,
         kind: SymbolKind,
+        doc_comment: Option<String>,
     ) {
         self.symbols.record(
             span,
@@ -188,7 +203,9 @@ impl Infer {
                 name,
                 ty,
                 definition_span,
+                name_span,
                 kind,
+                doc_comment,
             },
         );
     }
@@ -284,12 +301,12 @@ impl Infer {
     }
 
     /// Look up a function in an imported Soppo module.
-    /// Returns the function type and its definition span (for go-to-definition).
+    /// Returns the function type, definition span, name span (for go-to-definition), and doc comment.
     pub(super) fn lookup_soppo_function(
         &self,
         package_name: &str,
         func_name: &str,
-    ) -> Option<(Type, Option<Span>)> {
+    ) -> LookupResult {
         // Get the ModuleId for this package
         let module_id = self.soppo_imports.get(package_name)?;
 
@@ -297,7 +314,11 @@ impl Infer {
         let func_def = self.global_state.lookup_function_in(module_id, func_name)?;
 
         // Convert FuncDef to Type::Fun
-        let param_types: Vec<Type> = func_def.params.iter().map(|(_, ty)| ty.clone()).collect();
+        let param_types: Vec<(Option<String>, Type)> = func_def
+            .params
+            .iter()
+            .map(|(name, ty)| (Some(name.clone()), ty.clone()))
+            .collect();
 
         let return_type = if func_def.return_types.is_empty() {
             Type::unit()
@@ -308,16 +329,17 @@ impl Infer {
             Type::generic("tuple", func_def.return_types.clone())
         };
 
-        Some((Type::fun(param_types, return_type), func_def.span))
+        Some((
+            Type::fun_named(param_types, return_type),
+            func_def.span,
+            func_def.name_span,
+            func_def.doc_comment.clone(),
+        ))
     }
 
     /// Look up a type in an imported Soppo module.
-    /// Returns the type and its definition span (for go-to-definition).
-    pub(super) fn lookup_soppo_type(
-        &self,
-        package_name: &str,
-        type_name: &str,
-    ) -> Option<(Type, Option<Span>)> {
+    /// Returns the type, definition span, name span (for go-to-definition), and doc comment.
+    pub(super) fn lookup_soppo_type(&self, package_name: &str, type_name: &str) -> LookupResult {
         // Get the ModuleId for this package
         let module_id = self.soppo_imports.get(package_name)?;
 
@@ -325,16 +347,21 @@ impl Infer {
         let type_def = self.global_state.lookup_type_in(module_id, type_name)?;
 
         // Return the type as a simple type constructor
-        Some((Type::simple(&type_def.name), type_def.span))
+        Some((
+            Type::simple(&type_def.name),
+            type_def.span,
+            type_def.name_span,
+            type_def.doc_comment.clone(),
+        ))
     }
 
     /// Look up a constant in an imported Soppo module.
-    /// Returns the constant type and its definition span (for go-to-definition).
+    /// Returns the constant type, definition span, name span (for go-to-definition), and doc comment.
     pub(super) fn lookup_soppo_constant(
         &self,
         package_name: &str,
         const_name: &str,
-    ) -> Option<(Type, Option<Span>)> {
+    ) -> LookupResult {
         // Get the ModuleId for this package
         let module_id = self.soppo_imports.get(package_name)?;
 
@@ -343,7 +370,12 @@ impl Infer {
             .global_state
             .lookup_constant_in(module_id, const_name)?;
 
-        Some((const_def.ty.clone(), const_def.span))
+        Some((
+            const_def.ty.clone(),
+            const_def.span,
+            const_def.name_span,
+            const_def.doc_comment.clone(),
+        ))
     }
 
     /// Look up a function in an imported Go package
@@ -392,7 +424,7 @@ impl Infer {
     fn set_module_recursive(ty: Type, package_name: &str) -> Type {
         match ty {
             Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable,
             } => {
@@ -442,7 +474,7 @@ impl Infer {
                 };
 
                 Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: new_module,
                         name: name.name,
                         span: name.span,
@@ -454,14 +486,14 @@ impl Infer {
                     nullable,
                 }
             }
-            Type::Fun {
+            Type::Func {
                 args,
                 ret,
                 nullable,
-            } => Type::Fun {
+            } => Type::Func {
                 args: args
                     .into_iter()
-                    .map(|a| Self::set_module_recursive(a, package_name))
+                    .map(|(name, ty)| (name, Self::set_module_recursive(ty, package_name)))
                     .collect(),
                 ret: Box::new(Self::set_module_recursive(*ret, package_name)),
                 nullable,
@@ -484,7 +516,7 @@ impl Infer {
         // Check if it's a regular Go type
         if pkg.types.contains_key(type_name) {
             return Some(Type::Con {
-                name: Symbol {
+                sym: Symbol {
                     module: ModuleId::new(package_name),
                     name: type_name.to_string(),
                     span: Span::dummy(),
@@ -497,7 +529,7 @@ impl Infer {
         // Check if it's a Soppo type (from //soppo:enum markers)
         if pkg.soppo_types.contains_key(type_name) {
             return Some(Type::Con {
-                name: Symbol {
+                sym: Symbol {
                     module: ModuleId::new(package_name),
                     name: type_name.to_string(),
                     span: Span::dummy(),
@@ -513,7 +545,7 @@ impl Infer {
             // If the constant's type is a type defined in this package, return it with module info
             if pkg.types.contains_key(const_ty) {
                 return Some(Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: ModuleId::new(package_name),
                         name: const_ty.to_string(),
                         span: Span::dummy(),
@@ -623,7 +655,7 @@ impl Infer {
     /// Returns true if the type is defined as an interface in its source package
     pub(super) fn is_go_interface_type(&mut self, ty: &Type) -> bool {
         let (type_name, package_name) = match ty {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 // Skip built-in types that aren't from a package
                 let pkg = if name.module.0.is_empty() {
                     return false;
@@ -670,7 +702,7 @@ impl Infer {
     /// Check if a type is a user-defined interface in the current module
     pub(super) fn is_soppo_interface_type(&self, ty: &Type) -> bool {
         let type_name = match ty {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 // Strip nullable prefix if present
                 name.name
                     .strip_prefix('?')
@@ -697,7 +729,7 @@ impl Infer {
         ty: &Type,
     ) -> Option<Vec<crate::types::ctx::MethodSig>> {
         let type_name = match ty {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 // Strip nullable prefix if present
                 name.name
                     .strip_prefix('?')
@@ -727,7 +759,7 @@ impl Infer {
 
         // Get the concrete type name
         let concrete_name = match concrete_ty {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 // Strip nullable and pointer prefix if present
                 let type_name = name.name.strip_prefix('?').unwrap_or(&name.name);
                 type_name.strip_prefix('*').unwrap_or(type_name).to_string()
@@ -854,7 +886,7 @@ impl Infer {
         right: &Type,
     ) -> Option<Type> {
         let (left_name, left_module) = match left {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 let module = if name.module.0.is_empty() {
                     None
                 } else {
@@ -865,7 +897,7 @@ impl Infer {
             _ => return None,
         };
         let (right_name, right_module) = match right {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 let module = if name.module.0.is_empty() {
                     None
                 } else {
@@ -955,7 +987,7 @@ impl Infer {
                 let pkg = &inner_name[..dot_idx];
                 let type_name = &inner_name[dot_idx + 1..];
                 Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: ModuleId::new(pkg),
                         name: type_name.to_string(),
                         span: ast_ty.span,
@@ -1019,8 +1051,12 @@ impl Infer {
                 Type::generic("tuple", return_types)
             };
 
-            return Type::Fun {
-                args: param_types,
+            // Convert to named params (with no names, from AST)
+            let named_params: Vec<(Option<String>, Type)> =
+                param_types.into_iter().map(|ty| (None, ty)).collect();
+
+            return Type::Func {
+                args: named_params,
                 ret: Box::new(ret_ty),
                 nullable: ast_ty.nullable,
             };
@@ -1032,7 +1068,7 @@ impl Infer {
             if let Some(ty_var) = self.generic_params.get(inner_name) {
                 // Generic pointer type: *T where T is a type parameter
                 return Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: ModuleId::empty(),
                         name: format!("*{}", inner_name),
                         span: ast_ty.span,
@@ -1050,7 +1086,7 @@ impl Infer {
 
                 // Create inner type with module
                 let inner_ty = Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: ModuleId::new(pkg),
                         name: type_name.to_string(),
                         span: ast_ty.span,
@@ -1061,7 +1097,7 @@ impl Infer {
 
                 // Create pointer type
                 return Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: ModuleId::empty(),
                         name: format!("*{}", type_name),
                         span: ast_ty.span,
@@ -1077,7 +1113,7 @@ impl Infer {
             // Check if inner type is a generic parameter
             if let Some(ty_var) = self.generic_params.get(inner_name) {
                 return Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: ModuleId::empty(),
                         name: format!("[]{}", inner_name),
                         span: ast_ty.span,
@@ -1093,7 +1129,7 @@ impl Infer {
             // Check if inner type is a generic parameter
             if let Some(ty_var) = self.generic_params.get(inner_name) {
                 return Type::Con {
-                    name: Symbol {
+                    sym: Symbol {
                         module: ModuleId::empty(),
                         name: format!("chan {}", inner_name),
                         span: ast_ty.span,
@@ -1114,7 +1150,7 @@ impl Infer {
             let type_name = &ast_ty.name[dot_idx + 1..];
 
             return Type::Con {
-                name: Symbol {
+                sym: Symbol {
                     module: ModuleId::new(pkg),
                     name: type_name.to_string(),
                     span: ast_ty.span,
@@ -1137,7 +1173,7 @@ impl Infer {
             .collect();
 
         Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::empty(),
                 name: ast_ty.name.clone(),
                 span: ast_ty.span,
@@ -1152,7 +1188,7 @@ impl Infer {
     pub(super) fn instantiate_generic_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         match ty {
             Type::Con {
-                name,
+                sym: name,
                 args,
                 nullable,
             } => {
@@ -1172,7 +1208,7 @@ impl Infer {
                 {
                     let ptr_name = format!("*{}", concrete);
                     return Type::Con {
-                        name: Symbol {
+                        sym: Symbol {
                             module: ModuleId::empty(),
                             name: ptr_name,
                             span: name.span,
@@ -1188,7 +1224,7 @@ impl Infer {
                 {
                     let slice_name = format!("[]{}", concrete);
                     return Type::Con {
-                        name: Symbol {
+                        sym: Symbol {
                             module: ModuleId::empty(),
                             name: slice_name,
                             span: name.span,
@@ -1204,7 +1240,7 @@ impl Infer {
                 {
                     let chan_name = format!("chan {}", concrete);
                     return Type::Con {
-                        name: Symbol {
+                        sym: Symbol {
                             module: ModuleId::empty(),
                             name: chan_name,
                             span: name.span,
@@ -1221,22 +1257,22 @@ impl Infer {
                     .collect();
 
                 Type::Con {
-                    name: name.clone(),
+                    sym: name.clone(),
                     args: new_args,
                     nullable: *nullable,
                 }
             }
-            Type::Fun {
+            Type::Func {
                 args,
                 ret,
                 nullable,
             } => {
-                let new_args: Vec<Type> = args
+                let new_args: Vec<(Option<String>, Type)> = args
                     .iter()
-                    .map(|arg| Self::instantiate_generic_type(arg, subst))
+                    .map(|(name, ty)| (name.clone(), Self::instantiate_generic_type(ty, subst)))
                     .collect();
                 let new_ret = Self::instantiate_generic_type(ret, subst);
-                Type::Fun {
+                Type::Func {
                     args: new_args,
                     ret: Box::new(new_ret),
                     nullable: *nullable,
@@ -1309,7 +1345,7 @@ impl Infer {
     /// This includes: pointers, slices, maps, channels, functions, and interfaces
     pub(super) fn is_nilable_type(ty: &Type) -> bool {
         match ty {
-            Type::Con { name, .. } => {
+            Type::Con { sym: name, .. } => {
                 let ty_name = &name.name;
                 // Pointers: *T or ptr[T]
                 ty_name.starts_with('*')
@@ -1328,36 +1364,38 @@ impl Infer {
                     || ty_name == "any"
                     || ty_name == "error"
             }
-            Type::Fun { .. } => true, // Function types are nilable
+            Type::Func { .. } => true, // Function types are nilable
             _ => false,
         }
     }
 
     /// Check if a type is a pointer type (*T or ptr)
     pub(super) fn is_pointer_type(ty: &Type) -> bool {
-        matches!(ty, Type::Con { name, .. } if name.name.starts_with('*') || name.name == "ptr")
+        matches!(ty, Type::Con { sym, .. } if sym.name.starts_with('*') || sym.name == "ptr")
     }
 
     /// Check if a type is a slice type ([]T)
     pub(super) fn is_slice_type(ty: &Type) -> bool {
-        matches!(ty, Type::Con { name, .. } if name.name.starts_with("[]"))
+        matches!(ty, Type::Con { sym, .. } if sym.name.starts_with("[]"))
     }
 
     /// Check if a type is a map type (map[K]V)
     pub(super) fn is_map_type(ty: &Type) -> bool {
-        matches!(ty, Type::Con { name, .. } if name.name.starts_with("map["))
+        matches!(ty, Type::Con { sym, .. } if sym.name.starts_with("map["))
     }
 
     /// Check if a type is a channel type (chan T)
     pub(super) fn is_channel_type(ty: &Type) -> bool {
-        matches!(ty, Type::Con { name, .. } if name.name.starts_with("chan "))
+        matches!(ty, Type::Con { sym, .. } if sym.name.starts_with("chan "))
     }
 
     /// Extract element type from a channel type (chan T -> T)
     /// Returns None if not a channel type
     pub(super) fn extract_channel_element(ty: &Type) -> Option<Type> {
         match ty {
-            Type::Con { name, args, .. } if name.name.starts_with("chan ") => {
+            Type::Con {
+                sym: name, args, ..
+            } if name.name.starts_with("chan ") => {
                 if !args.is_empty() {
                     Some(args[0].clone())
                 } else {
@@ -1373,7 +1411,9 @@ impl Infer {
     /// Returns None if not a slice type
     pub(super) fn extract_slice_element(ty: &Type) -> Option<Type> {
         match ty {
-            Type::Con { name, args, .. } if name.name.starts_with("[]") => {
+            Type::Con {
+                sym: name, args, ..
+            } if name.name.starts_with("[]") => {
                 if !args.is_empty() {
                     Some(args[0].clone())
                 } else {
@@ -1389,7 +1429,9 @@ impl Infer {
     /// Returns None if not a map type
     pub(super) fn extract_map_elements(ty: &Type) -> Option<(Type, Type)> {
         match ty {
-            Type::Con { name, args, .. } if name.name.starts_with("map[") => {
+            Type::Con {
+                sym: name, args, ..
+            } if name.name.starts_with("map[") => {
                 if args.len() >= 2 {
                     Some((args[0].clone(), args[1].clone()))
                 } else {
@@ -1404,7 +1446,9 @@ impl Infer {
     /// Returns None if not a pointer type
     pub(super) fn extract_pointer_element(ty: &Type) -> Option<Type> {
         match ty {
-            Type::Con { name, args, .. } if name.name.starts_with('*') => {
+            Type::Con {
+                sym: name, args, ..
+            } if name.name.starts_with('*') => {
                 if !args.is_empty() {
                     Some(args[0].clone())
                 } else {
@@ -1521,7 +1565,7 @@ impl Infer {
     /// Check if a type is the `error` type
     pub(super) fn is_error_type(&self, ty: &Type) -> bool {
         match ty {
-            Type::Con { name, .. } => name.name == "error",
+            Type::Con { sym: name, .. } => name.name == "error",
             _ => false,
         }
     }
@@ -1535,7 +1579,9 @@ impl Infer {
         }
 
         // Tuple type with error as last element
-        if let Type::Con { name, args, .. } = ty
+        if let Type::Con {
+            sym: name, args, ..
+        } = ty
             && name.name == "tuple"
             && !args.is_empty()
             && let Some(last) = args.last()
@@ -1556,7 +1602,9 @@ impl Infer {
             return Type::unit();
         }
 
-        if let Type::Con { name, args, .. } = ty
+        if let Type::Con {
+            sym: name, args, ..
+        } = ty
             && name.name == "tuple"
             && !args.is_empty()
         {
@@ -1581,7 +1629,7 @@ impl Infer {
         use crate::syntax::StmtKind;
 
         match &stmt.kind {
-            StmtKind::Decl { name, .. } => Some(name.clone()),
+            StmtKind::Decl { ident, .. } => Some(ident.name.clone()),
             StmtKind::Assign { target, .. } => {
                 if let ExprKind::Ident(name) = &target.kind {
                     Some(name.clone())
@@ -1589,7 +1637,9 @@ impl Infer {
                     None
                 }
             }
-            StmtKind::MultiDecl { names, .. } if names.len() == 1 => Some(names[0].clone()),
+            StmtKind::MultiDecl { ident: names, .. } if names.len() == 1 => {
+                Some(names[0].name.clone())
+            }
             _ => None,
         }
     }
@@ -1622,7 +1672,9 @@ impl Infer {
                 let map_ty = self.substitute(map_ty);
 
                 // Check if this is a map type
-                if let Type::Con { name, args, .. } = &map_ty
+                if let Type::Con {
+                    sym: name, args, ..
+                } = &map_ty
                     && name.name.starts_with("map[")
                     && args.len() == 2
                 {
@@ -1643,7 +1695,9 @@ impl Infer {
                 let chan_ty = self.substitute(chan_ty);
 
                 // Extract element type from channel
-                if let Type::Con { name, args, .. } = &chan_ty
+                if let Type::Con {
+                    sym: name, args, ..
+                } = &chan_ty
                     && name.name.starts_with("chan ")
                     && args.len() == 1
                 {
@@ -1651,7 +1705,7 @@ impl Infer {
                     return Ok(Some((elem_ty, Type::simple("bool"))));
                 }
                 // Fallback: try to extract from name
-                if let Type::Con { name, .. } = &chan_ty
+                if let Type::Con { sym: name, .. } = &chan_ty
                     && let Some(elem) = name.name.strip_prefix("chan ")
                 {
                     let elem_ty = Type::simple(elem);
@@ -1681,7 +1735,7 @@ mod tests {
 
         // io.Reader is an interface
         let reader_type = Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::new("io"),
                 name: "Reader".to_string(),
                 span: Span::dummy(),
@@ -1693,7 +1747,7 @@ mod tests {
 
         // io.Writer is an interface
         let writer_type = Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::new("io"),
                 name: "Writer".to_string(),
                 span: Span::dummy(),
@@ -1723,7 +1777,7 @@ mod tests {
 
         // io.Reader should still be detected as interface (stdlib fallback)
         let reader_type = Type::Con {
-            name: Symbol {
+            sym: Symbol {
                 module: ModuleId::new("io"),
                 name: "Reader".to_string(),
                 span: Span::dummy(),

@@ -1,6 +1,8 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
-use crate::syntax::ast::{Arm, Block, FieldPattern, Literal, Pattern, PatternKind, Stmt, StmtKind};
+use crate::syntax::ast::{
+    Arm, Block, FieldPattern, Ident, Literal, Pattern, PatternKind, Stmt, StmtKind,
+};
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
@@ -203,8 +205,8 @@ impl Parser {
                 // Check if it's a destructor pattern: Result.Ok(value)
                 if self.consume(&Token::LParen) {
                     // Parse the single binding variable
-                    let binding = match self.advance() {
-                        Some((Token::Ident(binding), _)) => binding,
+                    let (binding_name, binding_span) = match self.advance() {
+                        Some((Token::Ident(binding), span)) => (binding, span),
                         Some((tok, span)) => {
                             return Err(SoppoError::Parse {
                                 message: format!(
@@ -225,7 +227,10 @@ impl Parser {
                     let end_span = self.expect(Token::RParen)?;
 
                     Ok(Pattern {
-                        kind: PatternKind::Destructor { name, binding },
+                        kind: PatternKind::Destructor {
+                            name,
+                            binding: Ident::new(binding_name, binding_span),
+                        },
                         span: Span::with_bytes(
                             current_span.start,
                             end_span.end,
@@ -250,8 +255,8 @@ impl Parser {
                             }
 
                             // Parse field_name: pattern or just field_name (shorthand)
-                            let field_name = match self.advance() {
-                                Some((Token::Ident(name), _)) => name,
+                            let (field_name, field_span) = match self.advance() {
+                                Some((Token::Ident(name), span)) => (name, span),
                                 Some((tok, span)) => {
                                     return Err(SoppoError::Parse {
                                         message: format!(
@@ -294,8 +299,9 @@ impl Parser {
                                     }
                                     Some(Token::Ident(name)) => {
                                         let name = name.clone();
+                                        let span = self.peek_span();
                                         self.advance();
-                                        FieldPattern::Bind(name)
+                                        FieldPattern::Bind(Ident::new(name, span))
                                     }
                                     Some(tok) => {
                                         let tok = tok.clone();
@@ -318,7 +324,7 @@ impl Parser {
                                 }
                             } else {
                                 // Shorthand: `field` is same as `field: field`
-                                FieldPattern::Bind(field_name.clone())
+                                FieldPattern::Bind(Ident::new(field_name.clone(), field_span))
                             };
 
                             fields.push((field_name, field_pattern));
