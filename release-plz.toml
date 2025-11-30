@@ -2,6 +2,11 @@
 git_tag_name = "v{{ version }}"
 git_release_name = "v{{ version }}"
 
+[[package]]
+name = "soppo-lsp"
+publish = false
+release = false
+
 [changelog]
 commit_parsers = [
     { message = "^feat", group = "added" },

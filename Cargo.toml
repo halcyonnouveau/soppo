@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "lsp"]
+exclude = ["editors/zed"]
+
 [package]
 name = "soppo"
 version = "0.2.0"

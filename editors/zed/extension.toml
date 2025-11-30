@@ -10,3 +10,7 @@ repository = "https://github.com/halcyonnouveau/soppo"
 repository = "https://github.com/halcyonnouveau/soppo"
 rev = "c642cd5e4197efbfc53921eae4534d1773073820"
 path = "editors/tree-sitter"
+
+[language_servers.soppo-lsp]
+name = "Soppo LSP"
+languages = ["Soppo"]
