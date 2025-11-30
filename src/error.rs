@@ -5,6 +5,7 @@ use crate::syntax::Span;
 use crate::types::Type;
 
 #[derive(Error, Debug, Diagnostic)]
+#[non_exhaustive]
 pub enum SoppoError {
     #[error("Syntax error: {message}")]
     #[diagnostic(code(soppo::parse))]
