@@ -16,6 +16,7 @@ pub enum ProjectError {
     InvalidFormat,
 }
 
+#[derive(Debug, Clone)]
 pub struct Project {
     /// Directory containing go.mod
     pub root: PathBuf,

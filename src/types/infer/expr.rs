@@ -46,19 +46,19 @@ impl Infer {
                 if name == "iota" {
                     return Ok(Type::simple("int"));
                 }
-                let ty = self
-                    .lookup_var(name)
-                    .ok_or_else(|| SoppoError::UndefinedVariable {
-                        name: name.clone(),
-                        span: expr.span,
-                    })?;
+                let (ty, def_span) =
+                    self.lookup_var(name)
+                        .ok_or_else(|| SoppoError::UndefinedVariable {
+                            name: name.clone(),
+                            span: expr.span,
+                        })?;
 
                 // Record the symbol for LSP features
                 self.record_symbol(
                     expr.span,
                     name.clone(),
                     ty.clone(),
-                    None, // TODO: track definition spans
+                    def_span,
                     SymbolKind::Variable,
                 );
 
@@ -383,7 +383,7 @@ impl Infer {
                 // Add parameters to scope - use resolve_type for proper qualified type handling
                 for param in params {
                     let param_ty = self.resolve_type(&param.ty);
-                    self.insert_var(param.name.clone(), param_ty);
+                    self.insert_var(param.name.clone(), param_ty, Some(param.span));
                 }
 
                 // Set expected return types for this function

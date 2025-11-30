@@ -45,14 +45,14 @@ impl Infer {
                             && vname == variant_name
                         {
                             let binding_ty = Type::simple(&ty.name);
-                            self.insert_var(binding.clone(), binding_ty);
+                            self.insert_var(binding.clone(), binding_ty, Some(pattern.span));
                             return Ok(());
                         }
                     }
                 }
                 // Fallback to fresh type variable if we can't determine the type
                 let binding_ty = self.fresh_ty_var();
-                self.insert_var(binding.clone(), binding_ty);
+                self.insert_var(binding.clone(), binding_ty, Some(pattern.span));
                 Ok(())
             }
             PatternKind::StructDestructor {
@@ -122,14 +122,14 @@ impl Infer {
                 // Insert bindings after borrows are released
                 if found_type {
                     for (binding_name, field_ty) in bindings {
-                        self.insert_var(binding_name, field_ty);
+                        self.insert_var(binding_name, field_ty, Some(pattern.span));
                     }
                 } else {
                     // Fallback: add bindings with fresh type variables
                     for (_field_name, field_pattern) in fields {
                         if let FieldPattern::Bind(binding_name) = field_pattern {
                             let binding_ty = self.fresh_ty_var();
-                            self.insert_var(binding_name.clone(), binding_ty);
+                            self.insert_var(binding_name.clone(), binding_ty, Some(pattern.span));
                         }
                     }
                 }

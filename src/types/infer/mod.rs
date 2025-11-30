@@ -67,8 +67,8 @@ pub struct Infer {
     /// Global state tracking all modules
     pub(super) global_state: GlobalCtxt,
 
-    /// Current scope: variable name -> type
-    pub(super) scopes: Vec<HashMap<String, Type>>,
+    /// Current scope: variable name -> (type, definition span)
+    pub(super) scopes: Vec<HashMap<String, (Type, Option<Span>)>>,
 
     /// Type variable substitutions (solutions)
     pub(super) substitutions: HashMap<i32, Type>,
@@ -229,7 +229,11 @@ impl Infer {
                     .insert(package_name.to_string(), import_path.to_string());
 
                 // Add package name to scope with a special "soppo_package" type
-                self.insert_var(package_name.to_string(), Type::simple("soppo_package"));
+                self.insert_var(
+                    package_name.to_string(),
+                    Type::simple("soppo_package"),
+                    None,
+                );
             } else {
                 // Go package import
                 // Use alias if provided, otherwise derive from path
@@ -260,7 +264,7 @@ impl Infer {
 
                 // Add package name to scope with a special "package" type
                 // This allows field access like fmt.Printf to work
-                self.insert_var(package_name.to_string(), Type::simple("package"));
+                self.insert_var(package_name.to_string(), Type::simple("package"), None);
             }
         }
     }
@@ -1254,17 +1258,18 @@ impl Infer {
     }
 
     /// Insert a variable into the current scope
-    pub(super) fn insert_var(&mut self, name: String, ty: Type) {
+    pub(super) fn insert_var(&mut self, name: String, ty: Type, def_span: Option<Span>) {
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, ty);
+            scope.insert(name, (ty, def_span));
         }
     }
 
     /// Lookup a variable in scopes (from innermost to outermost)
-    pub(super) fn lookup_var(&self, name: &str) -> Option<Type> {
+    /// Returns the type and optionally the definition span
+    pub(super) fn lookup_var(&self, name: &str) -> Option<(Type, Option<Span>)> {
         for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(name) {
-                return Some(ty.clone());
+            if let Some((ty, span)) = scope.get(name) {
+                return Some((ty.clone(), *span));
             }
         }
         None

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::ty::Type;
-use crate::syntax::{ConstDecl, EnumVariant, FuncDecl, ModuleId, TypeDecl, TypeKind};
+use crate::syntax::{ConstDecl, EnumVariant, FuncDecl, ModuleId, Span, TypeDecl, TypeKind};
 
 /// Kind of Soppo type discovered from Go package markers
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +56,8 @@ pub struct TypeDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub kind: TypeDefKind,
+    /// Source location of this definition (for go-to-definition)
+    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +153,8 @@ pub struct FuncDef {
     pub generics: Vec<GenericParam>,
     pub params: Vec<(String, Type)>,
     pub return_types: Vec<Type>,
+    /// Source location of this definition (for go-to-definition)
+    pub span: Option<Span>,
 }
 
 /// Constant definition in a module
@@ -158,6 +162,8 @@ pub struct FuncDef {
 pub struct ConstDef {
     pub name: String,
     pub ty: Type,
+    /// Source location of this definition (for go-to-definition)
+    pub span: Option<Span>,
 }
 
 impl GlobalCtxt {
@@ -260,6 +266,7 @@ impl GlobalCtxt {
                         .collect(),
                 },
             },
+            span: Some(type_decl.span),
         };
 
         self.current_module_mut()
@@ -282,6 +289,7 @@ impl GlobalCtxt {
                 .map(|p| (p.name.clone(), Type::from_ast(&p.ty)))
                 .collect(),
             return_types: func_decl.return_types.iter().map(Type::from_ast).collect(),
+            span: Some(func_decl.span),
         };
 
         // If this is a method (has receiver), register it by receiver type
@@ -322,6 +330,7 @@ impl GlobalCtxt {
         let const_def = ConstDef {
             name: const_decl.name.clone(),
             ty,
+            span: Some(const_decl.span),
         };
 
         self.current_module_mut()

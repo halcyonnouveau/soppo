@@ -1,11 +1,15 @@
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use miette::Diagnostic as MietteDiagnostic;
-use soppo::build::{typecheck, typecheck_with_symbols};
+use soppo::build::{typecheck, typecheck_with_symbols, typecheck_workspace};
 use soppo::error::SoppoError;
-use soppo::syntax::Span;
-use soppo::types::SymbolTable;
+use soppo::syntax::{FileId, FileRegistry, Span};
+use soppo::types::{GlobalCtxt, SymbolTable};
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -204,17 +208,36 @@ pub fn byte_offset_to_range(text: &str, start: usize, end: usize) -> Range {
     }
 }
 
-/// Cached document state including source and symbol table
+/// Cached document state including source and symbol table (single-file mode)
 #[derive(Debug)]
 struct DocumentState {
     text: String,
     symbols: Option<SymbolTable>,
 }
 
+/// Workspace state for multi-file projects
+#[derive(Debug)]
+struct Workspace {
+    /// Project root directory (where go.mod is)
+    project_root: PathBuf,
+    /// Registry mapping FileId to file paths
+    file_registry: FileRegistry,
+    /// Global type context with all modules (for type/function lookups)
+    #[allow(dead_code)]
+    global_ctxt: GlobalCtxt,
+    /// Symbol tables per file for LSP features
+    symbol_tables: HashMap<FileId, SymbolTable>,
+}
+
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
+    /// Single-file document state (fallback when no workspace)
     documents: Arc<RwLock<HashMap<Url, DocumentState>>>,
+    /// Text content of open documents (may have unsaved changes)
+    open_documents: Arc<RwLock<HashMap<PathBuf, String>>>,
+    /// Workspace state (initialized on first file open if project found)
+    workspace: Arc<RwLock<Option<Workspace>>>,
 }
 
 impl Backend {
@@ -222,11 +245,13 @@ impl Backend {
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
+            open_documents: Arc::new(RwLock::new(HashMap::new())),
+            workspace: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// Analyze a document, returning diagnostics and symbol table
-    fn analyze_document(text: &str, filename: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
+    /// Analyze a document, returning diagnostics and symbol table (single-file mode)
+    pub fn analyze_document(text: &str, filename: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
         match typecheck_with_symbols(text, filename) {
             Ok(symbols) => (vec![], Some(symbols)),
             Err(report) => {
@@ -258,7 +283,90 @@ impl Backend {
         }
     }
 
+    /// Try to discover a project from a file path and initialize workspace
+    async fn try_init_workspace(&self, file_path: &Path) -> bool {
+        // Already initialized?
+        if self.workspace.read().await.is_some() {
+            return true;
+        }
+
+        // Try to find project root by walking up from file
+        let start_dir = file_path.parent().unwrap_or(file_path);
+
+        // Try to typecheck the workspace
+        let open_docs = self.open_documents.read().await;
+        match typecheck_workspace(start_dir, &open_docs) {
+            Ok(result) => {
+                let mut ws = self.workspace.write().await;
+                *ws = Some(Workspace {
+                    project_root: start_dir.to_path_buf(),
+                    file_registry: result.file_registry,
+                    global_ctxt: result.global_ctxt,
+                    symbol_tables: result.symbol_tables,
+                });
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Rebuild the workspace after a file change
+    async fn rebuild_workspace(&self) {
+        let ws_guard = self.workspace.read().await;
+        let Some(ws) = ws_guard.as_ref() else {
+            return;
+        };
+        let project_root = ws.project_root.clone();
+        drop(ws_guard);
+
+        let open_docs = self.open_documents.read().await.clone();
+
+        match typecheck_workspace(&project_root, &open_docs) {
+            Ok(result) => {
+                let mut ws = self.workspace.write().await;
+                *ws = Some(Workspace {
+                    project_root,
+                    file_registry: result.file_registry,
+                    global_ctxt: result.global_ctxt,
+                    symbol_tables: result.symbol_tables,
+                });
+            }
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!("Workspace rebuild failed: {}", e),
+                    )
+                    .await;
+            }
+        }
+    }
+
+    /// Update a document (handles both workspace and single-file modes)
     async fn update_document(&self, uri: Url, text: String) {
+        // Convert URI to file path
+        let file_path = uri.to_file_path().ok();
+
+        // Try workspace mode first
+        if let Some(ref path) = file_path {
+            // Store the document content
+            self.open_documents
+                .write()
+                .await
+                .insert(path.clone(), text.clone());
+
+            // Try to initialize or use workspace
+            if self.try_init_workspace(path).await {
+                // Rebuild workspace
+                self.rebuild_workspace().await;
+
+                // Publish diagnostics from workspace
+                self.publish_workspace_diagnostics().await;
+                return;
+            }
+        }
+
+        // Fallback to single-file mode
         let filename = uri
             .path_segments()
             .and_then(|mut s| s.next_back())
@@ -278,8 +386,26 @@ impl Backend {
             .await;
     }
 
+    /// Publish diagnostics for all files in the workspace
+    async fn publish_workspace_diagnostics(&self) {
+        let ws_guard = self.workspace.read().await;
+        let Some(ws) = ws_guard.as_ref() else {
+            return;
+        };
+
+        // For now, if workspace typechecked successfully, clear diagnostics for all open files
+        // TODO: Collect and publish actual diagnostics per file
+        for path in ws.file_registry.file_ids() {
+            if let Some(file_path) = ws.file_registry.get_path(path)
+                && let Ok(uri) = Url::from_file_path(file_path)
+            {
+                self.client.publish_diagnostics(uri, vec![], None).await;
+            }
+        }
+    }
+
     /// Convert an LSP position to a byte offset in the document
-    fn position_to_byte_offset(text: &str, position: Position) -> usize {
+    pub fn position_to_byte_offset(text: &str, position: Position) -> usize {
         let mut offset = 0;
         let mut current_line = 0;
 
@@ -303,6 +429,11 @@ impl Backend {
         }
         offset
     }
+
+    /// Get the file path for a URI
+    fn uri_to_path(uri: &Url) -> Option<PathBuf> {
+        uri.to_file_path().ok()
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -314,6 +445,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -354,6 +486,32 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
+        // Try workspace mode first
+        if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(file_id) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&file_id)
+            {
+                // Get document text
+                let open_docs = self.open_documents.read().await;
+                if let Some(text) = open_docs.get(&path) {
+                    let offset = Self::position_to_byte_offset(text, position);
+                    if let Some(symbol) = symbols.find_at(offset) {
+                        let content = format!("```soppo\n{}: {}\n```", symbol.name, symbol.ty);
+                        return Ok(Some(Hover {
+                            contents: HoverContents::Markup(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: content,
+                            }),
+                            range: None,
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Fallback to single-file mode
         let docs = self.documents.read().await;
         let Some(doc) = docs.get(&uri) else {
             return Ok(None);
@@ -363,15 +521,11 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        // Convert position to byte offset
         let offset = Self::position_to_byte_offset(&doc.text, position);
-
-        // Find symbol at this position
         let Some(symbol) = symbols.find_at(offset) else {
             return Ok(None);
         };
 
-        // Format hover content
         let content = format!("```soppo\n{}: {}\n```", symbol.name, symbol.ty);
 
         Ok(Some(Hover {
@@ -382,6 +536,79 @@ impl LanguageServer for Backend {
             range: None,
         }))
     }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        // Try workspace mode first
+        if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(file_id) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&file_id)
+            {
+                // Get document text
+                let open_docs = self.open_documents.read().await;
+                if let Some(text) = open_docs.get(&path) {
+                    let offset = Self::position_to_byte_offset(text, position);
+                    if let Some(symbol) = symbols.find_at(offset)
+                        && let Some(def_span) = symbol.definition_span
+                    {
+                        // Check if definition is in a different file
+                        let def_uri = if def_span.file != file_id {
+                            // Cross-file: look up the path
+                            if let Some(def_path) = ws.file_registry.get_path(def_span.file) {
+                                Url::from_file_path(def_path).ok()
+                            } else {
+                                None
+                            }
+                        } else {
+                            // Same file
+                            Some(uri.clone())
+                        };
+
+                        if let Some(def_uri) = def_uri {
+                            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                                uri: def_uri,
+                                range: span_to_range(def_span),
+                            })));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback to single-file mode
+        let docs = self.documents.read().await;
+        let Some(doc) = docs.get(&uri) else {
+            return Ok(None);
+        };
+
+        let Some(ref symbols) = doc.symbols else {
+            return Ok(None);
+        };
+
+        let offset = Self::position_to_byte_offset(&doc.text, position);
+        let Some(symbol) = symbols.find_at(offset) else {
+            return Ok(None);
+        };
+
+        let Some(def_span) = symbol.definition_span else {
+            return Ok(None);
+        };
+
+        // In single-file mode, assume definition is in the same file
+        let location = Location {
+            uri: uri.clone(),
+            range: span_to_range(def_span),
+        };
+
+        Ok(Some(GotoDefinitionResponse::Scalar(location)))
+    }
 }
 
 /// Run the LSP server on stdin/stdout
@@ -391,232 +618,4 @@ pub async fn run_server() {
 
     let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
-}
-
-#[cfg(test)]
-mod tests {
-    use soppo::syntax::{FileId, LineColumn};
-    use soppo::types::Type;
-
-    use super::*;
-
-    pub fn make_span(start_line: usize, start_col: usize, end_line: usize, end_col: usize) -> Span {
-        Span {
-            start: LineColumn {
-                line: start_line,
-                col: start_col,
-            },
-            end: LineColumn {
-                line: end_line,
-                col: end_col,
-            },
-            file: FileId(0),
-            byte_start: 0,
-            byte_end: 0,
-        }
-    }
-
-    #[test]
-    fn span_to_range_converts_1based_to_0based() {
-        let span = make_span(1, 1, 1, 10);
-        let range = span_to_range(span);
-
-        assert_eq!(range.start.line, 0);
-        assert_eq!(range.start.character, 0);
-        assert_eq!(range.end.line, 0);
-        assert_eq!(range.end.character, 9);
-    }
-
-    #[test]
-    fn span_to_range_multiline() {
-        let span = make_span(5, 3, 10, 15);
-        let range = span_to_range(span);
-
-        assert_eq!(range.start.line, 4);
-        assert_eq!(range.start.character, 2);
-        assert_eq!(range.end.line, 9);
-        assert_eq!(range.end.character, 14);
-    }
-
-    #[test]
-    fn span_to_range_handles_zero_gracefully() {
-        let span = make_span(0, 0, 0, 0);
-        let range = span_to_range(span);
-
-        assert_eq!(range.start.line, 0);
-        assert_eq!(range.start.character, 0);
-    }
-
-    #[test]
-    fn error_to_diagnostics_type_mismatch() {
-        let err = SoppoError::TypeMismatch {
-            expected: Box::new(Type::simple("int")),
-            found: Box::new(Type::simple("string")),
-            span: make_span(5, 10, 5, 20),
-        };
-
-        let diagnostics = soppo_error_to_diagnostics(&err);
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message, "expected `int`, found `string`");
-        assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
-        assert_eq!(diagnostics[0].source, Some("soppo".to_string()));
-        assert_eq!(diagnostics[0].range.start.line, 4);
-        assert_eq!(diagnostics[0].range.start.character, 9);
-    }
-
-    #[test]
-    fn error_to_diagnostics_undefined_variable() {
-        let err = SoppoError::UndefinedVariable {
-            name: "foo".to_string(),
-            span: make_span(1, 1, 1, 4),
-        };
-
-        let diagnostics = soppo_error_to_diagnostics(&err);
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(
-            diagnostics[0].message,
-            "cannot find value `foo` in this scope"
-        );
-    }
-
-    #[test]
-    fn error_to_diagnostics_nil_pointer() {
-        let err = SoppoError::NilPointer {
-            name: "ptr".to_string(),
-            span: make_span(10, 5, 10, 8),
-        };
-
-        let diagnostics = soppo_error_to_diagnostics(&err);
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(
-            diagnostics[0].message,
-            "potential nil pointer dereference: `ptr`"
-        );
-    }
-
-    #[test]
-    fn error_to_diagnostics_non_exhaustive() {
-        let err = SoppoError::NonExhaustive {
-            missing: vec!["A".to_string(), "B".to_string()],
-            span: make_span(1, 1, 1, 10),
-        };
-
-        let diagnostics = soppo_error_to_diagnostics(&err);
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(
-            diagnostics[0].message,
-            "non-exhaustive match, missing: A, B"
-        );
-    }
-
-    #[test]
-    fn error_to_diagnostics_circular_dependency_no_span() {
-        let err = SoppoError::CircularDependency {
-            cycle: vec![
-                ("a.sop".to_string(), "b".to_string()),
-                ("b.sop".to_string(), "a".to_string()),
-            ],
-        };
-
-        let diagnostics = soppo_error_to_diagnostics(&err);
-        assert_eq!(diagnostics.len(), 1);
-        assert!(diagnostics[0].message.contains("circular dependency"));
-        assert_eq!(diagnostics[0].range.start.line, 0);
-        assert_eq!(diagnostics[0].range.start.character, 0);
-    }
-
-    #[test]
-    fn position_to_byte_offset_first_line() {
-        let text = "hello world";
-        let pos = Position {
-            line: 0,
-            character: 6,
-        };
-        assert_eq!(Backend::position_to_byte_offset(text, pos), 6);
-    }
-
-    #[test]
-    fn position_to_byte_offset_second_line() {
-        let text = "hello\nworld";
-        let pos = Position {
-            line: 1,
-            character: 2,
-        };
-        assert_eq!(Backend::position_to_byte_offset(text, pos), 8); // "hello\n" = 6 bytes + 2
-    }
-
-    #[test]
-    fn position_to_byte_offset_start_of_line() {
-        let text = "line1\nline2\nline3";
-        let pos = Position {
-            line: 2,
-            character: 0,
-        };
-        assert_eq!(Backend::position_to_byte_offset(text, pos), 12); // "line1\nline2\n" = 12 bytes
-    }
-
-    #[test]
-    fn analyze_document_returns_symbols_for_valid_code() {
-        let code = r#"
-package main
-
-func main() {
-    x := 42
-    println(x)
-}
-"#;
-        let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
-        assert!(
-            diagnostics.is_empty(),
-            "Valid code should have no diagnostics"
-        );
-        assert!(symbols.is_some(), "Valid code should produce symbols");
-
-        let symbols = symbols.unwrap();
-        assert!(
-            !symbols.is_empty(),
-            "Should have recorded at least one symbol"
-        );
-    }
-
-    #[test]
-    fn analyze_document_returns_diagnostics_for_invalid_code() {
-        let code = r#"
-package main
-
-func main() {
-    x := undefined_var
-}
-"#;
-        let (diagnostics, symbols) = Backend::analyze_document(code, "test.sop");
-        assert!(
-            !diagnostics.is_empty(),
-            "Invalid code should have diagnostics"
-        );
-        assert!(symbols.is_none(), "Invalid code should not produce symbols");
-    }
-
-    #[test]
-    fn symbol_lookup_finds_variable() {
-        let code = r#"
-package main
-
-func main() {
-    x := 42
-    println(x)
-}
-"#;
-        let (_, symbols) = Backend::analyze_document(code, "test.sop");
-        let symbols = symbols.expect("Should have symbols");
-
-        // Find the byte offset of the second 'x' (in println(x))
-        // "x" appears at position after "println("
-        let x_usage_offset = code.rfind("(x)").unwrap() + 1;
-
-        let symbol = symbols.find_at(x_usage_offset);
-        assert!(symbol.is_some(), "Should find symbol at x usage");
-        let symbol = symbol.unwrap();
-        assert_eq!(symbol.name, "x");
-        assert_eq!(symbol.ty.to_string(), "int");
-    }
 }

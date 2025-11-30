@@ -6,7 +6,7 @@ A language that compiles to Go, adding ergonomic and type safety features that G
 
 **[Try it in the playground](https://play.soppolang.dev)**
 
-See [docs/DESIGN.md](docs/DESIGN.md) for language design.
+See [docs/DESIGN.md](docs/design.md) for language design.
 
 Soppo is not production ready.
 

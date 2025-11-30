@@ -102,7 +102,7 @@ impl Infer {
             StmtKind::Decl { name, value } => {
                 let value_ty = self.infer_expr(value)?;
                 let value_ty_sub = self.substitute(value_ty.clone());
-                self.insert_var(name.clone(), value_ty.clone());
+                self.insert_var(name.clone(), value_ty.clone(), Some(stmt.span));
                 // Track nil state for pointer types
                 self.update_nil_state_for_assignment(name, value, &value_ty_sub);
                 Ok(Type::unit())
@@ -118,8 +118,8 @@ impl Infer {
                     if names.len() == 2
                         && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)?
                     {
-                        self.insert_var(names[0].clone(), value_ty);
-                        self.insert_var(names[1].clone(), ok_ty);
+                        self.insert_var(names[0].clone(), value_ty, Some(stmt.span));
+                        self.insert_var(names[1].clone(), ok_ty, Some(stmt.span));
                         return Ok(Type::unit());
                     }
 
@@ -136,7 +136,7 @@ impl Infer {
                         && args.len() == names.len()
                     {
                         for (name, ty) in names.iter().zip(args.iter()) {
-                            self.insert_var(name.clone(), ty.clone());
+                            self.insert_var(name.clone(), ty.clone(), Some(stmt.span));
                         }
                         return Ok(Type::unit());
                     }
@@ -154,7 +154,7 @@ impl Infer {
                     // a, b := expr1, expr2 (one value per name)
                     for (name, value) in names.iter().zip(values.iter()) {
                         let value_ty = self.infer_expr(value)?;
-                        self.insert_var(name.clone(), value_ty);
+                        self.insert_var(name.clone(), value_ty, Some(stmt.span));
                     }
                     Ok(Type::unit())
                 }
@@ -208,7 +208,7 @@ impl Infer {
                     }
                 };
                 let var_ty_sub = self.substitute(var_ty.clone());
-                self.insert_var(name.clone(), var_ty);
+                self.insert_var(name.clone(), var_ty, Some(stmt.span));
                 // Track nil state for nilable types
                 if let Some(expr) = init_expr {
                     self.update_nil_state_for_assignment(name, expr, &var_ty_sub);
@@ -232,7 +232,7 @@ impl Infer {
                                 span: stmt.span,
                             })?;
                     for name in names {
-                        self.insert_var(name.clone(), declared_ty.clone());
+                        self.insert_var(name.clone(), declared_ty.clone(), Some(stmt.span));
                     }
                 } else if values.len() == 1 && names.len() > 1 {
                     // var a, b = f() (multi-return unpacking)
@@ -251,9 +251,9 @@ impl Infer {
                         } else {
                             value_ty
                         };
-                        self.insert_var(names[0].clone(), var_ty);
+                        self.insert_var(names[0].clone(), var_ty, Some(stmt.span));
                         // Second variable gets the ok type (bool)
-                        self.insert_var(names[1].clone(), ok_ty);
+                        self.insert_var(names[1].clone(), ok_ty, Some(stmt.span));
                         return Ok(Type::unit());
                     }
 
@@ -277,7 +277,7 @@ impl Infer {
                             } else {
                                 arg_ty.clone()
                             };
-                            self.insert_var(name.clone(), var_ty);
+                            self.insert_var(name.clone(), var_ty, Some(stmt.span));
                         }
                         return Ok(Type::unit());
                     }
@@ -301,7 +301,7 @@ impl Infer {
                         } else {
                             value_ty
                         };
-                        self.insert_var(name.clone(), var_ty);
+                        self.insert_var(name.clone(), var_ty, Some(stmt.span));
                     }
                 }
                 Ok(Type::unit())
@@ -322,7 +322,7 @@ impl Infer {
                     value_ty
                 };
 
-                self.insert_var(name.clone(), const_ty);
+                self.insert_var(name.clone(), const_ty, Some(stmt.span));
                 Ok(Type::unit())
             }
 
@@ -337,7 +337,7 @@ impl Infer {
                     } else {
                         value_ty
                     };
-                    self.insert_var(name.clone(), const_ty);
+                    self.insert_var(name.clone(), const_ty, Some(stmt.span));
                 }
                 Ok(Type::unit())
             }
@@ -487,11 +487,11 @@ impl Infer {
                     };
 
                 // Bind the key variable
-                self.insert_var(key.clone(), key_ty);
+                self.insert_var(key.clone(), key_ty, Some(stmt.span));
 
                 // Bind the value variable if present
                 if let Some(val_name) = value {
-                    self.insert_var(val_name.clone(), value_ty);
+                    self.insert_var(val_name.clone(), value_ty, Some(stmt.span));
                 }
 
                 // Type check body
@@ -656,8 +656,9 @@ impl Infer {
                             }
 
                             // Add first pattern's bindings to scope
+                            let pattern_span = arm.patterns.first().map(|p| p.span);
                             for (name, ty) in first_bindings {
-                                self.insert_var(name, ty);
+                                self.insert_var(name, ty, pattern_span);
                             }
                         } else if let Some(pattern) = arm.patterns.first() {
                             // Single pattern
@@ -788,7 +789,7 @@ impl Infer {
                             let elem_ty = Self::extract_channel_element(&channel_ty)
                                 .unwrap_or_else(|| self.fresh_ty_var());
 
-                            self.insert_var(name.clone(), elem_ty);
+                            self.insert_var(name.clone(), elem_ty, Some(case.span));
                         }
                         SelectCaseKind::RecvDeclOk {
                             name,
@@ -803,8 +804,8 @@ impl Infer {
                             let elem_ty = Self::extract_channel_element(&channel_ty)
                                 .unwrap_or_else(|| self.fresh_ty_var());
 
-                            self.insert_var(name.clone(), elem_ty);
-                            self.insert_var(ok_name.clone(), Type::simple("bool"));
+                            self.insert_var(name.clone(), elem_ty, Some(case.span));
+                            self.insert_var(ok_name.clone(), Type::simple("bool"), Some(case.span));
                         }
                         SelectCaseKind::Send { channel, value } => {
                             // ch <- value: same as Send statement
@@ -907,7 +908,7 @@ impl Infer {
 
                         // Strip error from tuple type for the variable
                         let var_ty = self.strip_error_from_tuple(&value_ty_sub);
-                        self.insert_var(name.clone(), var_ty.clone());
+                        self.insert_var(name.clone(), var_ty.clone(), Some(inner_stmt.span));
                         self.update_nil_state_for_assignment(name, value, &var_ty);
                         (value_ty_sub, value.span)
                     }
@@ -928,7 +929,11 @@ impl Infer {
                                 if i < non_error_count
                                     && let Some(ty) = args.get(i)
                                 {
-                                    self.insert_var(var_name.clone(), ty.clone());
+                                    self.insert_var(
+                                        var_name.clone(),
+                                        ty.clone(),
+                                        Some(inner_stmt.span),
+                                    );
                                 }
                             }
                         }
@@ -982,7 +987,7 @@ impl Infer {
                 if let Some(block) = handler {
                     self.push_scope();
                     if let Some(name) = error_name {
-                        self.insert_var(name.clone(), Type::simple("error"));
+                        self.insert_var(name.clone(), Type::simple("error"), Some(stmt.span));
                     }
                     self.infer_block(block)?;
                     self.pop_scope();
@@ -990,7 +995,7 @@ impl Infer {
 
                 // Mark assigned nilable variables as non-null (success implies valid result)
                 if let Some(var_name) = self.get_assigned_var_name(inner_stmt)
-                    && let Some(var_type) = self.lookup_var(&var_name)
+                    && let Some((var_type, _)) = self.lookup_var(&var_name)
                 {
                     let var_type_sub = self.substitute(var_type);
                     if Self::is_nilable_type(&var_type_sub) {

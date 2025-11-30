@@ -76,7 +76,7 @@ impl Infer {
 
         // Store function type in outermost scope so it can be called
         if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(func.name.clone(), func_ty);
+            scope.insert(func.name.clone(), (func_ty, Some(func.span)));
         }
 
         // Register function in global state so it can be looked up for method calls
@@ -114,7 +114,11 @@ impl Infer {
         // Note: enum method validation is done in register_func_signature
         if let Some(receiver) = &func.receiver {
             let receiver_ty = self.resolve_type(&receiver.ty);
-            self.insert_var(receiver.name.clone(), receiver_ty.clone());
+            self.insert_var(
+                receiver.name.clone(),
+                receiver_ty.clone(),
+                Some(receiver.span),
+            );
 
             // Set nil state for nilable receivers based on nullability
             // Non-nullable nilable receivers (e.g., *T not ?*T) are trusted to be non-nil
@@ -129,7 +133,7 @@ impl Infer {
         // Add parameters to scope
         for param in &func.params {
             let param_ty = self.resolve_type(&param.ty);
-            self.insert_var(param.name.clone(), param_ty.clone());
+            self.insert_var(param.name.clone(), param_ty.clone(), Some(param.span));
 
             // Set nil state for nilable parameters based on nullability
             // Non-nullable nilable params are trusted to be non-nil
@@ -176,7 +180,7 @@ impl Infer {
 
         // Add constant to the global scope
         if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(const_decl.name.clone(), const_ty);
+            scope.insert(const_decl.name.clone(), (const_ty, Some(const_decl.span)));
         }
 
         Ok(())
@@ -213,31 +217,31 @@ impl Infer {
                 // Register each variant as a constructor function
                 for variant in variants {
                     match variant {
-                        EnumVariant::Unit { name, .. } => {
+                        EnumVariant::Unit { name, span } => {
                             // Unit variants are just values of the enum type
                             // They act like constructors with no arguments
                             let enum_ty = Type::simple(&type_decl.name);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope.insert(name.clone(), enum_ty);
+                                scope.insert(name.clone(), (enum_ty, Some(*span)));
                             }
                         }
-                        EnumVariant::Single { name, ty, .. } => {
+                        EnumVariant::Single { name, ty, span } => {
                             // Single value variants are functions: T -> EnumType
                             let value_ty = self.resolve_type(ty);
                             let enum_ty = Type::simple(&type_decl.name);
                             let constructor_ty = Type::fun(vec![value_ty], enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope.insert(name.clone(), constructor_ty);
+                                scope.insert(name.clone(), (constructor_ty, Some(*span)));
                             }
                         }
-                        EnumVariant::Struct { name, fields, .. } => {
+                        EnumVariant::Struct { name, fields, span } => {
                             // Struct variants are functions: (field1, field2, ...) -> EnumType
                             let field_tys: Vec<Type> =
                                 fields.iter().map(|f| self.resolve_type(&f.ty)).collect();
                             let enum_ty = Type::simple(&type_decl.name);
                             let constructor_ty = Type::fun(field_tys, enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope.insert(name.clone(), constructor_ty);
+                                scope.insert(name.clone(), (constructor_ty, Some(*span)));
                             }
                         }
                     }

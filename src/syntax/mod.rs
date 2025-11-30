@@ -6,4 +6,4 @@ mod source;
 pub use ast::*;
 pub use lexer::{Comment, Lexer, Token};
 pub use parser::Parser;
-pub use source::{FileId, LineColumn, ModuleId, Span, Symbol};
+pub use source::{FileId, FileRegistry, LineColumn, ModuleId, Span, Symbol};

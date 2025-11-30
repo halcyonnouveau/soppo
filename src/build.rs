@@ -1,16 +1,28 @@
+use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use miette::{IntoDiagnostic, NamedSource, Result};
 
 use crate::codegen::Codegen;
 use crate::deps::DepGraph;
 use crate::go::Project;
-use crate::syntax::{Decl, FileId, ModuleId, Parser};
+use crate::syntax::{Decl, FileId, FileRegistry, ModuleId, Parser};
 use crate::types::{GlobalCtxt, Infer, SymbolTable};
 
 /// Result of compiling a project - maps relative paths to generated Go code
 pub type BuildResult = Vec<(String, String)>;
+
+/// Result of type-checking a workspace - used by the LSP
+#[derive(Debug)]
+pub struct WorkspaceResult {
+    /// Registry mapping FileId to file paths
+    pub file_registry: FileRegistry,
+    /// Global type context with all modules
+    pub global_ctxt: GlobalCtxt,
+    /// Symbol tables per file for LSP features
+    pub symbol_tables: HashMap<FileId, SymbolTable>,
+}
 
 /// Build a project from a directory containing go.mod
 pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResult> {
@@ -269,4 +281,91 @@ fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> R
         }
     }
     Ok(())
+}
+
+/// Type-check an entire workspace, returning the FileRegistry, GlobalCtxt, and SymbolTables.
+/// Used by the LSP for cross-file features like go-to-definition.
+///
+/// `file_overrides` can provide in-memory content for files (e.g., unsaved changes in the editor).
+pub fn typecheck_workspace(
+    root: &Path,
+    file_overrides: &HashMap<PathBuf, String>,
+) -> Result<WorkspaceResult> {
+    let project = Project::discover(root)?;
+    let sources = project.find_sources();
+
+    if sources.is_empty() {
+        return Ok(WorkspaceResult {
+            file_registry: FileRegistry::new(),
+            global_ctxt: GlobalCtxt::new(),
+            symbol_tables: HashMap::new(),
+        });
+    }
+
+    // Build dependency graph and topologically sort
+    let dep_graph = DepGraph::build(&sources, &project.root, &project.module_path)?;
+    let ordered_sources = dep_graph.topological_sort()?;
+
+    let mut file_registry = FileRegistry::new();
+    let mut global_ctxt = GlobalCtxt::new();
+    let mut symbol_tables = HashMap::new();
+
+    for source_path in &ordered_sources {
+        // Register the file and get its FileId
+        let file_id = file_registry.register(source_path.clone());
+
+        // Use override content if available, otherwise read from disk
+        let source = if let Some(content) = file_overrides.get(source_path) {
+            content.clone()
+        } else {
+            fs::read_to_string(source_path)
+                .into_diagnostic()
+                .map_err(|e| e.context(format!("Failed to read file: {}", source_path.display())))?
+        };
+
+        let filename = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("input.sop");
+
+        // Compute module ID from package directory
+        let module_id = source_path
+            .strip_prefix(&project.root)
+            .ok()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("main");
+
+        // Parse with correct FileId
+        let mut parser = Parser::new(&source, file_id);
+        let file = parser.parse_file().map_err(|e| {
+            miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
+        })?;
+
+        // Set up for this module
+        global_ctxt.set_current_module(ModuleId::new(module_id));
+
+        let mut infer = Infer::with_global_state_and_project(global_ctxt, project.clone())?;
+        infer.process_imports(&file.imports);
+
+        // Two-pass type checking
+        for decl in &file.decls {
+            register_decl(&mut infer, decl, &source, filename)?;
+        }
+        for decl in &file.decls {
+            infer_decl(&mut infer, decl, &source, filename)?;
+        }
+
+        // Extract results
+        let symbols = infer.symbols().clone();
+        global_ctxt = infer.into_global_state();
+        symbol_tables.insert(file_id, symbols);
+    }
+
+    Ok(WorkspaceResult {
+        file_registry,
+        global_ctxt,
+        symbol_tables,
+    })
 }
