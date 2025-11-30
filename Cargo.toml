@@ -3,10 +3,10 @@ members = [".", "lsp"]
 exclude = ["editors/zed"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 
 [workspace.dependencies]
-soppo = { path = ".", version = "0.2.0" }
+soppo = { path = ".", version = "0.3.0" }
 
 [package]
 name = "soppo"
