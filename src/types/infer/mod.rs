@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 use super::ctx::GlobalCtxt;
 use super::ty::{Nullability, Type};
+use crate::error::SoppoError;
 use crate::go::{GoCache, Project, parse_go_type};
 use crate::syntax::{Expr, ExprKind, Import, ModuleId, Span, Symbol, Type as AstType, UnaryOp};
 
@@ -1277,6 +1278,102 @@ impl Infer {
             }
             Type::Fun { .. } => true, // Function types are nilable
             _ => false,
+        }
+    }
+
+    /// Check if a type is a pointer type (*T or ptr)
+    pub(super) fn is_pointer_type(ty: &Type) -> bool {
+        matches!(ty, Type::Con { name, .. } if name.name.starts_with('*') || name.name == "ptr")
+    }
+
+    /// Check if a type is a slice type ([]T)
+    pub(super) fn is_slice_type(ty: &Type) -> bool {
+        matches!(ty, Type::Con { name, .. } if name.name.starts_with("[]"))
+    }
+
+    /// Check if a type is a map type (map[K]V)
+    pub(super) fn is_map_type(ty: &Type) -> bool {
+        matches!(ty, Type::Con { name, .. } if name.name.starts_with("map["))
+    }
+
+    /// Check if a type is a channel type (chan T)
+    pub(super) fn is_channel_type(ty: &Type) -> bool {
+        matches!(ty, Type::Con { name, .. } if name.name.starts_with("chan "))
+    }
+
+    /// Extract element type from a channel type (chan T -> T)
+    /// Returns None if not a channel type
+    pub(super) fn extract_channel_element(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Con { name, args, .. } if name.name.starts_with("chan ") => {
+                if !args.is_empty() {
+                    Some(args[0].clone())
+                } else {
+                    // Fallback: parse from name "chan T" -> "T"
+                    Some(Type::simple(&name.name[5..]))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract element type from a slice type ([]T -> T)
+    /// Returns None if not a slice type
+    pub(super) fn extract_slice_element(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Con { name, args, .. } if name.name.starts_with("[]") => {
+                if !args.is_empty() {
+                    Some(args[0].clone())
+                } else {
+                    // Fallback: parse from name "[]T" -> "T"
+                    Some(Type::simple(&name.name[2..]))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract key and value types from a map type (map[K]V -> (K, V))
+    /// Returns None if not a map type
+    pub(super) fn extract_map_elements(ty: &Type) -> Option<(Type, Type)> {
+        match ty {
+            Type::Con { name, args, .. } if name.name.starts_with("map[") => {
+                if args.len() >= 2 {
+                    Some((args[0].clone(), args[1].clone()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract element type from pointer type (*T -> T)
+    /// Returns None if not a pointer type
+    pub(super) fn extract_pointer_element(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Con { name, args, .. } if name.name.starts_with('*') => {
+                if !args.is_empty() {
+                    Some(args[0].clone())
+                } else {
+                    // Fallback: parse from name "*T" -> "T"
+                    Some(Type::simple(&name.name[1..]))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if assigning nil to a target type would be an error
+    /// Returns Some(error) if nil cannot be assigned, None if it's OK
+    pub(super) fn check_nil_to_non_nilable(target_ty: &Type, span: Span) -> Option<SoppoError> {
+        if target_ty.is_nilable_kind() && !target_ty.is_nullable() && !target_ty.is_go_interface() {
+            Some(SoppoError::NilToNonNilable {
+                ty: target_ty.to_string(),
+                span,
+            })
+        } else {
+            None
         }
     }
 

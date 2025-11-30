@@ -148,23 +148,19 @@ impl Infer {
                 let container_ty = self.substitute(container_ty);
                 let index_ty = self.infer_expr(index)?;
 
+                // Map indexing: map[K]V - index is K, result is V
+                if let Some((key_ty, val_ty)) = Self::extract_map_elements(&container_ty) {
+                    self.unify(&index_ty, &key_ty, &index.span)?;
+                    return Ok(val_ty);
+                }
+
+                // Slice indexing: []T - index is int, result is T
+                if let Some(elem_ty) = Self::extract_slice_element(&container_ty) {
+                    self.unify(&index_ty, &Type::simple("int"), &index.span)?;
+                    return Ok(elem_ty);
+                }
+
                 if let Type::Con { name, args, .. } = &container_ty {
-                    // Map indexing: map[K]V - index is K, result is V
-                    if (name.name == "map" || name.name.starts_with("map[")) && args.len() == 2 {
-                        self.unify(&index_ty, &args[0], &index.span)?;
-                        return Ok(args[1].clone());
-                    }
-
-                    // Slice indexing: []T - index is int, result is T
-                    if name.name.starts_with("[]") {
-                        self.unify(&index_ty, &Type::simple("int"), &index.span)?;
-                        if args.len() == 1 {
-                            return Ok(args[0].clone());
-                        }
-                        let elem_name = &name.name[2..];
-                        return Ok(Type::simple(elem_name));
-                    }
-
                     // Array indexing: array or [N]T - index is int
                     if name.name == "array" && args.len() == 1 {
                         self.unify(&index_ty, &Type::simple("int"), &index.span)?;
@@ -204,14 +200,9 @@ impl Infer {
                 for elem in elements {
                     // Check: assigning nil to a non-nilable element type is an error
                     if matches!(elem.kind, ExprKind::Nil)
-                        && elem_ty.is_nilable_kind()
-                        && !elem_ty.is_nullable()
-                        && !elem_ty.is_go_interface()
+                        && let Some(err) = Self::check_nil_to_non_nilable(&elem_ty, elem.span)
                     {
-                        return Err(SoppoError::NilToNonNilable {
-                            ty: elem_ty.to_string(),
-                            span: elem.span,
-                        });
+                        return Err(err);
                     }
                     let elem_ty_actual = self.infer_expr(elem)?;
                     self.unify(&elem_ty, &elem_ty_actual, &elem.span)?;
@@ -240,14 +231,10 @@ impl Infer {
                             if let Some(field_ty) = field_types.get(field_name.as_str()) {
                                 // Check: assigning nil to a non-nilable field is an error
                                 if matches!(value.kind, ExprKind::Nil)
-                                    && field_ty.is_nilable_kind()
-                                    && !field_ty.is_nullable()
-                                    && !field_ty.is_go_interface()
+                                    && let Some(err) =
+                                        Self::check_nil_to_non_nilable(field_ty, value.span)
                                 {
-                                    return Err(SoppoError::NilToNonNilable {
-                                        ty: field_ty.to_string(),
-                                        span: value.span,
-                                    });
+                                    return Err(err);
                                 }
                             }
                             self.infer_expr(value)?;
@@ -322,14 +309,9 @@ impl Infer {
                 for (key, value) in entries {
                     // Check: assigning nil to a non-nilable value type is an error
                     if matches!(value.kind, ExprKind::Nil)
-                        && val_ty.is_nilable_kind()
-                        && !val_ty.is_nullable()
-                        && !val_ty.is_go_interface()
+                        && let Some(err) = Self::check_nil_to_non_nilable(&val_ty, value.span)
                     {
-                        return Err(SoppoError::NilToNonNilable {
-                            ty: val_ty.to_string(),
-                            span: value.span,
-                        });
+                        return Err(err);
                     }
                     let k_ty = self.infer_expr(key)?;
                     let v_ty = self.infer_expr(value)?;
@@ -865,17 +847,10 @@ impl Infer {
                 let arg_ty = self.infer_expr(&args[0].1)?;
                 let arg_ty = self.substitute(arg_ty);
                 // Verify it's a valid type for len
-                let valid = match &arg_ty {
-                    Type::Con { name, .. } => {
-                        name.name == "string"
-                            || name.name == "array" // array[T] representation
-                            || name.name.starts_with("[]")
-                            || name.name.starts_with("[")
-                            || name.name.starts_with("map") // map[K]V or map[K, V]
-                            || name.name.starts_with("chan ")
-                    }
-                    _ => false,
-                };
+                let valid = Self::is_slice_type(&arg_ty)
+                    || Self::is_map_type(&arg_ty)
+                    || Self::is_channel_type(&arg_ty)
+                    || matches!(&arg_ty, Type::Con { name, .. } if name.name == "string" || name.name == "array" || name.name.starts_with("["));
                 if !valid {
                     return Err(SoppoError::Type {
                         message: format!(
@@ -893,15 +868,9 @@ impl Infer {
                 let arg_ty = self.infer_expr(&args[0].1)?;
                 let arg_ty = self.substitute(arg_ty);
                 // Verify it's a valid type for cap
-                let valid = match &arg_ty {
-                    Type::Con { name, .. } => {
-                        name.name == "array" // array[T] representation
-                            || name.name.starts_with("[]")
-                            || name.name.starts_with("[")
-                            || name.name.starts_with("chan ")
-                    }
-                    _ => false,
-                };
+                let valid = Self::is_slice_type(&arg_ty)
+                    || Self::is_channel_type(&arg_ty)
+                    || matches!(&arg_ty, Type::Con { name, .. } if name.name == "array" || name.name.starts_with("["));
                 if !valid {
                     return Err(SoppoError::Type {
                         message: format!("cap requires array, slice, or channel; got {}", arg_ty),
@@ -915,17 +884,10 @@ impl Infer {
             if name == "append" && !args.is_empty() {
                 let slice_ty = self.infer_expr(&args[0].1)?;
                 let slice_ty = self.substitute(slice_ty);
-                // Verify first arg is a slice
-                let elem_ty = match &slice_ty {
-                    Type::Con { name, args, .. } if name.name.starts_with("[]") => {
-                        if args.is_empty() {
-                            // Extract element type from name like "[]int"
-                            Type::simple(&name.name[2..])
-                        } else {
-                            args[0].clone()
-                        }
-                    }
-                    _ => {
+                // Verify first arg is a slice and extract element type
+                let elem_ty = match Self::extract_slice_element(&slice_ty) {
+                    Some(elem) => elem,
+                    None => {
                         return Err(SoppoError::Type {
                             message: format!(
                                 "first argument to append must be a slice; got {}",
@@ -950,10 +912,8 @@ impl Infer {
                 let src_ty = self.infer_expr(&args[1].1)?;
                 let src_ty = self.substitute(src_ty);
                 // Both must be slices (or src can be string for []byte)
-                let dst_is_slice =
-                    matches!(&dst_ty, Type::Con { name, .. } if name.name.starts_with("[]"));
-                let src_is_slice =
-                    matches!(&src_ty, Type::Con { name, .. } if name.name.starts_with("[]"));
+                let dst_is_slice = Self::is_slice_type(&dst_ty);
+                let src_is_slice = Self::is_slice_type(&src_ty);
                 let src_is_string =
                     matches!(&src_ty, Type::Con { name, .. } if name.name == "string");
 
@@ -990,22 +950,10 @@ impl Infer {
             if name == "delete" && args.len() == 2 {
                 let map_ty = self.infer_expr(&args[0].1)?;
                 let map_ty = self.substitute(map_ty);
-                // Verify first arg is a map
-                let key_ty = match &map_ty {
-                    Type::Con { name, args, .. } if name.name.starts_with("map") => {
-                        if !args.is_empty() {
-                            args[0].clone()
-                        } else {
-                            // Extract key type from name like "map[string]int"
-                            let inner = &name.name[4..]; // skip "map["
-                            if let Some(bracket_end) = inner.find(']') {
-                                Type::simple(&inner[..bracket_end])
-                            } else {
-                                Type::simple("any")
-                            }
-                        }
-                    }
-                    _ => {
+                // Verify first arg is a map and extract key type
+                let key_ty = match Self::extract_map_elements(&map_ty) {
+                    Some((k, _)) => k,
+                    None => {
                         return Err(SoppoError::Type {
                             message: format!(
                                 "first argument to delete must be a map; got {}",
@@ -1406,20 +1354,13 @@ impl Infer {
                 ..
             } => {
                 // Helper to check nil arg against param type
-                let check_nil_arg =
-                    |param_ty: &Type, arg_span: &Span, is_nil: bool| -> Result<()> {
-                        if is_nil
-                            && param_ty.is_nilable_kind()
-                            && !param_ty.is_nullable()
-                            && !param_ty.is_go_interface()
-                        {
-                            return Err(SoppoError::NilToNonNilable {
-                                ty: param_ty.to_string(),
-                                span: *arg_span,
-                            });
-                        }
-                        Ok(())
-                    };
+                let check_nil_arg = |param_ty: &Type, arg_span: Span, is_nil: bool| -> Result<()> {
+                    if is_nil && let Some(err) = Self::check_nil_to_non_nilable(param_ty, arg_span)
+                    {
+                        return Err(err);
+                    }
+                    Ok(())
+                };
 
                 // Check if last param is variadic
                 let has_variadic = param_tys.last().is_some_and(|last| {
@@ -1451,7 +1392,7 @@ impl Infer {
                     for (param_ty, (arg_ty, arg_span, is_nil)) in
                         fixed_params.iter().zip(arg_tys.iter())
                     {
-                        check_nil_arg(param_ty, arg_span, *is_nil)?;
+                        check_nil_arg(param_ty, *arg_span, *is_nil)?;
                         self.unify(param_ty, arg_ty, arg_span)?;
                     }
 
@@ -1463,7 +1404,7 @@ impl Infer {
                             _ => false,
                         };
                         if !is_any {
-                            check_nil_arg(&variadic_elem, arg_span, *is_nil)?;
+                            check_nil_arg(&variadic_elem, *arg_span, *is_nil)?;
                             self.unify(&variadic_elem, arg_ty, arg_span)?;
                         }
                     }
@@ -1484,7 +1425,7 @@ impl Infer {
                     for (param_ty, (arg_ty, arg_span, is_nil)) in
                         param_tys.iter().zip(arg_tys.iter())
                     {
-                        check_nil_arg(param_ty, arg_span, *is_nil)?;
+                        check_nil_arg(param_ty, *arg_span, *is_nil)?;
                         self.unify(param_ty, arg_ty, arg_span)?;
                     }
                 }
@@ -1531,8 +1472,7 @@ impl Infer {
                 let operand_ty = self.substitute(operand_ty);
 
                 // Check for nil pointer dereference (only pointers can be dereferenced)
-                let is_ptr = matches!(&operand_ty, Type::Con { name, .. } if name.name.starts_with('*') || name.name == "ptr");
-                if is_ptr {
+                if Self::is_pointer_type(&operand_ty) {
                     // Get a key for the expression (works for identifiers and field chains)
                     let expr_key = super::stmt::expr_to_key(operand);
 
@@ -1552,15 +1492,8 @@ impl Infer {
                 }
 
                 // Extract the pointee type from *T
-                if let Type::Con { name, args, .. } = &operand_ty {
-                    if name.name.starts_with('*') && args.len() == 1 {
-                        return Ok(args[0].clone());
-                    }
-                    // Also handle case where type name encodes the pointee
-                    if name.name.starts_with('*') {
-                        let pointee_name = &name.name[1..];
-                        return Ok(Type::simple(pointee_name));
-                    }
+                if let Some(pointee_ty) = Self::extract_pointer_element(&operand_ty) {
+                    return Ok(pointee_ty);
                 }
                 // If we can't determine the pointer type, return a type variable
                 Ok(self.fresh_ty_var())
@@ -1569,16 +1502,8 @@ impl Infer {
                 // <-ch: operand must be chan T, result is T
                 let operand_ty = self.substitute(operand_ty);
                 // Extract the element type from chan T
-                if let Type::Con { name, args, .. } = &operand_ty {
-                    // Handle "chan T" type with args
-                    if name.name.starts_with("chan ") && args.len() == 1 {
-                        return Ok(args[0].clone());
-                    }
-                    // Also handle case where type name encodes the element type
-                    if name.name.starts_with("chan ") {
-                        let elem_name = &name.name[5..]; // skip "chan "
-                        return Ok(Type::simple(elem_name));
-                    }
+                if let Some(elem_ty) = Self::extract_channel_element(&operand_ty) {
+                    return Ok(elem_ty);
                 }
                 // If we can't determine the channel type, return a type variable
                 Ok(self.fresh_ty_var())

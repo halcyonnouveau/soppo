@@ -167,13 +167,9 @@ impl Infer {
 
                         // Check: assigning nil to a non-nilable type is an error
                         if matches!(expr.kind, ExprKind::Nil)
-                            && declared_ty.is_nilable_kind()
-                            && !declared_ty.is_nullable()
+                            && let Some(err) = Self::check_nil_to_non_nilable(&declared_ty, t.span)
                         {
-                            return Err(SoppoError::NilToNonNilable {
-                                ty: declared_ty.to_string(),
-                                span: t.span, // Point to the type annotation
-                            });
+                            return Err(err);
                         }
 
                         let value_ty = self.infer_expr(expr)?;
@@ -359,13 +355,9 @@ impl Infer {
 
                 // Check: assigning nil to a non-nilable type is an error
                 if matches!(value.kind, ExprKind::Nil)
-                    && target_ty_sub.is_nilable_kind()
-                    && !target_ty_sub.is_nullable()
+                    && let Some(err) = Self::check_nil_to_non_nilable(&target_ty_sub, value.span)
                 {
-                    return Err(SoppoError::NilToNonNilable {
-                        ty: target_ty_sub.to_string(),
-                        span: value.span,
-                    });
+                    return Err(err);
                 }
 
                 let value_ty = self.infer_expr(value)?;
@@ -476,41 +468,22 @@ impl Infer {
                 let coll_ty = self.substitute(coll_ty);
 
                 // Determine key and value types based on collection type
-                let (key_ty, value_ty) = if let Type::Con { name, args, .. } = &coll_ty {
-                    if name.name.starts_with("[]") {
+                let (key_ty, value_ty) =
+                    if let Some(elem_ty) = Self::extract_slice_element(&coll_ty) {
                         // Slice: key is int, value is element type
-                        let elem_ty = if args.len() == 1 {
-                            args[0].clone()
-                        } else {
-                            let elem_name = &name.name[2..];
-                            Type::simple(elem_name)
-                        };
                         (Type::simple("int"), elem_ty)
-                    } else if name.name.starts_with("map[") {
+                    } else if let Some((k, v)) = Self::extract_map_elements(&coll_ty) {
                         // Map: key is key type, value is value type
-                        if args.len() == 2 {
-                            (args[0].clone(), args[1].clone())
-                        } else {
-                            (self.fresh_ty_var(), self.fresh_ty_var())
-                        }
-                    } else if name.name.starts_with("chan ") {
+                        (k, v)
+                    } else if let Some(elem_ty) = Self::extract_channel_element(&coll_ty) {
                         // Channel: only one variable (value type)
-                        let elem_ty = if args.len() == 1 {
-                            args[0].clone()
-                        } else {
-                            let elem_name = &name.name[5..];
-                            Type::simple(elem_name)
-                        };
                         (elem_ty.clone(), elem_ty)
-                    } else if name.name == "string" {
+                    } else if matches!(&coll_ty, Type::Con { name, .. } if name.name == "string") {
                         // String: key is int (index), value is rune
                         (Type::simple("int"), Type::simple("rune"))
                     } else {
                         (self.fresh_ty_var(), self.fresh_ty_var())
-                    }
-                } else {
-                    (self.fresh_ty_var(), self.fresh_ty_var())
-                };
+                    };
 
                 // Bind the key variable
                 self.insert_var(key.clone(), key_ty);
@@ -616,16 +589,10 @@ impl Infer {
                     }
                     for (expr, expected) in values.iter().zip(expected_types.iter()) {
                         // Check: returning nil to a non-nilable type is an error
-                        // Exception: `error` and `any` are always implicitly nilable in Go
                         if matches!(expr.kind, ExprKind::Nil)
-                            && expected.is_nilable_kind()
-                            && !expected.is_nullable()
-                            && !expected.is_go_interface()
+                            && let Some(err) = Self::check_nil_to_non_nilable(expected, expr.span)
                         {
-                            return Err(SoppoError::NilToNonNilable {
-                                ty: expected.to_string(),
-                                span: expr.span,
-                            });
+                            return Err(err);
                         }
 
                         let value_ty = self.infer_expr(expr)?;
@@ -789,36 +756,14 @@ impl Infer {
                 let is_nil = matches!(value.kind, ExprKind::Nil);
 
                 // Extract element type from channel and check nil safety
-                if let Type::Con { name, args, .. } = &channel_ty {
-                    if name.name.starts_with("chan ") && args.len() == 1 {
-                        // Check: sending nil to a channel with non-nilable element type is an error
-                        if is_nil
-                            && args[0].is_nilable_kind()
-                            && !args[0].is_nullable()
-                            && !args[0].is_go_interface()
-                        {
-                            return Err(SoppoError::NilToNonNilable {
-                                ty: args[0].to_string(),
-                                span: value.span,
-                            });
-                        }
-                        self.unify(&args[0], &value_ty, &value.span)?;
-                    } else if name.name.starts_with("chan ") {
-                        let elem_name = &name.name[5..]; // skip "chan "
-                        let elem_ty = Type::simple(elem_name);
-                        // Check nil safety for non-nilable element types
-                        if is_nil
-                            && elem_ty.is_nilable_kind()
-                            && !elem_ty.is_nullable()
-                            && !elem_ty.is_go_interface()
-                        {
-                            return Err(SoppoError::NilToNonNilable {
-                                ty: elem_ty.to_string(),
-                                span: value.span,
-                            });
-                        }
-                        self.unify(&elem_ty, &value_ty, &value.span)?;
+                if let Some(elem_ty) = Self::extract_channel_element(&channel_ty) {
+                    // Check: sending nil to a channel with non-nilable element type is an error
+                    if is_nil
+                        && let Some(err) = Self::check_nil_to_non_nilable(&elem_ty, value.span)
+                    {
+                        return Err(err);
                     }
+                    self.unify(&elem_ty, &value_ty, &value.span)?;
                 }
 
                 Ok(Type::unit())
@@ -839,18 +784,8 @@ impl Infer {
                             let channel_ty = self.substitute(channel_ty);
 
                             // Extract element type from channel
-                            let elem_ty = if let Type::Con { name, args, .. } = &channel_ty {
-                                if name.name.starts_with("chan ") && args.len() == 1 {
-                                    args[0].clone()
-                                } else if name.name.starts_with("chan ") {
-                                    let elem_name = &name.name[5..];
-                                    Type::simple(elem_name)
-                                } else {
-                                    self.fresh_ty_var()
-                                }
-                            } else {
-                                self.fresh_ty_var()
-                            };
+                            let elem_ty = Self::extract_channel_element(&channel_ty)
+                                .unwrap_or_else(|| self.fresh_ty_var());
 
                             self.insert_var(name.clone(), elem_ty);
                         }
@@ -864,18 +799,8 @@ impl Infer {
                             let channel_ty = self.substitute(channel_ty);
 
                             // Extract element type from channel
-                            let elem_ty = if let Type::Con { name, args, .. } = &channel_ty {
-                                if name.name.starts_with("chan ") && args.len() == 1 {
-                                    args[0].clone()
-                                } else if name.name.starts_with("chan ") {
-                                    let elem_name = &name.name[5..];
-                                    Type::simple(elem_name)
-                                } else {
-                                    self.fresh_ty_var()
-                                }
-                            } else {
-                                self.fresh_ty_var()
-                            };
+                            let elem_ty = Self::extract_channel_element(&channel_ty)
+                                .unwrap_or_else(|| self.fresh_ty_var());
 
                             self.insert_var(name.clone(), elem_ty);
                             self.insert_var(ok_name.clone(), Type::simple("bool"));
@@ -887,36 +812,15 @@ impl Infer {
                             let value_ty = self.infer_expr(value)?;
                             let is_nil = matches!(value.kind, ExprKind::Nil);
 
-                            if let Type::Con { name, args, .. } = &channel_ty {
-                                if name.name.starts_with("chan ") && args.len() == 1 {
-                                    // Check nil safety
-                                    if is_nil
-                                        && args[0].is_nilable_kind()
-                                        && !args[0].is_nullable()
-                                        && !args[0].is_go_interface()
-                                    {
-                                        return Err(SoppoError::NilToNonNilable {
-                                            ty: args[0].to_string(),
-                                            span: value.span,
-                                        });
-                                    }
-                                    self.unify(&args[0], &value_ty, &value.span)?;
-                                } else if name.name.starts_with("chan ") {
-                                    let elem_name = &name.name[5..];
-                                    let elem_ty = Type::simple(elem_name);
-                                    // Check nil safety
-                                    if is_nil
-                                        && elem_ty.is_nilable_kind()
-                                        && !elem_ty.is_nullable()
-                                        && !elem_ty.is_go_interface()
-                                    {
-                                        return Err(SoppoError::NilToNonNilable {
-                                            ty: elem_ty.to_string(),
-                                            span: value.span,
-                                        });
-                                    }
-                                    self.unify(&elem_ty, &value_ty, &value.span)?;
+                            if let Some(elem_ty) = Self::extract_channel_element(&channel_ty) {
+                                // Check nil safety
+                                if is_nil
+                                    && let Some(err) =
+                                        Self::check_nil_to_non_nilable(&elem_ty, value.span)
+                                {
+                                    return Err(err);
                                 }
+                                self.unify(&elem_ty, &value_ty, &value.span)?;
                             }
                         }
                         SelectCaseKind::Default => {
