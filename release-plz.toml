@@ -4,9 +4,11 @@ git_release_name = "v{{ version }}"
 
 [[package]]
 name = "soppo"
+changelog_include = ["soppo-lsp"]
 
 [[package]]
 name = "soppo-lsp"
+changelog_update = false
 
 [changelog]
 commit_parsers = [
