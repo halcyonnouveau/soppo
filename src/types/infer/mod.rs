@@ -160,7 +160,11 @@ impl Infer {
     }
 
     /// Consume the Infer and return the symbol table
-    pub fn into_symbols(self) -> SymbolTable {
+    pub fn into_symbols(mut self) -> SymbolTable {
+        // Copy soppo imports to symbol table for cross-file completion
+        for (alias, module_id) in self.soppo_imports {
+            self.symbols.add_import(alias, module_id);
+        }
         self.symbols
     }
 
@@ -279,12 +283,13 @@ impl Infer {
         self.soppo_imports.get(package_name)
     }
 
-    /// Look up a function in an imported Soppo module
+    /// Look up a function in an imported Soppo module.
+    /// Returns the function type and its definition span (for go-to-definition).
     pub(super) fn lookup_soppo_function(
         &self,
         package_name: &str,
         func_name: &str,
-    ) -> Option<Type> {
+    ) -> Option<(Type, Option<Span>)> {
         // Get the ModuleId for this package
         let module_id = self.soppo_imports.get(package_name)?;
 
@@ -303,11 +308,16 @@ impl Infer {
             Type::generic("tuple", func_def.return_types.clone())
         };
 
-        Some(Type::fun(param_types, return_type))
+        Some((Type::fun(param_types, return_type), func_def.span))
     }
 
-    /// Look up a type in an imported Soppo module
-    pub(super) fn lookup_soppo_type(&self, package_name: &str, type_name: &str) -> Option<Type> {
+    /// Look up a type in an imported Soppo module.
+    /// Returns the type and its definition span (for go-to-definition).
+    pub(super) fn lookup_soppo_type(
+        &self,
+        package_name: &str,
+        type_name: &str,
+    ) -> Option<(Type, Option<Span>)> {
         // Get the ModuleId for this package
         let module_id = self.soppo_imports.get(package_name)?;
 
@@ -315,15 +325,16 @@ impl Infer {
         let type_def = self.global_state.lookup_type_in(module_id, type_name)?;
 
         // Return the type as a simple type constructor
-        Some(Type::simple(&type_def.name))
+        Some((Type::simple(&type_def.name), type_def.span))
     }
 
-    /// Look up a constant in an imported Soppo module
+    /// Look up a constant in an imported Soppo module.
+    /// Returns the constant type and its definition span (for go-to-definition).
     pub(super) fn lookup_soppo_constant(
         &self,
         package_name: &str,
         const_name: &str,
-    ) -> Option<Type> {
+    ) -> Option<(Type, Option<Span>)> {
         // Get the ModuleId for this package
         let module_id = self.soppo_imports.get(package_name)?;
 
@@ -332,7 +343,7 @@ impl Infer {
             .global_state
             .lookup_constant_in(module_id, const_name)?;
 
-        Some(const_def.ty.clone())
+        Some((const_def.ty.clone(), const_def.span))
     }
 
     /// Look up a function in an imported Go package

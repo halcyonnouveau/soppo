@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::ty::Type;
-use crate::syntax::Span;
+use crate::syntax::{ModuleId, Span};
 
 /// Information about a symbol at a specific location
 #[derive(Debug, Clone)]
@@ -45,13 +45,26 @@ pub enum SymbolKind {
 pub struct SymbolTable {
     /// Maps (byte_start, byte_end) to symbol info
     symbols: HashMap<(usize, usize), SymbolInfo>,
+    /// Soppo imports: package alias -> ModuleId (for cross-file completion)
+    imports: HashMap<String, ModuleId>,
 }
 
 impl SymbolTable {
     pub fn new() -> Self {
         Self {
             symbols: HashMap::new(),
+            imports: HashMap::new(),
         }
+    }
+
+    /// Add a Soppo import to the symbol table
+    pub fn add_import(&mut self, alias: String, module_id: ModuleId) {
+        self.imports.insert(alias, module_id);
+    }
+
+    /// Get all Soppo imports
+    pub fn imports(&self) -> &HashMap<String, ModuleId> {
+        &self.imports
     }
 
     /// Record a symbol at the given span

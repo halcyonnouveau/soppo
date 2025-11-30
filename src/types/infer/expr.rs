@@ -262,6 +262,15 @@ impl Infer {
             ExprKind::StructLit { ty, fields } => {
                 // Look up struct definition to check field types
                 if let Some(type_def) = self.global_state.lookup_type(&ty.name).cloned() {
+                    // Record the type name as a symbol for hover/go-to-definition
+                    self.record_symbol(
+                        ty.span,
+                        ty.name.clone(),
+                        Type::simple(&ty.name),
+                        type_def.span,
+                        SymbolKind::Type,
+                    );
+
                     if let TypeDefKind::Struct { fields: field_defs } = &type_def.kind {
                         // Build map of field name -> type
                         let field_types: std::collections::HashMap<_, _> = field_defs
@@ -537,15 +546,39 @@ impl Infer {
             // For Soppo imports, look up from GlobalCtxt
             if self.is_soppo_import(name) {
                 // Try to look up as a function first
-                if let Some(func_ty) = self.lookup_soppo_function(name, field) {
+                if let Some((func_ty, def_span)) = self.lookup_soppo_function(name, field) {
+                    // Record symbol for go-to-definition
+                    self.record_symbol(
+                        *field_span,
+                        field.to_string(),
+                        func_ty.clone(),
+                        def_span,
+                        SymbolKind::Function,
+                    );
                     return Ok(func_ty);
                 }
                 // Try to look up as a type
-                if let Some(ty) = self.lookup_soppo_type(name, field) {
+                if let Some((ty, def_span)) = self.lookup_soppo_type(name, field) {
+                    // Record symbol for go-to-definition
+                    self.record_symbol(
+                        *field_span,
+                        field.to_string(),
+                        ty.clone(),
+                        def_span,
+                        SymbolKind::Type,
+                    );
                     return Ok(ty);
                 }
                 // Try to look up as a constant
-                if let Some(ty) = self.lookup_soppo_constant(name, field) {
+                if let Some((ty, def_span)) = self.lookup_soppo_constant(name, field) {
+                    // Record symbol for go-to-definition
+                    self.record_symbol(
+                        *field_span,
+                        field.to_string(),
+                        ty.clone(),
+                        def_span,
+                        SymbolKind::Variable,
+                    );
                     return Ok(ty);
                 }
                 // Not found
@@ -1177,14 +1210,23 @@ impl Infer {
         if let ExprKind::Field {
             expr: pkg_expr,
             field: name,
-            ..
+            field_span,
         } = &func.kind
             && let ExprKind::Ident(pkg_name) = &pkg_expr.kind
             && self.is_imported_package(pkg_name)
         {
             // For Soppo imports, look up the function from GlobalCtxt
             if self.is_soppo_import(pkg_name) {
-                if let Some(func_ty) = self.lookup_soppo_function(pkg_name, name) {
+                if let Some((func_ty, def_span)) = self.lookup_soppo_function(pkg_name, name) {
+                    // Record symbol for go-to-definition
+                    self.record_symbol(
+                        *field_span,
+                        name.clone(),
+                        func_ty.clone(),
+                        def_span,
+                        SymbolKind::Function,
+                    );
+
                     // Found the function - infer args and check against signature
                     let mut arg_tys = Vec::new();
                     for (_, arg) in args {
@@ -1221,7 +1263,16 @@ impl Infer {
                 }
 
                 // Try type conversion: pkg.Type(value)
-                if let Some(ty) = self.lookup_soppo_type(pkg_name, name) {
+                if let Some((ty, def_span)) = self.lookup_soppo_type(pkg_name, name) {
+                    // Record symbol for go-to-definition
+                    self.record_symbol(
+                        *field_span,
+                        name.clone(),
+                        ty.clone(),
+                        def_span,
+                        SymbolKind::Type,
+                    );
+
                     if args.len() != 1 {
                         return Err(SoppoError::Type {
                             message: format!(

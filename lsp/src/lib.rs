@@ -9,7 +9,7 @@ use miette::Diagnostic as MietteDiagnostic;
 use soppo::build::{typecheck, typecheck_with_symbols, typecheck_workspace};
 use soppo::error::SoppoError;
 use soppo::syntax::{FileId, FileRegistry, Span};
-use soppo::types::{GlobalCtxt, SymbolTable};
+use soppo::types::{GlobalCtxt, SymbolKind as SoppoSymbolKind, SymbolTable};
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -434,6 +434,107 @@ impl Backend {
     fn uri_to_path(uri: &Url) -> Option<PathBuf> {
         uri.to_file_path().ok()
     }
+
+    /// Convert our SymbolKind to LSP SymbolKind
+    fn to_lsp_symbol_kind(kind: SoppoSymbolKind) -> SymbolKind {
+        match kind {
+            SoppoSymbolKind::Variable => SymbolKind::VARIABLE,
+            SoppoSymbolKind::Parameter => SymbolKind::VARIABLE,
+            SoppoSymbolKind::Function => SymbolKind::FUNCTION,
+            SoppoSymbolKind::Type => SymbolKind::STRUCT,
+            SoppoSymbolKind::Field => SymbolKind::FIELD,
+            SoppoSymbolKind::Variant => SymbolKind::ENUM_MEMBER,
+            SoppoSymbolKind::Constant => SymbolKind::CONSTANT,
+            SoppoSymbolKind::Method => SymbolKind::METHOD,
+        }
+    }
+
+    /// Convert our SymbolKind to LSP CompletionItemKind
+    fn to_completion_kind(kind: SoppoSymbolKind) -> CompletionItemKind {
+        match kind {
+            SoppoSymbolKind::Variable => CompletionItemKind::VARIABLE,
+            SoppoSymbolKind::Parameter => CompletionItemKind::VARIABLE,
+            SoppoSymbolKind::Function => CompletionItemKind::FUNCTION,
+            SoppoSymbolKind::Type => CompletionItemKind::STRUCT,
+            SoppoSymbolKind::Field => CompletionItemKind::FIELD,
+            SoppoSymbolKind::Variant => CompletionItemKind::ENUM_MEMBER,
+            SoppoSymbolKind::Constant => CompletionItemKind::CONSTANT,
+            SoppoSymbolKind::Method => CompletionItemKind::METHOD,
+        }
+    }
+
+    /// Extract the package name if cursor is after `pkg.`
+    /// Returns Some("pkg") if text before cursor ends with "pkg." pattern
+    fn get_package_prefix(text: &str, cursor_offset: usize) -> Option<String> {
+        let before_cursor = &text[..cursor_offset];
+
+        // Check if we just typed a `.` after an identifier
+        if !before_cursor.ends_with('.') {
+            return None;
+        }
+
+        // Find the identifier before the dot
+        let before_dot = &before_cursor[..before_cursor.len() - 1];
+        let ident_start = before_dot
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        let ident = before_dot[ident_start..].trim();
+        if ident.is_empty() || !ident.chars().next().unwrap().is_alphabetic() {
+            return None;
+        }
+
+        Some(ident.to_string())
+    }
+
+    /// Convert a FuncDef to a type string for display
+    fn func_def_to_type(func_def: &soppo::types::FuncDef) -> String {
+        let params: Vec<String> = func_def
+            .params
+            .iter()
+            .map(|(name, ty)| format!("{} {}", name, ty))
+            .collect();
+
+        let returns = if func_def.return_types.is_empty() {
+            String::new()
+        } else if func_def.return_types.len() == 1 {
+            format!(" {}", func_def.return_types[0])
+        } else {
+            format!(
+                " ({})",
+                func_def
+                    .return_types
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+
+        format!("func({}){}", params.join(", "), returns)
+    }
+
+    /// Convert a TypeDef to a string for display
+    fn type_def_to_string(type_def: &soppo::types::TypeDef) -> String {
+        use soppo::types::TypeDefKind;
+        match &type_def.kind {
+            TypeDefKind::Struct { fields } => {
+                let field_count = fields.len();
+                format!("struct ({} fields)", field_count)
+            }
+            TypeDefKind::Enum { variants } => {
+                let variant_count = variants.len();
+                format!("enum ({} variants)", variant_count)
+            }
+            TypeDefKind::Alias { target } => format!("= {}", target),
+            TypeDefKind::Definition { target } => format!("type {}", target),
+            TypeDefKind::Interface { methods } => {
+                let method_count = methods.len();
+                format!("interface ({} methods)", method_count)
+            }
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -446,6 +547,16 @@ impl LanguageServer for Backend {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![".".to_string()]),
+                    ..Default::default()
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
             ..Default::default()
@@ -608,6 +719,368 @@ impl LanguageServer for Backend {
         };
 
         Ok(Some(GotoDefinitionResponse::Scalar(location)))
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+
+        // Get symbols for this file
+        let symbols = if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(file_id) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&file_id)
+            {
+                Some(symbols.clone())
+            } else {
+                drop(ws_guard);
+                let docs = self.documents.read().await;
+                docs.get(&uri).and_then(|d| d.symbols.clone())
+            }
+        } else {
+            let docs = self.documents.read().await;
+            docs.get(&uri).and_then(|d| d.symbols.clone())
+        };
+
+        let Some(symbols) = symbols else {
+            return Ok(None);
+        };
+
+        // Filter to top-level symbols (functions, types, constants)
+        let doc_symbols: Vec<_> = symbols
+            .all_symbols()
+            .iter()
+            .filter(|(_, info)| {
+                matches!(
+                    info.kind,
+                    SoppoSymbolKind::Function
+                        | SoppoSymbolKind::Type
+                        | SoppoSymbolKind::Constant
+                        | SoppoSymbolKind::Method
+                )
+            })
+            .filter_map(|((start, end), info)| {
+                // Only include symbols that have a definition span (i.e., they are defined here)
+                let def_span = info.definition_span?;
+                // Check that the definition is at the same location as the symbol reference
+                if def_span.byte_start != *start || def_span.byte_end != *end {
+                    return None;
+                }
+                #[allow(deprecated)]
+                Some(DocumentSymbol {
+                    name: info.name.clone(),
+                    detail: Some(info.ty.to_string()),
+                    kind: Self::to_lsp_symbol_kind(info.kind),
+                    tags: None,
+                    deprecated: None,
+                    range: span_to_range(def_span),
+                    selection_range: span_to_range(def_span),
+                    children: None,
+                })
+            })
+            .collect();
+
+        Ok(Some(DocumentSymbolResponse::Nested(doc_symbols)))
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let mut items = Vec::new();
+
+        // Get document text and symbols
+        let (text, symbols) = if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(file_id) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&file_id)
+            {
+                let open_docs = self.open_documents.read().await;
+                (open_docs.get(&path).cloned(), Some(symbols.clone()))
+            } else {
+                drop(ws_guard);
+                let docs = self.documents.read().await;
+                let doc = docs.get(&uri);
+                (
+                    doc.map(|d| d.text.clone()),
+                    doc.and_then(|d| d.symbols.clone()),
+                )
+            }
+        } else {
+            let docs = self.documents.read().await;
+            let doc = docs.get(&uri);
+            (
+                doc.map(|d| d.text.clone()),
+                doc.and_then(|d| d.symbols.clone()),
+            )
+        };
+
+        let cursor_offset = text
+            .as_ref()
+            .map(|t| Self::position_to_byte_offset(t, position))
+            .unwrap_or(0);
+
+        // Check if we're completing after a package name followed by `.`
+        // e.g., `helpers.` should show exports from the helpers module
+        if let Some(ref text) = text
+            && let Some(ref symbols) = symbols
+            && let Some(pkg_name) = Self::get_package_prefix(text, cursor_offset)
+        {
+            // Look up the module for this package in the symbol table's imports
+            if let Some(module_id) = symbols.imports().get(&pkg_name) {
+                // Get the module from GlobalCtxt
+                let ws_guard = self.workspace.read().await;
+                if let Some(ws) = ws_guard.as_ref()
+                    && let Some(module) = ws.global_ctxt.get_module(module_id)
+                {
+                    // Add exported functions (uppercase names)
+                    for (name, func_def) in &module.functions {
+                        if name.starts_with(char::is_uppercase) {
+                            let ty = Self::func_def_to_type(func_def);
+                            items.push(CompletionItem {
+                                label: name.clone(),
+                                kind: Some(CompletionItemKind::FUNCTION),
+                                detail: Some(ty),
+                                ..Default::default()
+                            });
+                        }
+                    }
+
+                    // Add exported types
+                    for (name, type_def) in &module.types {
+                        if name.starts_with(char::is_uppercase) {
+                            items.push(CompletionItem {
+                                label: name.clone(),
+                                kind: Some(CompletionItemKind::STRUCT),
+                                detail: Some(Self::type_def_to_string(type_def)),
+                                ..Default::default()
+                            });
+                        }
+                    }
+
+                    // Add exported constants
+                    for (name, const_def) in &module.constants {
+                        if name.starts_with(char::is_uppercase) {
+                            items.push(CompletionItem {
+                                label: name.clone(),
+                                kind: Some(CompletionItemKind::CONSTANT),
+                                detail: Some(const_def.ty.to_string()),
+                                ..Default::default()
+                            });
+                        }
+                    }
+
+                    // Return only cross-module completions when after `pkg.`
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
+        }
+
+        // Add keywords
+        const KEYWORDS: &[&str] = &[
+            "break",
+            "case",
+            "const",
+            "continue",
+            "default",
+            "defer",
+            "else",
+            "enum",
+            "fallthrough",
+            "for",
+            "func",
+            "go",
+            "if",
+            "import",
+            "interface",
+            "map",
+            "match",
+            "package",
+            "range",
+            "return",
+            "select",
+            "struct",
+            "type",
+            "var",
+        ];
+
+        for kw in KEYWORDS {
+            items.push(CompletionItem {
+                label: (*kw).to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
+            });
+        }
+
+        // Add builtin types
+        const BUILTIN_TYPES: &[&str] = &[
+            "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32",
+            "uint64", "float32", "float64", "string", "bool", "byte", "rune", "error", "any",
+        ];
+
+        for ty in BUILTIN_TYPES {
+            items.push(CompletionItem {
+                label: (*ty).to_string(),
+                kind: Some(CompletionItemKind::TYPE_PARAMETER),
+                ..Default::default()
+            });
+        }
+
+        // Add builtin functions
+        const BUILTIN_FUNCS: &[&str] = &[
+            "len", "cap", "make", "new", "append", "copy", "delete", "panic", "recover", "close",
+            "print", "println",
+        ];
+
+        for func in BUILTIN_FUNCS {
+            items.push(CompletionItem {
+                label: (*func).to_string(),
+                kind: Some(CompletionItemKind::FUNCTION),
+                ..Default::default()
+            });
+        }
+
+        // Add symbols from the current file
+        if let Some(symbols) = symbols {
+            // Collect unique symbol names that are in scope
+            let mut seen = std::collections::HashSet::new();
+            for ((start, _end), info) in symbols.all_symbols() {
+                // Only include symbols defined before the cursor
+                if let Some(def_span) = info.definition_span {
+                    if def_span.byte_start <= cursor_offset && seen.insert(info.name.clone()) {
+                        items.push(CompletionItem {
+                            label: info.name.clone(),
+                            kind: Some(Self::to_completion_kind(info.kind)),
+                            detail: Some(info.ty.to_string()),
+                            ..Default::default()
+                        });
+                    }
+                } else if *start <= cursor_offset && seen.insert(info.name.clone()) {
+                    // For builtins without definition span
+                    items.push(CompletionItem {
+                        label: info.name.clone(),
+                        kind: Some(Self::to_completion_kind(info.kind)),
+                        detail: Some(info.ty.to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        // Get document text
+        let text = if let Some(path) = Self::uri_to_path(&uri) {
+            let open_docs = self.open_documents.read().await;
+            open_docs.get(&path).cloned()
+        } else {
+            let docs = self.documents.read().await;
+            docs.get(&uri).map(|d| d.text.clone())
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        let offset = Self::position_to_byte_offset(&text, position);
+
+        // Find the function call context by scanning backwards for '('
+        let before_cursor = &text[..offset];
+        let mut paren_depth = 0;
+        let mut func_call_start = None;
+        let mut comma_count = 0;
+
+        for (i, c) in before_cursor.char_indices().rev() {
+            match c {
+                ')' => paren_depth += 1,
+                '(' => {
+                    if paren_depth == 0 {
+                        func_call_start = Some(i);
+                        break;
+                    }
+                    paren_depth -= 1;
+                }
+                ',' if paren_depth == 0 => comma_count += 1,
+                _ => {}
+            }
+        }
+
+        let Some(paren_pos) = func_call_start else {
+            return Ok(None);
+        };
+
+        // Find the function name by scanning backwards from the opening paren
+        let before_paren = &text[..paren_pos];
+        let func_name_end = before_paren.trim_end().len();
+        let func_name_start = before_paren[..func_name_end]
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let func_name = before_paren[func_name_start..func_name_end].trim();
+
+        if func_name.is_empty() {
+            return Ok(None);
+        }
+
+        // Look up the function in symbols
+        let symbols = if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(file_id) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&file_id)
+            {
+                Some(symbols.clone())
+            } else {
+                drop(ws_guard);
+                let docs = self.documents.read().await;
+                docs.get(&uri).and_then(|d| d.symbols.clone())
+            }
+        } else {
+            let docs = self.documents.read().await;
+            docs.get(&uri).and_then(|d| d.symbols.clone())
+        };
+
+        let Some(symbols) = symbols else {
+            return Ok(None);
+        };
+
+        // Find the function symbol - handle qualified names like "pkg.Func"
+        let search_name = func_name.split('.').next_back().unwrap_or(func_name);
+
+        let func_info = symbols.all_symbols().values().find(|info| {
+            info.name == search_name
+                && matches!(
+                    info.kind,
+                    SoppoSymbolKind::Function | SoppoSymbolKind::Method
+                )
+        });
+
+        let Some(func_info) = func_info else {
+            return Ok(None);
+        };
+
+        // Format the signature
+        let signature_label = format!("{}: {}", func_info.name, func_info.ty);
+
+        Ok(Some(SignatureHelp {
+            signatures: vec![SignatureInformation {
+                label: signature_label,
+                documentation: None,
+                parameters: None, // Could parse params from type string
+                active_parameter: Some(comma_count as u32),
+            }],
+            active_signature: Some(0),
+            active_parameter: Some(comma_count as u32),
+        }))
     }
 }
 

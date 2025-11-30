@@ -369,3 +369,111 @@ pub fn typecheck_workspace(
         symbol_tables,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn typecheck_workspace_cross_file_symbols() {
+        // Set up a temp project with go.mod
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let root = temp.path();
+
+        // Create go.mod
+        fs::write(
+            root.join("go.mod"),
+            "module github.com/test/simple\n\ngo 1.23\n",
+        )
+        .expect("Failed to write go.mod");
+
+        // Create helpers/lib.sop
+        fs::create_dir_all(root.join("helpers")).expect("Failed to create helpers dir");
+        fs::write(
+            root.join("helpers/lib.sop"),
+            r#"package helpers
+
+func Add(a int, b int) int {
+    return a + b
+}
+"#,
+        )
+        .expect("Failed to write helpers/lib.sop");
+
+        // Create cmd/main.sop
+        fs::create_dir_all(root.join("cmd")).expect("Failed to create cmd dir");
+        fs::write(
+            root.join("cmd/main.sop"),
+            r#"package main
+
+import (
+    "fmt"
+    "github.com/test/simple/helpers"
+)
+
+func main() {
+    result := helpers.Add(1, 2)
+    fmt.Println(result)
+}
+"#,
+        )
+        .expect("Failed to write cmd/main.sop");
+
+        // Typecheck the workspace
+        let result = typecheck_workspace(root, &HashMap::new())
+            .expect("Workspace should typecheck successfully");
+
+        // Find the main file
+        let main_file_id = result
+            .file_registry
+            .file_ids()
+            .find(|id| {
+                result
+                    .file_registry
+                    .get_path(*id)
+                    .map(|p| p.ends_with("cmd/main.sop"))
+                    .unwrap_or(false)
+            })
+            .expect("Should find main.sop");
+
+        // Find the helpers file
+        let helpers_file_id = result
+            .file_registry
+            .file_ids()
+            .find(|id| {
+                result
+                    .file_registry
+                    .get_path(*id)
+                    .map(|p| p.ends_with("helpers/lib.sop"))
+                    .unwrap_or(false)
+            })
+            .expect("Should find helpers/lib.sop");
+
+        // Get symbols for main file
+        let main_symbols = result
+            .symbol_tables
+            .get(&main_file_id)
+            .expect("Should have symbols for main file");
+
+        // Look for the "Add" symbol (from helpers.Add call)
+        let add_symbol = main_symbols
+            .all_symbols()
+            .values()
+            .find(|s| s.name == "Add")
+            .expect("Should have Add symbol in main file");
+
+        // Verify it has a definition span pointing to the helpers file
+        let def_span = add_symbol
+            .definition_span
+            .expect("Add symbol should have a definition span");
+
+        assert_eq!(
+            def_span.file, helpers_file_id,
+            "Add symbol definition should point to helpers file"
+        );
+    }
+}
