@@ -30,7 +30,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test
+        run: cargo test --workspace
 
   clippy:
     name: Clippy
@@ -42,7 +42,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
-        run: cargo clippy --tests -- -D warnings
+        run: cargo clippy --workspace --tests -- -D warnings
 
   fmt:
     name: Format
