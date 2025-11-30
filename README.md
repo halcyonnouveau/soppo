@@ -30,6 +30,7 @@ cargo install soppo
 - **Named arguments:** `func(name: value)` for clarity
 - **String interpolation:** `"value: {var}"` syntax
 - **Detailed error messages:** Rust-inspired compiler diagnostics
+- **Go interop:** Use any Go library directly
 
 ## Quick Look
 
