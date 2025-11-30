@@ -183,6 +183,9 @@ if _ := colour.(Colour.Red) {
 
 Uses Go's type assertion syntax `.(Type)` but the block only executes if the variant matches. The binding receives the variant's data (inner value for single-value variants, full struct for struct variants).
 
+> [!NOTE]
+> Type assertions behave differently for Soppo enums vs Go interfaces. Enum variant assertions (e.g., `opt.(Option.Some)`) return a nilable pointer for the if-init pattern above. Go interface assertions (e.g., `iface.(int)`) return the actual type, matching standard Go semantics.
+
 ## Error Handling (`?` operator)
 
 Go's `if err != nil { return err }` is verbose and repetitive. The `?` operator reduces boilerplate while keeping error handling explicit and visible.

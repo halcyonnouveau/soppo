@@ -72,13 +72,14 @@ fn extract_nil_check(expr: &Expr) -> Option<NilCheck> {
 }
 
 /// Extract all nil checks from a condition expression
-/// Handles compound conditions with && (e.g., `x != nil && y != nil`)
+/// Handles compound conditions with && and || (e.g., `x != nil && y != nil`)
 pub(super) fn extract_nil_checks(expr: &Expr) -> Vec<NilCheck> {
     let mut checks = Vec::new();
 
     if let ExprKind::Binary { op, left, right } = &expr.kind {
-        // Handle && - collect checks from both sides
-        if matches!(op, BinOp::And) {
+        // Handle && and || - collect checks from both sides
+        // The caller handles the difference: && applies checks as-is, || applies opposite
+        if matches!(op, BinOp::And | BinOp::Or) {
             checks.extend(extract_nil_checks(left));
             checks.extend(extract_nil_checks(right));
             return checks;

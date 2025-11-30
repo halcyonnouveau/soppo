@@ -55,6 +55,7 @@ impl Infer {
             ExprKind::Binary { op, left, right } => {
                 // For && operator, apply short-circuit narrowing:
                 // In `x != nil && f(x)`, x is known non-nil when evaluating f(x)
+                // Left was TRUE, so apply narrowing as-is
                 if matches!(op, BinOp::And) {
                     let left_ty = self.infer_expr(left)?;
                     self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
@@ -64,6 +65,30 @@ impl Infer {
                     self.push_nil_scope();
                     for check in &nil_checks {
                         if check.is_not_nil {
+                            self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
+                        }
+                    }
+                    let right_ty = self.infer_expr(right)?;
+                    self.pop_nil_scope();
+                    self.unify(&right_ty, &Type::simple("bool"), &right.span)?;
+
+                    return Ok(Type::simple("bool"));
+                }
+
+                // For || operator, apply short-circuit narrowing with OPPOSITE logic:
+                // In `x == nil || f(x)`, x is known non-nil when evaluating f(x)
+                // Left was FALSE, so apply the opposite narrowing
+                if matches!(op, BinOp::Or) {
+                    let left_ty = self.infer_expr(left)?;
+                    self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
+
+                    // Extract nil checks from left side and apply OPPOSITE narrowing
+                    let nil_checks = super::stmt::extract_nil_checks(left);
+                    self.push_nil_scope();
+                    for check in &nil_checks {
+                        // Opposite: if left checked `x == nil` (is_not_nil=false),
+                        // and left is false, then x != nil
+                        if !check.is_not_nil {
                             self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
                         }
                     }
@@ -438,12 +463,31 @@ impl Infer {
             }
 
             ExprKind::TypeAssert { expr, ty } => {
-                // Type assertion: x.(Type) - returns a pointer to the asserted type
-                // The pointer is nil if the assertion fails, non-nil if it succeeds
-                // This enables: if x := val.(Type); x != nil { use(x) }
+                // Type assertions have two behaviors:
+                //
+                // 1. Soppo enum variants (e.g., Option.Some, Result.Err):
+                //    Returns a nilable pointer - nil if wrong variant, non-nil if matched.
+                //    Enables: `if x := opt.(Option.Some) { use(x.Value) }`
+                //
+                // 2. Go interface type assertions (e.g., x.(int), x.(MyStruct)):
+                //    Returns the actual type. Should be used with comma-ok syntax:
+                //    `v, ok := iface.(ConcreteType)`
+                //
                 self.infer_expr(expr)?;
-                let inner_ty = Type::simple(&ty.name.replace('.', "_"));
-                Ok(Type::ptr(inner_ty))
+
+                // Soppo enum variants contain a dot (e.g., "Option.Some")
+                let is_enum_variant = ty.name.contains('.');
+
+                if is_enum_variant {
+                    // Enum variant: return pointer for nil-check pattern
+                    let inner_ty = Type::simple(&ty.name.replace('.', "_"));
+                    Ok(Type::ptr(inner_ty).as_nullable())
+                } else {
+                    // Go interface assertion: return the actual type
+                    // TODO: Enforce comma-ok syntax requirement
+                    let target_ty = self.resolve_type(ty);
+                    Ok(target_ty)
+                }
             }
 
             ExprKind::NilAssert { expr } => {

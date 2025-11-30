@@ -74,4 +74,20 @@ func main() {
     // When you know it's non-nil from external context
     user5 := getUser(5)
     fmt.Println(user5.name)
+    // === Nil narrowing preserved in loops ===
+    // Early return before loop
+    user6 := getUser(6)
+    if (user6 == nil) {
+        return
+    }
+    for i := 0; (i < 3); i++ {
+        fmt.Println(user6.name) // user6 is non-nil here
+    }
+    // Nil check with nested loop
+    user7 := getUser(7)
+    if (user7 != nil) {
+        for i := 0; (i < 3); i++ {
+            fmt.Println(user7.name) // user7 is non-nil in this block
+        }
+    }
 }
