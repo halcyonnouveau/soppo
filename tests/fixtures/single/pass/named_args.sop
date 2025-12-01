@@ -39,6 +39,14 @@ func main() {
     // Named arguments with reordering
     fmt.Println(formatPoint(z: 3, x: 1, y: 2))
 
+    // Positional args fill remaining slots after named args reserve theirs
+    // z: 3 reserves slot 2, positional 1 fills slot 0, positional 2 fills slot 1
+    fmt.Println(formatPoint(1, 2, z: 3))
+
+    // Named arg for FIRST param - positional args fill remaining slots
+    // x: 1 reserves slot 0, positional 2 fills slot 1, positional 3 fills slot 2
+    fmt.Println(formatPoint(2, 3, x: 1))
+
     // Variadic with named fixed params
     fmt.Println(log(level: "INFO", msg: "test", 1, 2, 3))
 }

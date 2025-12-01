@@ -164,12 +164,11 @@ func getUser(id int) ?*User {
 }
 
 func main() {
-    user := getUser(1)
+    user := getUser(id: 1)
 
     if user != nil || user == nil {
-        // This will fail to compile because User is nilable
-        // Remove the \`|| user == nil\` from the if statement
-        // to fix it!
+        // This will fail to compile because User is nilable.
+        // Remove the \`|| user == nil\` from the if statement to fix it!
         fmt.Println("Name:", user.name)
 
         if user.profile != nil {
@@ -177,7 +176,7 @@ func main() {
         }
     }
 
-    user2 := getUser(0)
+    user2 := getUser(id: 0)
     if user2 == nil {
         fmt.Println("User not found")
         return
@@ -219,7 +218,7 @@ func main() {
     results := make(chan Result, numJobs)
 
     for w := 1; w <= numWorkers; w++ {
-        go worker(id: w, jobs: jobs, results: results)
+        go worker(jobs, results, id: w)
     }
 
     for j := 1; j <= numJobs; j++ {

@@ -412,39 +412,39 @@ impl Codegen {
         if let Some(param_names) = param_names {
             // Reorder based on parameter names
             // Rules:
-            // - Positional args before any named arg fill fixed params in order
-            // - Named args fill their named slots
-            // - Positional args after a named arg go to variadic
+            // - Named args reserve their specific slots first
+            // - Positional args fill remaining slots in order
+            // - Extra positional args go to variadic
             let mut result: Vec<Option<&Expr>> = vec![None; param_names.len()];
             let mut variadic_args: Vec<&Expr> = Vec::new();
-            let mut seen_named = false;
-            let mut next_positional_idx = 0;
+            let mut positional_args: Vec<&Expr> = Vec::new();
 
+            // First pass: process named args to reserve slots, collect positional args
             for (name, arg) in args {
                 match name {
                     Some((n, _)) => {
-                        seen_named = true;
                         if let Some(idx) = param_names.iter().position(|p| p == n) {
                             result[idx] = Some(arg);
                         }
                     }
                     None => {
-                        if seen_named {
-                            // Positional after named goes to variadic
-                            variadic_args.push(arg);
-                        } else {
-                            // Positional before any named fills fixed params
-                            if next_positional_idx < param_names.len() {
-                                result[next_positional_idx] = Some(arg);
-                                next_positional_idx += 1;
-                            } else {
-                                // Extra positional goes to variadic
-                                variadic_args.push(arg);
-                            }
-                        }
+                        positional_args.push(arg);
                     }
                 }
             }
+
+            // Second pass: fill remaining slots with positional args
+            let mut positional_iter = positional_args.into_iter();
+            for slot in result.iter_mut() {
+                if slot.is_none()
+                    && let Some(arg) = positional_iter.next()
+                {
+                    *slot = Some(arg);
+                }
+            }
+
+            // Any remaining positional args go to variadic
+            variadic_args.extend(positional_iter);
 
             // Collect results (type checker already validated all are filled)
             let mut ordered: Vec<&Expr> = result.into_iter().flatten().collect();

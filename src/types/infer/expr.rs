@@ -1444,14 +1444,16 @@ impl Infer {
         } else if let Some(param_names) = &param_names {
             // We have named args and know parameter names - reorder
             // Rules:
-            // - Positional args before any named arg fill fixed params in order
-            // - Named args fill their named slots
-            // - Positional args after a named arg go to variadic
+            // - Named args reserve their specific slots first
+            // - Positional args fill remaining slots in order
+            // - Positional args after named args only allowed for variadic functions
+            // - Extra positional args go to variadic
             let mut result: Vec<Option<(&Expr, Span)>> = vec![None; param_names.len()];
             let mut variadic_args: Vec<(&Expr, Span)> = Vec::new();
+            let mut positional_args: Vec<&Expr> = Vec::new();
             let mut seen_named = false;
-            let mut next_positional_idx = 0;
 
+            // First pass: process named args to reserve their slots, collect positional args
             for (name, arg_expr) in args {
                 match name {
                     Some((n, name_span)) => {
@@ -1472,27 +1474,31 @@ impl Infer {
                         }
                     }
                     None => {
-                        if seen_named {
-                            // Positional after named - only allowed for variadic functions
-                            if !is_variadic {
-                                return Err(SoppoError::Type {
-                                    message: "Positional argument cannot follow named argument (non-variadic function)".to_string(),
-                                    span: arg_expr.span,
-                                });
-                            }
-                            variadic_args.push((arg_expr, arg_expr.span));
-                        } else {
-                            // Positional before any named fills fixed params
-                            if next_positional_idx < param_names.len() {
-                                result[next_positional_idx] = Some((arg_expr, arg_expr.span));
-                                next_positional_idx += 1;
-                            } else {
-                                // Extra positional goes to variadic
-                                variadic_args.push((arg_expr, arg_expr.span));
-                            }
+                        // Positional after named - only allowed for variadic functions
+                        if seen_named && !is_variadic {
+                            return Err(SoppoError::Type {
+                                message: "Positional argument cannot follow named argument (non-variadic function)".to_string(),
+                                span: arg_expr.span,
+                            });
                         }
+                        positional_args.push(arg_expr);
                     }
                 }
+            }
+
+            // Second pass: fill remaining slots with positional args
+            let mut positional_iter = positional_args.into_iter();
+            for slot in result.iter_mut() {
+                if slot.is_none()
+                    && let Some(arg_expr) = positional_iter.next()
+                {
+                    *slot = Some((arg_expr, arg_expr.span));
+                }
+            }
+
+            // Any remaining positional args go to variadic
+            for arg_expr in positional_iter {
+                variadic_args.push((arg_expr, arg_expr.span));
             }
 
             // Check all required params are provided
