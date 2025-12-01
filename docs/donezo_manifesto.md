@@ -5,7 +5,7 @@ I'd like to present to you Soppo's raison d'être:
 ![screenshot of me complaining about dingo](./assets/donezo_1.png)
 
 > So I'm making a callout post on my Twitter.com: Claude, you've got a small dick. It's the size of this walnut except WAY smaller. And guess what? Here's what my dong looks like.
-> 
+>
 > [Explosion sounds] That's right, baby. All points, no quills, no pillows — look at that, it looks like two balls and a bong. He fucked my wife, so guess what, I'm gonna fuck the Earth. That's right, this is what you get: MY SUPER LASER PISS!! Except I'm not gonna piss on the Earth, I'm gonna go higher; I'M PISSING ON THE MOON! How do you like that, Obama?! I PISSED ON THE MOON, YOU IDIOT!
 >
 > [https://www.youtube.com/watch?v=9XyEosgoGgg](https://www.youtube.com/watch?v=9XyEosgoGgg)
@@ -31,7 +31,7 @@ Okay enough of the shit, what's up with Dingo? I think I can just go through the
 > Dingo is a language that compiles to clean, idiomatic Go code. Not some franken-runtime or a whole new ecosystem. Just better syntax that becomes regular Go.
 >
 > The pitch: Write code with Result types, pattern matching, and null safety. Get back perfect Go code that your team can read, your tools can process, and your production servers can run at exactly the same speed.
-> 
+>
 > Zero runtime overhead. Zero new dependencies. Zero "what's this weird thing in my transpiled code?"
 >
 > Is this proven to work? Yes. Borgo (4.5k stars) already proved you can transpile to Go successfully. Dingo builds on that foundation with better IDE integration, source maps, and a pure Go implementation.
@@ -44,7 +44,7 @@ A specific design goal of TypeScript is to "[impose no runtime overhead on emitt
 
 Dingo also says it has "zero runtime overhead", which is just a fucking lie.
 
-Dingo generates code. Your enum becomes a tagged struct with a tag field, pointer fields for each variant's data, constructor functions, and helper methods. Your `Result<int>` isn't just `(int, error)` - it's a whole struct with `IsOk()`, `IsErr()`, `Unwrap()`, `UnwrapOr()`, `Map()`, etc. 
+Dingo generates code. Your enum becomes a tagged struct with a tag field, pointer fields for each variant's data, constructor functions, and helper methods. Your `Result<int>` isn't just `(int, error)` - it's a whole struct with `IsOk()`, `IsErr()`, `Unwrap()`, `UnwrapOr()`, `Map()`, etc.
 
 This is real boilerplate code that executes at runtime. Extra allocations, extra indirection, extra function calls. You could say "minimal" if you have numbers to back it up (which wouldn't be hard, because I'm sure it doesn't have much of an impact), but "zero"? Fuck off with that shit.
 
@@ -54,12 +54,12 @@ However, I can attest - there are some nice things that come with a Go implement
 
 But that's also because of the different architectures between the two. At the time of writing, and from what I understand after reading the code - Dingo does not do any type checking, it's a simple syntax transform and codegen, then it hands it off to Go. It's basically a fancy preprocessor.
 
-This is not the correct approach. I don't understand why you'd add a new type (`enum`), but not type check it properly. Yes, Dingo does attempt exhaustiveness checking - but it's done by pattern matching on variant names like "Ok" and "Err", not actual type information. It only works for built-in types (`Result`, `Option`) and falls back to "cannot determine type, skip exhaustiveness check" for anything it doesn't recognise. 
+This is not the correct approach. I don't understand why you'd add a new type (`enum`), but not type check it properly. Yes, Dingo does attempt exhaustiveness checking - but it's done by pattern matching on variant names like "Ok" and "Err", not actual type information. It only works for built-in types (`Result`, `Option`) and falls back to "cannot determine type, skip exhaustiveness check" for anything it doesn't recognise.
 
 And even after checking, they still add a `panic` to "unreachable" parts of the generated code because Go's compiler doesn't know the match is complete. "Unreachable" or not (I seriously doubt every case this gets added in is actually unreachable), I don't think you should ever be adding panics to your generated code.
 
 > Ever wonder what a dingo actually is?
-> 
+>
 > Thousands of years ago, they were domesticated dogs. Well-behaved. Following commands. Controlled.
 >
 > Then they escaped to the Australian wild and evolved into something science couldn't categorize. Not quite dog. Not quite wolf. Ungovernable.
@@ -149,7 +149,7 @@ Functional constructs outside of non-functional languages are overrated.
 
 In functional languages, `map`, `filter`, and `reduce` aren't valuable for what they do directly. They're valuable because they compose with other recursion schemes - calling a function `map` doesn't give you the same `map` you'd have in OCaml.
 
-OCaml's `map` over a list is a specialisation of a more general pattern: a functor. This means you can swap in a different data structure (trees, options, results) and map still works, with the same laws and guarantees. In JavaScript, `Array.prototype.map` is just a method on arrays. It doesn't compose with anything. You can't generalise it, swap the container, or build larger abstractions from it. 
+OCaml's `map` over a list is a specialisation of a more general pattern: a functor. This means you can swap in a different data structure (trees, options, results) and map still works, with the same laws and guarantees. In JavaScript, `Array.prototype.map` is just a method on arrays. It doesn't compose with anything. You can't generalise it, swap the container, or build larger abstractions from it.
 
 There's also a performance cost. Chaining `map`, `filter`, and `reduce` in most languages creates intermediate arrays at each step. Instead of one loop doing 3 things, you get 3 loops producing 3 arrays. Haskell solves this with fusion optimisations that collapse the chain back into a single pass. Rust solves it with lazy evaluation. Go does NOT solve this because it was never designed to.
 
@@ -203,14 +203,12 @@ Notice the inversion. The structured representation comes after the main transfo
 
 The "Plugins" step exists because regex can't do semantic work. It can transform `x?` into `error` handling boilerplate, but it can't figure out types. So plugins walk the Go AST looking for patterns - see a function call named `Ok`? That's probably a `Result` constructor, so infer the type, generate a struct declaration, and rewrite the call. It's pattern matching on names, not actual Dingo semantics.
 
-This is the core issue - the fragile tool (regex) does 90% of the work, and the reliable tool (AST plugins) just does cleanup. The division of labour is backwards.
+The division of labour is backwards, and as a result:
 
-And as a result:
+- Without a type checker to check Dingo types, exhaustiveness checking can only recognise hardcoded built-in types like `Result` and `Option` by matching on variant names - user-defined enums can't be checked because there's no type information to know which enum a value belongs to
+- It would be difficult to build a formatter, linter, or proper LSP (not just relying on gopls - I'm not sure how far you could go with that) because there's no Dingo AST to work with
 
-1. No error recovery: if regex breaks, you get Go parser errors pointing at generated code, not your Dingo source
-2. Limited analysis: plugins are pattern-matching on Go AST, not Dingo structure. Exhaustiveness only works for hardcoded types
-3. No reliable transforms: regex can't count braces, can't handle nesting, can't know if it's in a string - and it's on the critical path
-4. No tooling foundation: can't build a formatter, linter, or proper LSP (not just relying on `gopls`) because there's no Dingo AST to work with (also yes I'm aware of the "source maps", but like... source maps? really?)
+Fixing these issues likely requires building most of a proper frontend anyway, at which point you might as well design it coherently from the start.
 
 > Update 2025-11-30:
 >
@@ -222,7 +220,7 @@ And as a result:
 >
 > Like that's basically the standard architecture I've been talking about. So if it is moving towards this, fair enough I guess? Most of my critiques at that point will become invalid.
 >
-> I just don't understand why it wasn't done like this in the first place. It's not like it's much slower to prove out or anything (I mean... just look at Soppo), and it's going to take a lot longer to fix (and thus cost more... because AI) than just doing it right the first time. 
+> I just don't understand why it wasn't done like this in the first place. It's not like it's much slower to prove out or anything (I mean... just look at Soppo), and it's going to take a lot longer to fix (and thus cost more... because AI) than just doing it right the first time.
 >
 > Anyway, I think I'm done trying to read this code ever again - it genuinely hurts my brain.
 
@@ -230,11 +228,11 @@ If this were a human writing it, I'd tell them to read one of the canonical book
 
 I'm completely speculating here, but I think Dingo's architecture emerged because Claude started using regex first as it's simple and handles most syntax transforms, along with using Go's parser because why bother making your own?
 
-Then plugins then came to fill the gap for things regex can't handle. I mean, I honestly doubt this is correct - but it really *feels* like it, and that isn't a good sign. 
+Then plugins then came to fill the gap for things regex can't handle. I mean, I honestly doubt this is correct - but it really *feels* like it, and that isn't a good sign.
 
-The "extensible plugin system" framing is optimistic. Yes, someone could theoretically write a plugin, but they'd need to understand Go's AST types, what the regex stage already transformed, and how to coordinate with other plugins in order to not break each other. 
+The "extensible plugin system" framing is optimistic. Yes, someone could theoretically write a plugin, but they'd need to understand Go's AST types, what the regex stage already transformed, and how to coordinate with other plugins in order to not break each other.
 
-I think it would be more accurate to say plugins are more how Dingo organises its internal code than a community extension point. Though I think it would be nice to be proven wrong, as it's an interesting idea *in theory*, but there's probably a reason other languages haven't done it. 
+I think it would be more accurate to say plugins are more how Dingo organises its internal code than a community extension point. Though I think it would be nice to be proven wrong, as it's an interesting idea *in theory*, but there's probably a reason other languages haven't done it.
 
 Although, if Dingo managed to actually get plugins working in a reliable state in this fucked up bizarro world architecture, that would be a much greater achievement than just "making a better Go" and its innovation in compiler design should be shown off front and centre of the project instead.
 

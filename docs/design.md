@@ -271,7 +271,7 @@ fmt.Println(result.name)    // OK: result is non-nil after guard
 Some expressions are guaranteed non-nil:
 - `&expr` (address-of) - always points to a valid value
 - `new(T)` - allocates and returns a valid pointer
-- Nilable results after `?` succeeds 
+- Nilable results after `?` succeeds
 ```go
 ptr := &User{}              // *User (non-nilable)
 newUser := new(User)        // *User (non-nilable)
@@ -331,7 +331,7 @@ Variadic parameters are always positional at the end:
 
 ```go
 func log(level string, msgs ...string)
-log(level: "info", "msg1", "msg2") 
+log(level: "info", "msg1", "msg2")
 ```
 
 ## String Interpolation
@@ -386,18 +386,17 @@ Soppo-generated Go code includes special markers that preserve type information 
 
 type User struct {
 	Name  string
-	Address *Address //soppo:nilable 
+	Address *Address //soppo:nilable
 }
 ```
 
 When importing a Go package with `//soppo:generated`:
-- Struct fields with `//soppo:nilable` are treated as nilable
-- Struct fields WITHOUT the marker are non-nilable (even pointer types)
+- Fields with `//soppo:nilable` are treated as nilable
+- Fields **without** the marker are non-nilable
 - Types marked `//soppo:enum` support pattern matching
 
 When importing regular Go packages (no marker):
-- All pointer/slice/map/chan/func/interface types are assumed nilable 
-- No enum support (treated as regular structs)
+- All pointer/slice/map/chan/func/interface types are assumed nilable
 
 This allows Soppo projects to depend on generated Go from other Soppo projects while preserving nil safety guarantees.
 
