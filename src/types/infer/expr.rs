@@ -921,6 +921,9 @@ impl Infer {
                     // Validate type arg constraints
                     for (generic_param, type_arg) in type_def.generics.iter().zip(type_args.iter())
                     {
+                        // Validate the type argument is a real type
+                        self.validate_type_arg(type_arg)?;
+
                         let concrete_ty = self.resolve_type(type_arg);
                         if !generic_param.satisfies(&concrete_ty) {
                             return Err(SoppoError::ConstraintNotSatisfied {
@@ -965,6 +968,7 @@ impl Infer {
                 }
                 // Return the type being made (properly resolving type args)
                 let ty = &type_args[0];
+                self.validate_type_arg(ty)?;
                 return Ok(self.resolve_type(ty));
             }
 
@@ -972,6 +976,7 @@ impl Infer {
                 // new(type) - returns *type
                 // Return a pointer to the type
                 let ty = &type_args[0];
+                self.validate_type_arg(ty)?;
                 let inner_ty = self.resolve_type(ty);
                 // Use *{type} naming pattern consistent with UnaryOp::Ref
                 let ptr_name = format!("*{}", inner_ty);
@@ -1369,6 +1374,9 @@ impl Infer {
                     if !type_args.is_empty() {
                         // Explicit type args provided: validate constraints and use them
                         for (generic_param, type_arg) in generics.iter().zip(type_args.iter()) {
+                            // Validate the type argument is a real type
+                            self.validate_type_arg(type_arg)?;
+
                             let concrete_ty = self.resolve_type(type_arg);
 
                             // Validate constraint

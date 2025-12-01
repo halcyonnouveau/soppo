@@ -69,12 +69,12 @@ type Result[T any, E any] enum {
 func main() {
     x := Option.Some(42)
     y := Option.Some("hello")
-    z := Option.Some[int](100)
+    z := Option.None[string]
 
     r1 := Result.Ok[int, string](1)
     r2 := Result.Err[int, string]("failed")
 
-    fmt.Printf("%v %v %v %v %v\\n", x, y, z, r1, r2)
+    fmt.Println("{x} {y} {z} {r1} {r2}")
 }
 `,
     "String Interpolation": `package main
@@ -166,8 +166,10 @@ func getUser(id int) ?*User {
 func main() {
     user := getUser(1)
 
-    // After nil check, user is known to be non-nil
-    if user != nil {
+    if user != nil || user == nil {
+        // This will fail to compile because User is nilable
+        // Remove the \`|| user == nil\` from the if statement
+        // to fix it!
         fmt.Println("Name:", user.name)
 
         if user.profile != nil {
@@ -175,12 +177,13 @@ func main() {
         }
     }
 
-    // Early return pattern
     user2 := getUser(0)
     if user2 == nil {
         fmt.Println("User not found")
         return
     }
+
+    // This works because of the early return
     fmt.Println(user2.name)
 }
 `,
@@ -512,8 +515,7 @@ func main() {
   }
 
   .output-panel {
-    height: 300px;
-    min-height: 200px;
+    height: 250px;
     border-top: 1px solid #3c3c3c;
   }
 

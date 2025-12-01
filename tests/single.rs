@@ -108,6 +108,7 @@ mod fail {
         try_no_space,
         type_mismatch,
         undeclared_variable,
+        undefined_type_arg,
         var_no_type_or_value,
     );
 }

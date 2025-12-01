@@ -1,0 +1,11 @@
+package main
+
+type Option[T any] enum {
+	Some struct { value T }
+	None
+}
+
+func main() {
+	x := Option.None[String]
+	_ = x
+}

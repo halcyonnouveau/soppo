@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use super::ctx::GlobalCtxt;
 use super::symbols::{SymbolInfo, SymbolKind, SymbolTable};
 use super::ty::{Nullability, Type};
-use crate::error::SoppoError;
+use crate::error::{Result, SoppoError};
 use crate::go::{GoCache, Project, parse_go_type};
 use crate::syntax::{
     Expr, ExprKind, Import, ModuleId, Span, Symbol, TypeAnnotation as AstType, UnaryOp,
@@ -1239,6 +1239,70 @@ impl Infer {
             args,
             nullable: ast_ty.nullable,
         }
+    }
+
+    /// Validate that a type annotation refers to a real type.
+    /// This catches errors like `Option.None[String]` where `String` isn't a valid Go type.
+    pub(super) fn validate_type_arg(&self, ast_ty: &AstType) -> Result<()> {
+        let name = &ast_ty.name;
+
+        // Generic parameters are always valid (they're checked elsewhere)
+        if self.generic_params.contains_key(name) {
+            return Ok(());
+        }
+
+        // Primitive types are valid
+        if is_primitive_type(name) {
+            return Ok(());
+        }
+
+        // Qualified types (pkg.Type) are assumed valid (external types)
+        if name.contains('.') {
+            // Recursively validate type arguments
+            for arg in &ast_ty.args {
+                self.validate_type_arg(arg)?;
+            }
+            return Ok(());
+        }
+
+        // Constructed types - validate inner types recursively
+        if name.starts_with('*')
+            || name.starts_with("[]")
+            || name.starts_with("map[")
+            || name.starts_with("chan ")
+            || name.starts_with("func(")
+            || name.starts_with("...")
+        {
+            for arg in &ast_ty.args {
+                self.validate_type_arg(arg)?;
+            }
+            return Ok(());
+        }
+
+        // Check if it's a known type in the current module
+        if self.global_state.lookup_type(name).is_some() {
+            // Recursively validate type arguments
+            for arg in &ast_ty.args {
+                self.validate_type_arg(arg)?;
+            }
+            return Ok(());
+        }
+
+        // Check if it's a known type in any imported Soppo module
+        for module_id in self.soppo_imports.values() {
+            if self.global_state.lookup_type_in(module_id, name).is_some() {
+                for arg in &ast_ty.args {
+                    self.validate_type_arg(arg)?;
+                }
+                return Ok(());
+            }
+        }
+
+        // Not a valid type
+        Err(SoppoError::Type {
+            message: format!("cannot find type `{}` in this scope", name),
+            span: ast_ty.span,
+        })
     }
 
     /// Instantiate a Type by substituting generic parameters with concrete types
