@@ -6,11 +6,11 @@ use super::source::{FileId, LineColumn, Span};
 #[logos(skip r"[ \t\f]+")]
 pub enum Token {
     // Single-line comment: // ...
-    #[regex(r"//[^\n]*", callback = |lex| lex.slice().to_string())]
+    #[regex(r"//[^\n]*", allow_greedy = true, callback = |lex| lex.slice().to_string())]
     LineComment(String),
 
     // Multi-line comment: /* ... */
-    #[regex(r"/\*([^*]|\*[^/])*\*/", callback = |lex| lex.slice().to_string())]
+    #[regex(r"/\*([^*]|\*[^/])*\*/", allow_greedy = true, callback = |lex| lex.slice().to_string())]
     BlockComment(String),
 
     #[regex(r"\n+")]
@@ -84,7 +84,7 @@ pub enum Token {
     String(String),
 
     // Raw string (backtick): `...` - no escape processing, can span lines
-    #[regex(r"`[^`]*`", |lex| {
+    #[regex(r"`[^`]*`", allow_greedy = true, callback = |lex| {
         let s = lex.slice();
         s[1..s.len()-1].to_string()
     })]
