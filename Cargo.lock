@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "soppo"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "clap",
  "insta",
@@ -1027,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "soppo-lsp"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "futures",
  "miette",
