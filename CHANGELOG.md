@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/halcyonnouveau/soppo/compare/v0.4.0...v0.4.1) - 2025-12-09
+
+### Fixed
+
+- named argument slot filling
+- validate type arguments are real types
+
 ## [0.4.0](https://github.com/halcyonnouveau/soppo/compare/v0.3.1...v0.4.0) - 2025-11-30
 
 ### Fixed
