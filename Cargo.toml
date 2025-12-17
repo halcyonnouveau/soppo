@@ -36,8 +36,21 @@ tree-sitter = "0.26"
 tree-sitter-go = "0.25"
 
 [dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
 insta = "1.44"
 proptest = "1.9"
 regex = "1.11"
 tempfile = "3.23"
 toml = "0.9"
+
+[[bench]]
+name = "compiler"
+harness = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.bench]
+lto = true

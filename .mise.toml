@@ -30,3 +30,15 @@ run = [
     "mkdir -p fuzz/corpus/compile",
     "cargo +nightly fuzz run compile fuzz/corpus/compile tests/fixtures/single/pass"
 ]
+
+[tasks.bench]
+description = "Run benchmarks"
+run = "cargo bench --bench compiler"
+
+[tasks."bench:save"]
+description = "Run benchmarks and save baseline"
+run = "cargo bench --bench compiler -- --save-baseline main"
+
+[tasks."bench:compare"]
+description = "Compare benchmarks against saved baseline"
+run = "cargo bench --bench compiler -- --baseline main"

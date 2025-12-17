@@ -1,11 +1,36 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use miette::{Diagnostic, Result};
 use serde::Deserialize;
 use thiserror::Error;
 
 use super::project::Project;
+
+/// Cached Go environment variables (GOROOT, GOMODCACHE).
+static GO_ENV: OnceLock<GoEnv> = OnceLock::new();
+
+struct GoEnv {
+    goroot: PathBuf,
+    gomodcache: PathBuf,
+}
+
+fn get_cached_go_env() -> Result<&'static GoEnv> {
+    if let Some(env) = GO_ENV.get() {
+        return Ok(env);
+    }
+
+    let goroot = get_go_env("GOROOT")?;
+    let gomodcache = get_go_env("GOMODCACHE")?;
+
+    let _ = GO_ENV.set(GoEnv {
+        goroot: PathBuf::from(goroot),
+        gomodcache: PathBuf::from(gomodcache),
+    });
+
+    Ok(GO_ENV.get().unwrap())
+}
 
 #[derive(Error, Diagnostic, Debug)]
 pub enum ResolveError {
@@ -50,14 +75,12 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    /// Create a new resolver by querying Go environment
+    /// Create a new resolver using cached Go environment
     pub fn new() -> Result<Self> {
-        let goroot = get_go_env("GOROOT")?;
-        let gomodcache = get_go_env("GOMODCACHE")?;
-
+        let env = get_cached_go_env()?;
         Ok(Self {
-            goroot: PathBuf::from(goroot),
-            gomodcache: PathBuf::from(gomodcache),
+            goroot: env.goroot.clone(),
+            gomodcache: env.gomodcache.clone(),
         })
     }
 
