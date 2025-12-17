@@ -40,6 +40,31 @@ impl Parser {
         self.parse_binary(0)
     }
 
+    /// Parse a unary operator expression
+    fn parse_unary(&mut self, op: UnaryOp, start_span: Span, use_postfix: bool) -> Result<Expr> {
+        let operand = if use_postfix {
+            self.parse_postfix()?
+        } else {
+            self.parse_primary()?
+        };
+
+        let end_span = operand.span;
+
+        Ok(Expr {
+            kind: ExprKind::Unary {
+                op,
+                operand: Box::new(operand),
+            },
+            span: Span::with_bytes(
+                start_span.start,
+                end_span.end,
+                self.file,
+                start_span.byte_start,
+                end_span.byte_end,
+            ),
+        })
+    }
+
     /// Parse binary operations with precedence
     fn parse_binary(&mut self, min_prec: u8) -> Result<Expr> {
         let mut left = self.parse_postfix()?;
@@ -581,104 +606,12 @@ impl Parser {
         })?;
 
         match tok {
-            // Unary operators
-            Token::Ampersand => {
-                // &x - address of (parse_postfix to allow &Type{...})
-                let operand = self.parse_postfix()?;
-                let end_span = operand.span;
-                Ok(Expr {
-                    kind: ExprKind::Unary {
-                        op: UnaryOp::Ref,
-                        operand: Box::new(operand),
-                    },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
-                })
-            }
-
-            Token::Star => {
-                // *p - dereference (when used as unary prefix)
-                // Use parse_postfix so *user.Email parses as *(user.Email)
-                let operand = self.parse_postfix()?;
-                let end_span = operand.span;
-                Ok(Expr {
-                    kind: ExprKind::Unary {
-                        op: UnaryOp::Deref,
-                        operand: Box::new(operand),
-                    },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
-                })
-            }
-
-            Token::Minus => {
-                // -x - negation
-                // Use parse_postfix so -obj.field parses as -(obj.field)
-                let operand = self.parse_postfix()?;
-                let end_span = operand.span;
-                Ok(Expr {
-                    kind: ExprKind::Unary {
-                        op: UnaryOp::Neg,
-                        operand: Box::new(operand),
-                    },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
-                })
-            }
-
-            Token::Not => {
-                // !x - logical not
-                // Use parse_postfix so !obj.valid parses as !(obj.valid)
-                let operand = self.parse_postfix()?;
-                let end_span = operand.span;
-                Ok(Expr {
-                    kind: ExprKind::Unary {
-                        op: UnaryOp::Not,
-                        operand: Box::new(operand),
-                    },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
-                })
-            }
-
-            Token::Arrow => {
-                // <-ch - channel receive
-                let operand = self.parse_primary()?;
-                let end_span = operand.span;
-                Ok(Expr {
-                    kind: ExprKind::Unary {
-                        op: UnaryOp::Recv,
-                        operand: Box::new(operand),
-                    },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
-                })
-            }
+            // Unary operators (use parse_postfix so &Type{}, *user.Email, etc. work)
+            Token::Ampersand => self.parse_unary(UnaryOp::Ref, span, true),
+            Token::Star => self.parse_unary(UnaryOp::Deref, span, true),
+            Token::Minus => self.parse_unary(UnaryOp::Neg, span, true),
+            Token::Not => self.parse_unary(UnaryOp::Not, span, true),
+            Token::Arrow => self.parse_unary(UnaryOp::Recv, span, false),
 
             Token::Integer(n) => Ok(Expr {
                 kind: ExprKind::Integer(n),

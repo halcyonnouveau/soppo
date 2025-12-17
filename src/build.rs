@@ -147,24 +147,8 @@ pub fn build_project_to_disk(root: &Path, output_dir: Option<&Path>) -> Result<u
 
 /// Compile a single source string
 pub fn compile(source: &str, filename: &str) -> Result<String> {
-    let mut parser = Parser::new(source, FileId(0));
-    let file = parser.parse_file().map_err(|e| {
-        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
-    })?;
-
     let mut infer = Infer::new()?;
-    infer.process_imports(&file.imports);
-
-    // Two-pass type checking:
-    // Pass 1: Register all type definitions and function signatures
-    for decl in &file.decls {
-        register_decl(&mut infer, decl, source, filename)?;
-    }
-
-    // Pass 2: Infer and check function bodies
-    for decl in &file.decls {
-        infer_decl(&mut infer, decl, source, filename)?;
-    }
+    let file = parse_and_typecheck(source, filename, &mut infer)?;
 
     let global_state = infer.into_global_state();
     let mut codegen = Codegen::with_global_state(global_state);
@@ -185,14 +169,8 @@ pub fn compile_with_context(
     module_id: &str,
     project_root: &Path,
 ) -> Result<(String, GlobalCtxt)> {
-    let mut parser = Parser::new(source, FileId(0));
-    let file = parser.parse_file().map_err(|e| {
-        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
-    })?;
-
     global_ctxt.set_current_module(ModuleId::new(module_id));
 
-    // Create project context for import resolution
     let project = Project {
         root: project_root.to_path_buf(),
         module_path: module_path.to_string(),
@@ -200,18 +178,7 @@ pub fn compile_with_context(
     };
 
     let mut infer = Infer::with_global_state_and_project(global_ctxt, project)?;
-    infer.process_imports(&file.imports);
-
-    // Two-pass type checking:
-    // Pass 1: Register all type definitions and function signatures
-    for decl in &file.decls {
-        register_decl(&mut infer, decl, source, filename)?;
-    }
-
-    // Pass 2: Infer and check function bodies
-    for decl in &file.decls {
-        infer_decl(&mut infer, decl, source, filename)?;
-    }
+    let file = parse_and_typecheck(source, filename, &mut infer)?;
 
     let global_state = infer.into_global_state();
     let mut codegen = Codegen::with_module_info(
@@ -235,29 +202,37 @@ pub fn typecheck(source: &str, filename: &str) -> Result<()> {
 /// Type-check a single source string and return the symbol table.
 /// Used by the LSP for hover and go-to-definition.
 pub fn typecheck_with_symbols(source: &str, filename: &str) -> Result<SymbolTable> {
+    let mut infer = Infer::new()?;
+    parse_and_typecheck(source, filename, &mut infer)?;
+    Ok(infer.into_symbols())
+}
+
+/// Parse source and run two-pass type checking
+fn parse_and_typecheck(
+    source: &str,
+    filename: &str,
+    infer: &mut Infer,
+) -> Result<crate::syntax::File> {
     let mut parser = Parser::new(source, FileId(0));
     let file = parser.parse_file().map_err(|e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
     })?;
 
-    let mut infer = Infer::new()?;
     infer.process_imports(&file.imports);
 
-    // Two-pass type checking:
     // Pass 1: Register all type definitions and function signatures
     for decl in &file.decls {
-        register_decl(&mut infer, decl, source, filename)?;
+        register_decl(infer, decl, source, filename)?;
     }
 
     // Pass 2: Infer and check function bodies
     for decl in &file.decls {
-        infer_decl(&mut infer, decl, source, filename)?;
+        infer_decl(infer, decl, source, filename)?;
     }
 
-    Ok(infer.into_symbols())
+    Ok(file)
 }
 
-/// Pass 1: Register type definitions and function signatures (no body checking)
 fn register_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
     let add_source = |e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
@@ -286,7 +261,6 @@ fn register_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -
     Ok(())
 }
 
-/// Pass 2: Infer and check function bodies (consts and types already processed in pass 1)
 fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
     let add_source = |e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
