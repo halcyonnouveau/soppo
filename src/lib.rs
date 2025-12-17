@@ -2,6 +2,7 @@
 
 pub mod build;
 pub mod codegen;
+pub mod config;
 pub mod deps;
 pub mod error;
 pub mod go;

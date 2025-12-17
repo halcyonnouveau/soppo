@@ -7,7 +7,7 @@ expression: format_results(& results)
 package main
 
 import "fmt"
-import "github.com/test/simple/gen/helpers"
+import "github.com/test/simple/helpers"
 
 func main() {
     result := helpers.Add(1, 2)

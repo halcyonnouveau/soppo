@@ -7,7 +7,7 @@ expression: format_results(& results)
 package main
 
 import "fmt"
-import u "github.com/test/aliased/gen/mathutil"
+import u "github.com/test/aliased/mathutil"
 
 func main() {
     result := u.Multiply(3, 4)

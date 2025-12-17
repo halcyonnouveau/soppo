@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use miette::{Diagnostic, Result};
 use thiserror::Error;
 
+use crate::config::SopConfig;
+
 #[derive(Error, Diagnostic, Debug)]
 pub enum ProjectError {
     #[error("No go.mod found (searched from {0} to filesystem root)")]
@@ -22,10 +24,13 @@ pub struct Project {
     pub root: PathBuf,
     /// Go module path (e.g., "github.com/user/project")
     pub module_path: String,
+    /// Optional sop.mod configuration
+    pub config: Option<SopConfig>,
 }
 
 impl Project {
-    /// Walk up from `start` to find go.mod and create Project
+    /// Walk up from `start` to find go.mod and create Project.
+    /// Also loads sop.mod if present in the same directory.
     pub fn discover(start: &Path) -> Result<Project> {
         let mut current = start.to_path_buf();
 
@@ -33,9 +38,14 @@ impl Project {
             let go_mod = current.join("go.mod");
             if go_mod.exists() {
                 let module_path = parse_go_mod(&go_mod)?;
+
+                // Try to load sop.mod from the same directory
+                let config = SopConfig::load(&current).ok().flatten();
+
                 return Ok(Project {
                     root: current,
                     module_path,
+                    config,
                 });
             }
 
@@ -45,12 +55,18 @@ impl Project {
         }
     }
 
-    /// Find all .sop files in the project (recursive, excluding gen/, vendor/, testdata/, dotdirs)
+    /// Find all .sop files in the project.
+    /// If sop.mod exists with include patterns, use those.
+    /// Otherwise, use default recursive search (excluding gen/, vendor/, testdata/, dotdirs).
     pub fn find_sources(&self) -> Vec<PathBuf> {
-        let mut sources = Vec::new();
-        find_sop_files(&self.root, &mut sources);
-        sources.sort();
-        sources
+        if let Some(ref config) = self.config {
+            config.find_files()
+        } else {
+            let mut sources = Vec::new();
+            find_sop_files(&self.root, &mut sources);
+            sources.sort();
+            sources
+        }
     }
 
     /// Map a source path to its output path under the output directory

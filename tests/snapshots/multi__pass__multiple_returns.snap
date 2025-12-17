@@ -7,7 +7,7 @@ expression: format_results(& results)
 package main
 
 import "fmt"
-import "github.com/test/multiret/gen/helpers"
+import "github.com/test/multiret/helpers"
 
 func main() {
     num, str := helpers.GetPair()

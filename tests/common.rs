@@ -49,10 +49,6 @@ pub fn compile_soppo_file(input_file: &str) -> Result<String, String> {
     }
 }
 
-// ============================================================================
-// Multi-file test helpers
-// ============================================================================
-
 /// Parse test.toml configuration from a fixture directory
 pub fn parse_test_toml(path: &Path) -> TestConfig {
     let content = fs::read_to_string(path).expect("Failed to read test.toml");
@@ -124,7 +120,7 @@ fn build_test_project(
     // Create go.mod
     fs::write(
         root.join("go.mod"),
-        format!("module {}\n\ngo 1.23\n", module_name),
+        format!("module {}\n\ngo 1.25\n", module_name),
     )
     .expect("Failed to write go.mod");
 
@@ -147,52 +143,41 @@ fn build_test_project(
     }
 
     // Build using the library directly
+    // Output goes next to source files (None means no separate output dir)
     let results = soppo::build::build_project(root, None).map_err(|e| {
         // Render the full miette diagnostic for better error messages
         format!("{:?}", e)
     })?;
 
     // Write generated files to disk for go build validation
-    let gen_dir = root.join("gen");
+    // Files are written next to source files (relative to project root)
     for (relative_path, go_code) in &results {
-        let output_path = gen_dir.join(relative_path);
+        let output_path = root.join(relative_path);
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).expect("Failed to create output directories");
         }
         fs::write(&output_path, go_code).expect("Failed to write generated file");
     }
 
-    // Add replace directive to go.mod so Go can find local packages
-    let go_mod_path = root.join("go.mod");
-    let go_mod_content = fs::read_to_string(&go_mod_path).expect("Failed to read go.mod");
-    let updated_go_mod = format!(
-        "{}\nreplace {}/gen => ./gen\n",
-        go_mod_content.trim(),
-        module_name
-    );
-    fs::write(&go_mod_path, updated_go_mod).expect("Failed to update go.mod");
-
     // Run go build to verify the generated code compiles
     // Use -o /dev/null to avoid creating binaries (which can conflict with dir names)
-    if gen_dir.exists() {
-        let go_output = Command::new("go")
-            .args(["build", "-o", "/dev/null", "./..."])
-            .current_dir(&gen_dir)
-            .output()
-            .expect("Failed to run go build");
+    let go_output = Command::new("go")
+        .args(["build", "-o", "/dev/null", "./..."])
+        .current_dir(root)
+        .output()
+        .expect("Failed to run go build");
 
-        if !go_output.status.success() {
-            let go_error = String::from_utf8_lossy(&go_output.stderr);
-            return Err(format!(
-                "Generated Go code failed to compile:\n{}\n\nGenerated files:\n{}",
-                go_error,
-                results
-                    .iter()
-                    .map(|(p, c)| format!("=== {} ===\n{}", p, c))
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            ));
-        }
+    if !go_output.status.success() {
+        let go_error = String::from_utf8_lossy(&go_output.stderr);
+        return Err(format!(
+            "Generated Go code failed to compile:\n{}\n\nGenerated files:\n{}",
+            go_error,
+            results
+                .iter()
+                .map(|(p, c)| format!("=== {} ===\n{}", p, c))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        ));
     }
 
     Ok(results)

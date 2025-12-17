@@ -24,21 +24,20 @@ pub struct WorkspaceResult {
     pub symbol_tables: HashMap<FileId, SymbolTable>,
 }
 
-/// Build a project from a directory containing go.mod
+/// Build a project from a directory containing go.mod.
+/// If output_dir is None, outputs .go files next to .sop files.
+/// If output_dir is Some, outputs to that directory preserving structure.
 pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResult> {
     let project = Project::discover(root)?;
 
     // Compute output directory (absolute) and relative path for Go imports
-    let (output_dir_abs, output_dir_relative) = match output_dir {
-        Some(dir) => {
-            let relative = dir
-                .strip_prefix(&project.root)
-                .map(|p| p.to_string_lossy().to_string())
-                .ok();
-            (dir.to_path_buf(), relative)
-        }
-        None => (project.root.join("gen"), Some("gen".to_string())),
-    };
+    // When output_dir is None, output next to source (no import rewriting needed)
+    // When output_dir is Some, use that directory (with import rewriting if under project root)
+    let output_dir_relative = output_dir.and_then(|dir| {
+        dir.strip_prefix(&project.root)
+            .map(|p| p.to_string_lossy().to_string())
+            .ok()
+    });
 
     let sources = project.find_sources();
     if sources.is_empty() {
@@ -54,7 +53,16 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
     let mut results = Vec::new();
 
     for source_path in &ordered_sources {
-        let output_path = project.output_path(source_path, &output_dir_abs);
+        // Compute output path
+        let output_path = match output_dir {
+            Some(dir) => project.output_path(source_path, dir),
+            None => {
+                // Output next to source file
+                let mut out = source_path.clone();
+                out.set_extension("go");
+                out
+            }
+        };
 
         // Compute module ID from package directory
         let module_id = source_path
@@ -85,11 +93,18 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
         )?;
 
         // Compute relative output path for the result
-        let relative_path = output_path
-            .strip_prefix(&output_dir_abs)
-            .unwrap_or(&output_path)
-            .to_string_lossy()
-            .to_string();
+        let relative_path = match output_dir {
+            Some(dir) => output_path
+                .strip_prefix(dir)
+                .unwrap_or(&output_path)
+                .to_string_lossy()
+                .to_string(),
+            None => output_path
+                .strip_prefix(&project.root)
+                .unwrap_or(&output_path)
+                .to_string_lossy()
+                .to_string(),
+        };
 
         results.push((relative_path, go_code));
         global_ctxt = new_global_ctxt;
@@ -98,13 +113,17 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
     Ok(results)
 }
 
-/// Build a project and write output files to disk
+/// Build a project and write output files to disk.
+/// If output_dir is None, outputs .go files next to .sop files.
+/// If output_dir is Some, outputs to that directory preserving structure.
 pub fn build_project_to_disk(root: &Path, output_dir: Option<&Path>) -> Result<usize> {
     let project = Project::discover(root)?;
 
+    // When output_dir is None, output next to source (relative paths are from project.root)
+    // When output_dir is Some, output there
     let output_dir_abs = output_dir
         .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| project.root.join("gen"));
+        .unwrap_or_else(|| project.root.clone());
 
     let results = build_project(root, output_dir)?;
     let count = results.len();
@@ -177,6 +196,7 @@ pub fn compile_with_context(
     let project = Project {
         root: project_root.to_path_buf(),
         module_path: module_path.to_string(),
+        config: None,
     };
 
     let mut infer = Infer::with_global_state_and_project(global_ctxt, project)?;

@@ -7,7 +7,7 @@ expression: format_results(& results)
 package main
 
 import "fmt"
-import "github.com/test/nilable_cross/gen/types"
+import "github.com/test/nilable_cross/types"
 
 func main() {
     cfg1 := types.Config{Name: "app", Logger: nil}

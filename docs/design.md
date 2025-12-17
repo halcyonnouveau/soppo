@@ -402,3 +402,27 @@ This allows Soppo projects to depend on generated Go from other Soppo projects w
 
 > [!IMPORTANT]
 > You cannot import external Soppo source directly. To use an external Soppo library, import its generated Go code as a regular Go import.
+
+## Build System
+
+Soppo uses `sop.mod` for project configuration. Create one in your project root (alongside `go.mod`):
+
+```toml
+include = ["**/*.sop"]
+exclude = ["testdata/**"]
+output = "gen"
+```
+
+All fields are optional. Without `include`, all `.sop` files are compiled. Without `output`, `.go` files are generated next to their source files.
+
+```bash
+sop build                        # Uses sop.mod config
+sop build src/**/*.sop           # Compile specific files/globs
+sop build --output gen           # Output to directory
+sop check                        # Type-check without codegen
+```
+
+Without `sop.mod`, you must provide files or glob patterns as arguments.
+
+> [!NOTE]
+> A `go.mod` file is still required for module path resolution.

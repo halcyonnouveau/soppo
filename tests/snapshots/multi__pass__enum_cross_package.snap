@@ -7,7 +7,7 @@ expression: format_results(& results)
 package main
 
 import "fmt"
-import "github.com/test/enum_cross/gen/types"
+import "github.com/test/enum_cross/types"
 
 func describeStatus(s types.Status) string {
     result := ""
