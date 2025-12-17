@@ -17,15 +17,8 @@ run = [
     "cp editors/tree-sitter/queries/*.scm editors/zed/languages/soppo/"
 ]
 
-[tasks."fuzz:parse"]
-description = "Run parser fuzzer"
-run = [
-    "mkdir -p fuzz/corpus/parse",
-    "cargo +nightly fuzz run parse fuzz/corpus/parse tests/fixtures/single/pass"
-]
-
-[tasks."fuzz:compile"]
-description = "Run compiler fuzzer"
+[tasks.fuzz]
+description = "Run fuzzer"
 run = [
     "mkdir -p fuzz/corpus/compile",
     "cargo +nightly fuzz run compile fuzz/corpus/compile tests/fixtures/single/pass"

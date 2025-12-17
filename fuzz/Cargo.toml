@@ -14,13 +14,6 @@ libfuzzer-sys = "0.4"
 soppo = { path = ".." }
 
 [[bin]]
-name = "parse"
-path = "targets/parse.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "compile"
 path = "targets/compile.rs"
 test = false
