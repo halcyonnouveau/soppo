@@ -1,0 +1,28 @@
+[workspace]
+
+[package]
+name = "soppo-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+soppo = { path = ".." }
+
+[[bin]]
+name = "parse"
+path = "targets/parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "compile"
+path = "targets/compile.rs"
+test = false
+doc = false
+bench = false

@@ -1,6 +1,6 @@
 [workspace]
 members = [".", "lsp"]
-exclude = ["editors/zed"]
+exclude = ["editors/zed", "fuzz"]
 
 [workspace.package]
 version = "0.4.1"
@@ -37,6 +37,7 @@ tree-sitter-go = "0.25"
 
 [dev-dependencies]
 insta = "1.44"
+proptest = "1.9"
 regex = "1.11"
 tempfile = "3.23"
 toml = "0.9"
