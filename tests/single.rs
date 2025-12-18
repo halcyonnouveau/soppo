@@ -104,7 +104,6 @@ mod fail {
         nullable_no_init,
         string_interpolation_undefined,
         try_expr_no_error,
-        try_no_return_error,
         try_no_space,
         type_mismatch,
         undeclared_variable,

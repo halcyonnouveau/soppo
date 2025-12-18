@@ -927,26 +927,9 @@ impl Infer {
                 stmt: inner_stmt,
                 error_name,
                 handler,
-                try_span,
                 discard_count,
+                ..
             } => {
-                // Only require error return type if there's no handler (propagating error)
-                // With a handler, the error is handled locally and doesn't need to propagate
-                if handler.is_none() {
-                    let return_types = self
-                        .expected_return_types
-                        .as_ref()
-                        .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
-
-                    let last_type = return_types
-                        .last()
-                        .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
-
-                    if !self.is_error_type(last_type) {
-                        return Err(SoppoError::TryNoErrorReturn { span: *try_span });
-                    }
-                }
-
                 // Infer inner statement and extract expression type + span
                 // For ? operator, we need to strip the error from tuple types
                 let (expr_ty, expr_span) = match &inner_stmt.kind {

@@ -504,25 +504,37 @@ impl Codegen {
                         self.gen_stmt(handler_stmt);
                     }
                 } else {
-                    // Default: return zero values + error
+                    // Default: return zero values (+ error if function returns error)
                     self.emit_indent();
                     self.emit("return ");
 
-                    // Generate zero values for all return types except last (error)
                     let return_types = self.current_return_types.clone();
-                    let zero_values: Vec<String> = return_types
-                        .iter()
-                        .take(return_types.len().saturating_sub(1))
-                        .map(|ty| self.zero_value(ty))
-                        .collect();
+                    let returns_error = return_types
+                        .last()
+                        .is_some_and(|ty| ty == "error" || ty.ends_with(".error"));
 
-                    self.emit(zero_values.join(", "));
+                    if returns_error {
+                        // Generate zero values for all return types except last (error)
+                        let zero_values: Vec<String> = return_types
+                            .iter()
+                            .take(return_types.len().saturating_sub(1))
+                            .map(|ty| self.zero_value(ty))
+                            .collect();
 
-                    // Add error variable
-                    if !zero_values.is_empty() {
-                        self.emit(", ");
+                        self.emit(zero_values.join(", "));
+
+                        // Add error variable
+                        if !zero_values.is_empty() {
+                            self.emit(", ");
+                        }
+                        self.emit(&err_var);
+                    } else {
+                        // No error return - just return zero values for all return types
+                        let zero_values: Vec<String> =
+                            return_types.iter().map(|ty| self.zero_value(ty)).collect();
+
+                        self.emit(zero_values.join(", "));
                     }
-                    self.emit(&err_var);
                     self.emit("\n");
                 }
 

@@ -235,6 +235,26 @@ func discardErrorOnly() error {
     return nil
 }
 
+// === ? without handler in function that doesn't return error ===
+// Returns zero values automatically on error
+func tryZeroValueReturn() int {
+    // On error, automatically returns 0 (zero value for int)
+    port, _err0 := parsePort("")
+    if _err0 != nil {
+        return 0
+    }
+    return port
+}
+
+func tryZeroValueMultiReturn() (string, int) {
+    // On error, automatically returns ("", 0)
+    user, _err0 := getUser(0)
+    if _err0 != nil {
+        return "", 0
+    }
+    return user.name, user.age
+}
+
 // === ? with handler in function that doesn't return error ===
 // Handler that returns a fallback value - no error propagation needed
 func tryWithFallback() int {
@@ -294,7 +314,11 @@ func main() {
     discardMultipleReturns()
     discardErrorOnly()
 
-    // New tests for ? with handlers in non-error-returning functions
+    // New tests for ? returning zero values without handler
+    fmt.Println(tryZeroValueReturn())
+    fmt.Println(tryZeroValueMultiReturn())
+
+    // Tests for ? with handlers in non-error-returning functions
     fmt.Println(tryWithFallback())
     fmt.Println(tryWithFallbackNamed())
     fmt.Println(tryMultipleWithFallbacks())
