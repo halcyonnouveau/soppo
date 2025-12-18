@@ -1,0 +1,22 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "net/http"
+import "os"
+
+// Test that Go package variables are accessible.
+// This tests type inference for variables declared with composite literals.
+func main() {
+    // Variables declared as: var DefaultClient = &Client{}
+    // Type should be inferred as *Client
+    _ = http.DefaultClient
+
+    // Variables with explicit types like: var Stdin *File
+    _ = os.Stdin
+    _ = os.Stdout
+    _ = os.Stderr
+}

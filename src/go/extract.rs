@@ -795,17 +795,40 @@ fn extract_var_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) 
 fn infer_var_type_from_expr(node: tree_sitter::Node, source: &str, pkg: &GoPackage) -> String {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "call_expression" {
-            // Get the function being called
-            if let Some(func_node) = child.child_by_field_name("function") {
-                let func_name = node_text(func_node, source);
-                // Look up the function's return type in the package
-                if let Some(func_def) = pkg.functions.get(func_name)
-                    && !func_def.return_type.is_empty()
-                {
-                    return func_def.return_type.clone();
+        match child.kind() {
+            "call_expression" => {
+                // Get the function being called
+                if let Some(func_node) = child.child_by_field_name("function") {
+                    let func_name = node_text(func_node, source);
+                    // Look up the function's return type in the package
+                    if let Some(func_def) = pkg.functions.get(func_name)
+                        && !func_def.return_type.is_empty()
+                    {
+                        return func_def.return_type.clone();
+                    }
                 }
             }
+            "unary_expression" => {
+                // Handle &Type{} (address-of composite literal)
+                let op = child
+                    .child_by_field_name("operator")
+                    .map(|n| node_text(n, source));
+                if op == Some("&")
+                    && let Some(operand) = child.child_by_field_name("operand")
+                    && operand.kind() == "composite_literal"
+                    && let Some(type_node) = operand.child_by_field_name("type")
+                {
+                    let type_name = extract_type_string(type_node, source);
+                    return format!("*{}", type_name);
+                }
+            }
+            "composite_literal" => {
+                // Handle Type{} (composite literal without address-of)
+                if let Some(type_node) = child.child_by_field_name("type") {
+                    return extract_type_string(type_node, source);
+                }
+            }
+            _ => {}
         }
     }
     String::new()
