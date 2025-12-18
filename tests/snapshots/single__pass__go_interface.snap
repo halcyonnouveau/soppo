@@ -3,12 +3,12 @@ source: tests/single.rs
 expression: output
 ---
 //soppo:generated
+// Tests interface type unification - io.Reader accepts *os.File
 package main
 
 import "bufio"
 import "os"
 
-// Tests interface type unification - io.Reader accepts *os.File
 func main() {
     // os.Stdin is *File, but bufio.NewReader expects io.Reader interface
     // This tests that interface types accept any implementing type

@@ -3,12 +3,12 @@ source: tests/single.rs
 expression: output
 ---
 //soppo:generated
+// Test passing function references as arguments to other functions
 package main
 
 import "fmt"
 import "sort"
 
-// Test passing function references as arguments to other functions
 // A simple callback function
 func double(x int) int {
     return (x * 2)

@@ -3,13 +3,13 @@ source: tests/single.rs
 expression: output
 ---
 //soppo:generated
+// Tests method calls on Go types from stdlib
 package main
 
 import "bufio"
 import "os"
 import "strings"
 
-// Tests method calls on Go types from stdlib
 func main() {
     // Method call on bufio.Reader (returned from bufio.NewReader)
     reader := bufio.NewReader(os.Stdin)

@@ -3,11 +3,11 @@ source: tests/single.rs
 expression: output
 ---
 //soppo:generated
+// Tests rune/character literal support
 package main
 
 import "fmt"
 
-// Tests rune/character literal support
 func delimTest(delim rune) {
     fmt.Printf("delimiter: %c\n", delim)
 }

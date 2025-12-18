@@ -290,15 +290,38 @@ impl Codegen {
 
     /// Generate code for an entire file
     pub fn gen_file(&mut self, file: &File) -> Result<()> {
-        // Set up comments for emission
-        self.set_comments(file.comments.clone());
+        // Find the earliest position in the file (first import or first declaration)
+        let first_line = file
+            .imports
+            .first()
+            .map(|i| i.span.start.line)
+            .into_iter()
+            .chain(file.decls.first().map(|d| d.span().start.line))
+            .min()
+            .unwrap_or(usize::MAX);
+
+        // Separate file-level comments from the rest
+        let (file_comments, other_comments): (Vec<_>, Vec<_>) = file
+            .comments
+            .iter()
+            .cloned()
+            .partition(|c| c.span.start.line < first_line);
+
+        // Set up only non-file-level comments for emission during gen_declarations
+        self.set_comments(other_comments);
 
         // Generate declarations first to discover needed imports
         let decls_output = self.gen_declarations(file)?;
 
         // Now build the final output with header, imports, and declarations
-        // Soppo generated marker - allows re-importing with proper nil safety
+        // Soppo generated marker - always first
         self.emit_line("//soppo:generated");
+
+        // Emit file-level comments (after marker, before package)
+        for comment in &file_comments {
+            self.output.push_str(&comment.text);
+            self.output.push('\n');
+        }
 
         // Package declaration
         self.emit_line(&format!("package {}", file.package));

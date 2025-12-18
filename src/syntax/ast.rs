@@ -84,6 +84,18 @@ pub enum Decl {
     Func(FuncDecl),
 }
 
+impl Decl {
+    /// Get the span of this declaration
+    pub fn span(&self) -> &Span {
+        match self {
+            Decl::Const(c) => &c.span,
+            Decl::ConstBlock(cs) => &cs.first().expect("const block should not be empty").span,
+            Decl::Type(t) => &t.span,
+            Decl::Func(f) => &f.span,
+        }
+    }
+}
+
 /// Constant declaration
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstDecl {

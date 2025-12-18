@@ -3,12 +3,12 @@ source: tests/single.rs
 expression: output
 ---
 //soppo:generated
+// Tests Go package variable lookup (os.Stdin, os.Stdout, os.Stderr)
 package main
 
 import "fmt"
 import "os"
 
-// Tests Go package variable lookup (os.Stdin, os.Stdout, os.Stderr)
 func main() {
     // Package-level variables from os
     stdin := os.Stdin
