@@ -86,6 +86,7 @@ pub struct Import {
 pub enum Decl {
     Const(ConstDecl),
     ConstBlock(Vec<ConstDecl>), // Grouped const block for iota support
+    Var(VarDecl),
     Type(TypeDecl),
     Func(FuncDecl),
 }
@@ -96,6 +97,7 @@ impl Decl {
         match self {
             Decl::Const(c) => &c.span,
             Decl::ConstBlock(cs) => &cs.first().expect("const block should not be empty").span,
+            Decl::Var(v) => &v.span,
             Decl::Type(t) => &t.span,
             Decl::Func(f) => &f.span,
         }
@@ -110,6 +112,15 @@ pub struct ConstDecl {
     pub value: Expr,
     pub span: Span,
     pub doc_comment: Option<String>,
+}
+
+/// Package-level variable declaration
+#[derive(Debug, Clone, PartialEq)]
+pub struct VarDecl {
+    pub ident: Ident,
+    pub ty: Option<TypeAnnotation>, // Optional - infer from value if not provided
+    pub value: Option<Expr>,        // Optional - zero value if not provided
+    pub span: Span,
 }
 
 /// Type declaration (enum, struct, alias)

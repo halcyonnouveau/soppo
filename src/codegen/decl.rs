@@ -1,6 +1,7 @@
 use super::Codegen;
 use crate::syntax::{
     Block, ConstDecl, EnumVariant, FuncDecl, Literal, Pattern, PatternKind, TypeDecl, TypeKind,
+    VarDecl,
 };
 
 impl Codegen {
@@ -54,6 +55,34 @@ impl Codegen {
         }
         self.dedent();
         self.emit_line(")");
+    }
+
+    /// Generate a var declaration
+    pub(crate) fn gen_var_decl(&mut self, var_decl: &VarDecl) {
+        if let Some(ty) = &var_decl.ty {
+            if let Some(value) = &var_decl.value {
+                // var X type = value
+                self.emit(format!(
+                    "var {} {} = ",
+                    var_decl.ident,
+                    self.go_type(&ty.name)
+                ));
+                self.gen_expr(value);
+                self.emit("\n");
+            } else {
+                // var X type (zero value)
+                self.emit_line(&format!(
+                    "var {} {}",
+                    var_decl.ident,
+                    self.go_type(&ty.name)
+                ));
+            }
+        } else if let Some(value) = &var_decl.value {
+            // var X = value (type inference)
+            self.emit(format!("var {} = ", var_decl.ident));
+            self.gen_expr(value);
+            self.emit("\n");
+        }
     }
 
     /// Generate a type declaration (enum or struct)

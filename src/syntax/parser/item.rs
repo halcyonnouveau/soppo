@@ -2,7 +2,7 @@ use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
     ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Ident, Import,
-    InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind,
+    InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind, VarDecl,
 };
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
@@ -712,6 +712,7 @@ impl Parser {
     pub fn parse_decl(&mut self) -> Result<Decl> {
         match self.peek() {
             Some(Token::Const) => Ok(Decl::Const(self.parse_const_decl()?)),
+            Some(Token::Var) => Ok(Decl::Var(self.parse_var_decl()?)),
             Some(Token::Func) => Ok(Decl::Func(self.parse_func_decl()?)),
             Some(Token::Type) => Ok(Decl::Type(self.parse_type_decl()?)),
             Some(tok) => Err(SoppoError::Parse {
@@ -723,6 +724,73 @@ impl Parser {
                 span: Span::dummy(),
             }),
         }
+    }
+
+    /// Parse a var declaration: var NAME = VALUE or var NAME TYPE = VALUE or var NAME TYPE
+    fn parse_var_decl(&mut self) -> Result<VarDecl> {
+        let start = self.expect(Token::Var)?;
+
+        let (name, name_span) = match self.advance() {
+            Some((Token::Ident(name), span)) => (name, span),
+            Some((tok, span)) => {
+                return Err(SoppoError::Parse {
+                    message: format!("Expected identifier, found {:?}", tok),
+                    span,
+                });
+            }
+            None => {
+                return Err(SoppoError::Parse {
+                    message: "Expected identifier".to_string(),
+                    span: self.peek_span(),
+                });
+            }
+        };
+
+        self.validate_identifier(&name, &name_span)?;
+
+        // Check if next token is = (type inference) or a type name
+        let (ty, value) = if self.consume(&Token::Assign) {
+            // var NAME = VALUE (type inference)
+            let value = self.parse_expr()?;
+            (None, Some(value))
+        } else if matches!(
+            self.peek(),
+            Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+        ) {
+            // var NAME TYPE or var NAME TYPE = VALUE
+            let ty = self.parse_type()?;
+            if self.consume(&Token::Assign) {
+                let value = self.parse_expr()?;
+                (Some(ty), Some(value))
+            } else {
+                // var NAME TYPE (zero value)
+                (Some(ty), None)
+            }
+        } else {
+            return Err(SoppoError::Parse {
+                message: "Expected type or '=' in var declaration".to_string(),
+                span: name_span,
+            });
+        };
+
+        let end_span = value
+            .as_ref()
+            .map(|v| v.span)
+            .or(ty.as_ref().map(|t| t.span))
+            .unwrap_or(name_span);
+
+        Ok(VarDecl {
+            ident: Ident::new(name, name_span),
+            ty,
+            value,
+            span: Span::with_bytes(
+                start.start,
+                end_span.end,
+                self.file,
+                start.byte_start,
+                end_span.byte_end,
+            ),
+        })
     }
 
     /// Parse a const declaration: const NAME = VALUE or const NAME TYPE = VALUE

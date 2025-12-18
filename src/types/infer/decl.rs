@@ -277,6 +277,61 @@ impl Infer {
         Ok(())
     }
 
+    /// Type check a var declaration
+    pub fn infer_var_decl(&mut self, var_decl: &crate::syntax::VarDecl) -> Result<()> {
+        // Determine the variable's type
+        let var_ty = match (&var_decl.ty, &var_decl.value) {
+            (Some(ty), Some(value)) => {
+                // var X type = value: unify declared with inferred
+                let declared_ty = Type::from_ast(ty);
+                let value_ty = self.infer_expr(value)?;
+                self.unify(&declared_ty, &value_ty, &value.span)?;
+                declared_ty
+            }
+            (Some(ty), None) => {
+                // var X type (zero value)
+                Type::from_ast(ty)
+            }
+            (None, Some(value)) => {
+                // var X = value: infer from value
+                self.infer_expr(value)?
+            }
+            (None, None) => {
+                // This shouldn't happen - parser should reject it
+                return Err(SoppoError::Type {
+                    message: "var declaration must have type or value".to_string(),
+                    span: var_decl.span,
+                });
+            }
+        };
+
+        // Add variable to the global scope
+        if let Some(scope) = self.scopes.first_mut() {
+            scope.insert(
+                var_decl.ident.name.clone(),
+                (var_ty.clone(), Some(var_decl.span), true), // true = mutable
+            );
+        }
+
+        // Record type annotation for LSP if present
+        if let Some(ty) = &var_decl.ty {
+            self.record_type_annotation(ty);
+        }
+
+        // Record variable definition for LSP
+        self.record_symbol(
+            var_decl.ident.span,
+            var_decl.ident.name.clone(),
+            var_ty,
+            Some(var_decl.span),
+            Some(var_decl.ident.span),
+            SymbolKind::Variable,
+            None,
+        );
+
+        Ok(())
+    }
+
     /// Type check an enum/struct declaration
     pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> Result<()> {
         // Record type definition for LSP

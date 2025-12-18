@@ -260,6 +260,9 @@ fn register_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -
             // Types are fully processed in pass 1
             infer.infer_type_decl(type_decl).map_err(add_source)?;
         }
+        Decl::Var(var_decl) => {
+            infer.infer_var_decl(var_decl).map_err(add_source)?;
+        }
         Decl::Func(func) => {
             // Only register the signature, don't check the body yet
             infer.register_func_signature(func).map_err(add_source)?;
@@ -274,8 +277,8 @@ fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> R
     };
 
     match decl {
-        // Consts and types were fully processed in pass 1
-        Decl::Const(_) | Decl::ConstBlock(_) | Decl::Type(_) => {}
+        // Consts, vars, and types were fully processed in pass 1
+        Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) | Decl::Type(_) => {}
         // Only functions need body checking in pass 2
         Decl::Func(func) => {
             infer.infer_func_decl(func).map_err(add_source)?;

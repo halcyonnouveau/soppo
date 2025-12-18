@@ -421,6 +421,11 @@ impl Codegen {
                     self.gen_const_block(consts);
                     self.emit_line("");
                 }
+                Decl::Var(var_decl) => {
+                    self.emit_comments_before(var_decl.span.byte_start, var_decl.span.start.line);
+                    self.gen_var_decl(var_decl);
+                    self.emit_line("");
+                }
                 Decl::Type(type_decl) => {
                     self.emit_comments_before(type_decl.span.byte_start, type_decl.span.start.line);
                     self.gen_type_decl(type_decl);
