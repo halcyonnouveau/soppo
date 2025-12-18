@@ -282,19 +282,27 @@ fn arb_type_decl() -> impl Strategy<Value = TypeDecl> {
         })
 }
 
+/// Generate an unnamed return param (empty ident name)
+fn arb_return_param() -> impl Strategy<Value = Param> {
+    arb_type_annotation().prop_map(|ty| Param {
+        ident: Ident::new("", ty.span),
+        ty,
+    })
+}
+
 fn arb_func_decl() -> impl Strategy<Value = FuncDecl> {
     (
         arb_ident(),
         prop::collection::vec(arb_param(), 0..4),
-        prop::collection::vec(arb_type_annotation(), 0..2),
+        prop::collection::vec(arb_return_param(), 0..2),
         arb_block(),
     )
-        .prop_map(|(ident, params, return_types, body)| FuncDecl {
+        .prop_map(|(ident, params, returns, body)| FuncDecl {
             receiver: None,
             ident,
             generics: vec![],
             params,
-            return_types,
+            returns,
             body,
             span: Span::dummy(),
             doc_comment: None,

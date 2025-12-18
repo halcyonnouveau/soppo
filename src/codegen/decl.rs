@@ -362,10 +362,10 @@ impl Codegen {
             .map(|p| p.ident.name.as_str())
             .collect();
         let nilable_returns: Vec<String> = func
-            .return_types
+            .returns
             .iter()
             .enumerate()
-            .filter(|(_, t)| t.nullable)
+            .filter(|(_, p)| p.ty.nullable)
             .map(|(i, _)| i.to_string())
             .collect();
 
@@ -416,29 +416,44 @@ impl Codegen {
 
         self.emit(")");
 
-        // Return type(s)
+        // Return type(s) - handles both named (x int, y string) and unnamed (int, string)
         // Use go_type_from_ast to strip ? prefix from nullable types
         self.current_return_types = func
-            .return_types
+            .returns
             .iter()
-            .map(|t| self.go_type_from_ast(t))
+            .map(|p| self.go_type_from_ast(&p.ty))
             .collect();
 
-        if !func.return_types.is_empty() {
-            if func.return_types.len() == 1 {
-                // Single return type
-                let go_type = self.go_type_from_ast(&func.return_types[0]);
+        if !func.returns.is_empty() {
+            // Check if returns are named (first return has non-empty name)
+            let is_named = !func.returns[0].ident.name.is_empty();
+
+            if func.returns.len() == 1 && !is_named {
+                // Single unnamed return type
+                let go_type = self.go_type_from_ast(&func.returns[0].ty);
                 self.emit(format!(" {}", go_type));
                 self.current_func_return_type = Some(go_type);
             } else {
-                // Multi-value return: (type1, type2, ...)
-                let types: Vec<String> = func
-                    .return_types
+                // Multi-value return or named returns: (type1, type2, ...) or (x int, y string)
+                let returns_str: Vec<String> = func
+                    .returns
                     .iter()
-                    .map(|t| self.go_type_from_ast(t))
+                    .map(|p| {
+                        let go_type = self.go_type_from_ast(&p.ty);
+                        if p.ident.name.is_empty() {
+                            go_type
+                        } else {
+                            format!("{} {}", p.ident.name, go_type)
+                        }
+                    })
                     .collect();
-                self.emit(format!(" ({})", types.join(", ")));
-                self.current_func_return_type = Some(types.join(", "));
+                self.emit(format!(" ({})", returns_str.join(", ")));
+                let types_only: Vec<String> = func
+                    .returns
+                    .iter()
+                    .map(|p| self.go_type_from_ast(&p.ty))
+                    .collect();
+                self.current_func_return_type = Some(types_only.join(", "));
             }
         } else {
             self.current_func_return_type = None;

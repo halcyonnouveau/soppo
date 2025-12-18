@@ -437,17 +437,24 @@ impl Formatter {
         self.emit(&self.format_params(&f.params));
         self.emit(")");
 
-        // Return types
-        if !f.return_types.is_empty() {
+        // Return types - handle named and unnamed
+        if !f.returns.is_empty() {
             self.emit(" ");
-            if f.return_types.len() == 1 {
-                self.emit(&self.format_type_annotation(&f.return_types[0]));
+            let is_named = !f.returns[0].ident.name.is_empty();
+            if f.returns.len() == 1 && !is_named {
+                self.emit(&self.format_type_annotation(&f.returns[0].ty));
             } else {
                 self.emit("(");
                 let returns: Vec<_> = f
-                    .return_types
+                    .returns
                     .iter()
-                    .map(|t| self.format_type_annotation(t))
+                    .map(|p| {
+                        if p.ident.name.is_empty() {
+                            self.format_type_annotation(&p.ty)
+                        } else {
+                            format!("{} {}", p.ident.name, self.format_type_annotation(&p.ty))
+                        }
+                    })
                     .collect();
                 self.emit(&returns.join(", "));
                 self.emit(")");
@@ -1109,21 +1116,32 @@ impl Formatter {
             }
             ExprKind::FuncLit {
                 params,
-                return_types,
+                returns,
                 body: _,
             } => {
                 let mut result = String::from("func(");
                 result.push_str(&self.format_params(params));
                 result.push(')');
-                if !return_types.is_empty() {
+                if !returns.is_empty() {
                     result.push(' ');
-                    if return_types.len() == 1 {
-                        result.push_str(&self.format_type_annotation(&return_types[0]));
+                    let is_named = !returns[0].ident.name.is_empty();
+                    if returns.len() == 1 && !is_named {
+                        result.push_str(&self.format_type_annotation(&returns[0].ty));
                     } else {
                         result.push('(');
-                        let rets: Vec<_> = return_types
+                        let rets: Vec<_> = returns
                             .iter()
-                            .map(|t| self.format_type_annotation(t))
+                            .map(|p| {
+                                if p.ident.name.is_empty() {
+                                    self.format_type_annotation(&p.ty)
+                                } else {
+                                    format!(
+                                        "{} {}",
+                                        p.ident.name,
+                                        self.format_type_annotation(&p.ty)
+                                    )
+                                }
+                            })
                             .collect();
                         result.push_str(&rets.join(", "));
                         result.push(')');

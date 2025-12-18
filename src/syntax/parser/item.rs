@@ -2,7 +2,7 @@ use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
     ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Ident, Import,
-    InterfaceMethod, Param, TypeDecl, TypeKind,
+    InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind,
 };
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
@@ -91,6 +91,185 @@ impl Parser {
             }
 
             break;
+        }
+
+        Ok(params)
+    }
+
+    /// Parse function return list: (x, y int, err error) or (int, string) or int
+    /// Returns Vec<Param> where unnamed returns have empty ident name.
+    pub(super) fn parse_return_list(&mut self) -> Result<Vec<Param>> {
+        if matches!(self.peek(), Some(Token::LBrace)) {
+            // No return type
+            return Ok(vec![]);
+        }
+
+        if self.consume(&Token::LParen) {
+            // Multi-value return - could be named or unnamed
+            if matches!(self.peek(), Some(Token::RParen)) {
+                self.advance(); // consume )
+                return Ok(vec![]);
+            }
+
+            // Try to determine if named or unnamed by looking at pattern
+            // Collect identifiers and look for type position
+            let returns = self.parse_return_params()?;
+            self.expect(Token::RParen)?;
+            return Ok(returns);
+        }
+
+        // Single return type (unnamed)
+        let ty = self.parse_type()?;
+        Ok(vec![Param {
+            ident: Ident::new("", ty.span),
+            ty,
+        }])
+    }
+
+    /// Parse return parameters, handling both named (x int) and unnamed (int) returns.
+    /// In Go, if any return is named, all must be named.
+    fn parse_return_params(&mut self) -> Result<Vec<Param>> {
+        let mut params = Vec::new();
+        let mut pending_names: Vec<Ident> = Vec::new();
+        let mut is_named: Option<bool> = None;
+
+        loop {
+            // First, try to determine if this is named or unnamed
+            // by looking at current token and what follows
+
+            let (first_name, first_span) = match self.peek() {
+                Some(Token::Ident(name)) if name == "map" || name == "chan" => {
+                    // map and chan are always types, never parameter names
+                    if is_named == Some(true) {
+                        return Err(SoppoError::Parse {
+                            message: "Mixed named and unnamed returns".to_string(),
+                            span: self.peek_span(),
+                        });
+                    }
+                    is_named = Some(false);
+                    let ty = self.parse_type()?;
+                    params.push(Param {
+                        ident: Ident::new("", ty.span),
+                        ty,
+                    });
+                    if !self.consume(&Token::Comma) {
+                        break;
+                    }
+                    continue;
+                }
+                Some(Token::Ident(_)) => {
+                    let (Token::Ident(name), span) = self.advance().unwrap() else {
+                        unreachable!()
+                    };
+                    (name, span)
+                }
+                Some(
+                    Token::Star
+                    | Token::LBracket
+                    | Token::Func
+                    | Token::Question
+                    | Token::Struct
+                    | Token::Interface,
+                ) => {
+                    // Definitely a type (pointer, slice, func, nullable, struct, interface)
+                    if is_named == Some(true) {
+                        return Err(SoppoError::Parse {
+                            message: "Mixed named and unnamed returns".to_string(),
+                            span: self.peek_span(),
+                        });
+                    }
+                    is_named = Some(false);
+                    let ty = self.parse_type()?;
+                    params.push(Param {
+                        ident: Ident::new("", ty.span),
+                        ty,
+                    });
+                    if !self.consume(&Token::Comma) {
+                        break;
+                    }
+                    continue;
+                }
+                Some(tok) => {
+                    return Err(SoppoError::Parse {
+                        message: format!("Expected return type or name, found {:?}", tok),
+                        span: self.peek_span(),
+                    });
+                }
+                None => {
+                    return Err(SoppoError::Parse {
+                        message: "Unexpected end of return list".to_string(),
+                        span: Span::dummy(),
+                    });
+                }
+            };
+
+            // We have an identifier. Now look at what follows to determine if it's a name or type.
+            match self.peek() {
+                Some(Token::Comma) => {
+                    // Could be unnamed type list or start of grouped names
+                    // Collect as potential name for now
+                    pending_names.push(Ident::new(first_name, first_span));
+                    self.advance(); // consume comma
+                    continue;
+                }
+                Some(Token::RParen) => {
+                    // End of list - identifier was a type
+                    if is_named == Some(true) {
+                        return Err(SoppoError::Parse {
+                            message: "Mixed named and unnamed returns".to_string(),
+                            span: first_span,
+                        });
+                    }
+                    // All pending names were actually types
+                    for name in pending_names.drain(..) {
+                        params.push(Param {
+                            ident: Ident::new("", name.span),
+                            ty: TypeAnnotation {
+                                name: name.name,
+                                args: vec![],
+                                span: name.span,
+                                nullable: false,
+                            },
+                        });
+                    }
+                    // Current identifier is also a type
+                    params.push(Param {
+                        ident: Ident::new("", first_span),
+                        ty: TypeAnnotation {
+                            name: first_name,
+                            args: vec![],
+                            span: first_span,
+                            nullable: false,
+                        },
+                    });
+                    break;
+                }
+                _ => {
+                    // Something else follows - this is a named return
+                    // The identifier is a name, parse the type
+                    if is_named == Some(false) {
+                        return Err(SoppoError::Parse {
+                            message: "Mixed named and unnamed returns".to_string(),
+                            span: first_span,
+                        });
+                    }
+                    is_named = Some(true);
+                    pending_names.push(Ident::new(first_name, first_span));
+
+                    // Parse the type for all pending names
+                    let ty = self.parse_type()?;
+                    for name in pending_names.drain(..) {
+                        params.push(Param {
+                            ident: name,
+                            ty: ty.clone(),
+                        });
+                    }
+
+                    if !self.consume(&Token::Comma) {
+                        break;
+                    }
+                }
+            }
         }
 
         Ok(params)
@@ -197,28 +376,8 @@ impl Parser {
         let params = self.parse_param_list()?;
         self.expect(Token::RParen)?;
 
-        // Parse optional return type(s)
-        // Go-style: single type or (type1, type2, ...)
-        let return_types = if matches!(self.peek(), Some(Token::LBrace)) {
-            // No return type
-            vec![]
-        } else if self.consume(&Token::LParen) {
-            // Multi-value return: (int, string, error)
-            let mut types = vec![];
-            if !matches!(self.peek(), Some(Token::RParen)) {
-                loop {
-                    types.push(self.parse_type()?);
-                    if !self.consume(&Token::Comma) {
-                        break;
-                    }
-                }
-            }
-            self.expect(Token::RParen)?;
-            types
-        } else {
-            // Single return type
-            vec![self.parse_type()?]
-        };
+        // Parse optional return type(s) - supports named (x int, y string) and unnamed (int, string)
+        let returns = self.parse_return_list()?;
 
         // Parse body
         let body = self.parse_block()?;
@@ -228,7 +387,7 @@ impl Parser {
             ident: Ident::new(name, name_span),
             generics,
             params,
-            return_types,
+            returns,
             body: body.clone(),
             span: Span::with_bytes(
                 start_span.start,
@@ -922,9 +1081,77 @@ mod tests {
         assert_eq!(func.params[0].ident, "x");
         assert_eq!(func.params[0].ty.name, "int");
         assert_eq!(func.params[1].ident, "y");
-        assert_eq!(func.return_types.len(), 1);
-        assert_eq!(func.return_types[0].name, "int");
+        assert_eq!(func.returns.len(), 1);
+        assert_eq!(func.returns[0].ty.name, "int");
+        assert_eq!(func.returns[0].ident.name, ""); // unnamed return
         assert_eq!(func.body.stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_function_named_returns() {
+        let source =
+            "func divide(a int, b int) (quotient int, remainder int) { return a / b, a % b }";
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser
+            .parse_func_decl()
+            .expect("failed to parse function with named returns");
+
+        assert_eq!(func.ident, "divide");
+        assert_eq!(func.params.len(), 2);
+        assert_eq!(func.returns.len(), 2);
+        assert_eq!(func.returns[0].ident.name, "quotient");
+        assert_eq!(func.returns[0].ty.name, "int");
+        assert_eq!(func.returns[1].ident.name, "remainder");
+        assert_eq!(func.returns[1].ty.name, "int");
+    }
+
+    #[test]
+    fn test_parse_function_grouped_named_returns() {
+        let source = "func parseVersion(s string) (major, minor, patch int, err error) { return 0, 0, 0, nil }";
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser
+            .parse_func_decl()
+            .expect("failed to parse function with grouped named returns");
+
+        assert_eq!(func.ident, "parseVersion");
+        assert_eq!(func.returns.len(), 4);
+        assert_eq!(func.returns[0].ident.name, "major");
+        assert_eq!(func.returns[0].ty.name, "int");
+        assert_eq!(func.returns[1].ident.name, "minor");
+        assert_eq!(func.returns[1].ty.name, "int");
+        assert_eq!(func.returns[2].ident.name, "patch");
+        assert_eq!(func.returns[2].ty.name, "int");
+        assert_eq!(func.returns[3].ident.name, "err");
+        assert_eq!(func.returns[3].ty.name, "error");
+    }
+
+    #[test]
+    fn test_parse_function_multiple_unnamed_returns() {
+        let source = "func swap(a int, b int) (int, int) { return b, a }";
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser
+            .parse_func_decl()
+            .expect("failed to parse function with multiple unnamed returns");
+
+        assert_eq!(func.ident, "swap");
+        assert_eq!(func.returns.len(), 2);
+        assert_eq!(func.returns[0].ident.name, ""); // unnamed
+        assert_eq!(func.returns[0].ty.name, "int");
+        assert_eq!(func.returns[1].ident.name, ""); // unnamed
+        assert_eq!(func.returns[1].ty.name, "int");
+    }
+
+    #[test]
+    fn test_parse_function_no_returns() {
+        let source = "func log(msg string) { println(msg) }";
+        let mut parser = Parser::new(source, FileId(0));
+        let func = parser
+            .parse_func_decl()
+            .expect("failed to parse function with no returns");
+
+        assert_eq!(func.ident, "log");
+        assert_eq!(func.params.len(), 1);
+        assert_eq!(func.returns.len(), 0);
     }
 
     #[test]

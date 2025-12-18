@@ -58,16 +58,16 @@ impl Infer {
                 .iter()
                 .map(|p| (Some(p.ident.name.clone()), self.resolve_type(&p.ty)))
                 .collect();
-            let ret_ty = if func.return_types.is_empty() {
+            let ret_ty = if func.returns.is_empty() {
                 Type::unit()
-            } else if func.return_types.len() == 1 {
-                self.resolve_type(&func.return_types[0])
+            } else if func.returns.len() == 1 {
+                self.resolve_type(&func.returns[0].ty)
             } else {
                 Type::generic(
                     "tuple",
-                    func.return_types
+                    func.returns
                         .iter()
-                        .map(|t| self.resolve_type(t))
+                        .map(|r| self.resolve_type(&r.ty))
                         .collect(),
                 )
             };
@@ -116,13 +116,13 @@ impl Infer {
 
         // Set expected return types for this function
         let old_expected_return = self.expected_return_types.clone();
-        if func.return_types.is_empty() {
+        if func.returns.is_empty() {
             self.expected_return_types = Some(vec![]);
         } else {
             self.expected_return_types = Some(
-                func.return_types
+                func.returns
                     .iter()
-                    .map(|ty| self.resolve_type(ty))
+                    .map(|r| self.resolve_type(&r.ty))
                     .collect(),
             );
         }
@@ -173,18 +173,18 @@ impl Infer {
         }
 
         // Record return type annotations for LSP
-        for ret_ty in &func.return_types {
-            self.record_type_annotation(ret_ty);
+        for ret in &func.returns {
+            self.record_type_annotation(&ret.ty);
         }
 
         // Infer body type
         let body_ty = self.infer_block(&func.body)?;
 
         // Check against declared return type (for single return)
-        if func.return_types.len() == 1 {
-            let declared_ret_ty = self.resolve_type(&func.return_types[0]);
+        if func.returns.len() == 1 {
+            let declared_ret_ty = self.resolve_type(&func.returns[0].ty);
             // Point to return type annotation for better error messages
-            self.unify(&body_ty, &declared_ret_ty, &func.return_types[0].span)?;
+            self.unify(&body_ty, &declared_ret_ty, &func.returns[0].ty.span)?;
         }
 
         self.pop_scope();

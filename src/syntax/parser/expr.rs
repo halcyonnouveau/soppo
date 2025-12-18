@@ -997,27 +997,8 @@ impl Parser {
                 }
                 self.expect(Token::RParen)?;
 
-                // Parse return types
-                let mut return_types = Vec::new();
-                // Check for multi-return: (type1, type2)
-                if self.consume(&Token::LParen) {
-                    if !matches!(self.peek(), Some(Token::RParen)) {
-                        loop {
-                            return_types.push(self.parse_type()?);
-                            if !self.consume(&Token::Comma) {
-                                break;
-                            }
-                        }
-                    }
-                    self.expect(Token::RParen)?;
-                } else if matches!(
-                    self.peek(),
-                    Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
-                ) && !matches!(self.peek(), Some(Token::LBrace))
-                {
-                    // Single return type (not followed by {)
-                    return_types.push(self.parse_type()?);
-                }
+                // Parse return types (supports named returns)
+                let returns = self.parse_return_list()?;
 
                 // Parse body
                 let body = self.parse_block()?;
@@ -1025,7 +1006,7 @@ impl Parser {
                 Ok(Expr {
                     kind: ExprKind::FuncLit {
                         params,
-                        return_types,
+                        returns,
                         body: body.clone(),
                     },
                     span: Span::with_bytes(

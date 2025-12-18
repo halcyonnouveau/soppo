@@ -188,7 +188,7 @@ pub struct FuncDecl {
     pub ident: Ident,
     pub generics: Vec<Generic>,
     pub params: Vec<Param>,
-    pub return_types: Vec<TypeAnnotation>, // Empty = no return, one = single, many = multi-value
+    pub returns: Vec<Param>, // Empty = no return; Param.ident.name is "" for unnamed returns
     pub body: Block,
     pub span: Span,
     pub doc_comment: Option<String>,
@@ -420,10 +420,10 @@ pub enum ExprKind {
         op: UnaryOp,
         operand: Box<Expr>,
     },
-    // Anonymous function: func(params) returnTypes { body }
+    // Anonymous function: func(params) returns { body }
     FuncLit {
         params: Vec<Param>,
-        return_types: Vec<TypeAnnotation>,
+        returns: Vec<Param>,
         body: Block,
     },
     Block(Block),

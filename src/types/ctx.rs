@@ -304,7 +304,11 @@ impl GlobalCtxt {
                 .iter()
                 .map(|p| (p.ident.name.clone(), Type::from_ast(&p.ty)))
                 .collect(),
-            return_types: func_decl.return_types.iter().map(Type::from_ast).collect(),
+            return_types: func_decl
+                .returns
+                .iter()
+                .map(|p| Type::from_ast(&p.ty))
+                .collect(),
             span: Some(func_decl.span),
             name_span: Some(func_decl.ident.span),
             doc_comment: func_decl.doc_comment.clone(),

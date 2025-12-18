@@ -429,7 +429,7 @@ impl Infer {
 
             ExprKind::FuncLit {
                 params,
-                return_types,
+                returns,
                 body,
             } => {
                 // Save the current expected return types
@@ -446,7 +446,7 @@ impl Infer {
 
                 // Set expected return types for this function
                 let expected_ret_types: Vec<Type> =
-                    return_types.iter().map(|t| self.resolve_type(t)).collect();
+                    returns.iter().map(|r| self.resolve_type(&r.ty)).collect();
                 if !expected_ret_types.is_empty() {
                     self.expected_return_types = Some(expected_ret_types.clone());
                 }
@@ -462,14 +462,14 @@ impl Infer {
                 // Build function type - use resolve_type for proper qualified type handling
                 let param_types: Vec<Type> =
                     params.iter().map(|p| self.resolve_type(&p.ty)).collect();
-                let ret_ty = if return_types.is_empty() {
+                let ret_ty = if returns.is_empty() {
                     Type::unit()
-                } else if return_types.len() == 1 {
-                    self.resolve_type(&return_types[0])
+                } else if returns.len() == 1 {
+                    self.resolve_type(&returns[0].ty)
                 } else {
                     // Multiple return types - use a tuple type
                     let ret_types: Vec<Type> =
-                        return_types.iter().map(|t| self.resolve_type(t)).collect();
+                        returns.iter().map(|r| self.resolve_type(&r.ty)).collect();
                     Type::generic("tuple", ret_types)
                 };
 

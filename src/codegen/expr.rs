@@ -344,7 +344,7 @@ impl Codegen {
 
             ExprKind::FuncLit {
                 params,
-                return_types,
+                returns,
                 body,
             } => {
                 self.emit("func(");
@@ -358,19 +358,26 @@ impl Codegen {
                 }
                 self.emit(")");
 
-                // Return types
-                if return_types.len() == 1 {
-                    self.emit(" ");
-                    self.emit(self.go_type(&return_types[0].name));
-                } else if return_types.len() > 1 {
-                    self.emit(" (");
-                    for (i, ty) in return_types.iter().enumerate() {
-                        if i > 0 {
-                            self.emit(", ");
+                // Return types - handle named and unnamed
+                if !returns.is_empty() {
+                    let is_named = !returns[0].ident.name.is_empty();
+                    if returns.len() == 1 && !is_named {
+                        self.emit(" ");
+                        self.emit(self.go_type(&returns[0].ty.name));
+                    } else {
+                        self.emit(" (");
+                        for (i, ret) in returns.iter().enumerate() {
+                            if i > 0 {
+                                self.emit(", ");
+                            }
+                            if !ret.ident.name.is_empty() {
+                                self.emit(&ret.ident.name);
+                                self.emit(" ");
+                            }
+                            self.emit(self.go_type(&ret.ty.name));
                         }
-                        self.emit(self.go_type(&ty.name));
+                        self.emit(")");
                     }
-                    self.emit(")");
                 }
 
                 self.emit(" ");
