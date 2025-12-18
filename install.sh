@@ -53,7 +53,6 @@ esac
 echo ""
 echo "Next steps:"
 echo "  1. Run 'sopmod install sop latest' to install sop"
-echo "  2. Run 'sopmod default sop latest' to set it as default"
-echo "  3. Add ~/.sopmod/bin to your PATH:"
+echo "  2. Add ~/.sopmod/bin to your PATH:"
 echo ""
 echo "     export PATH=\"\$HOME/.sopmod/bin:\$PATH\""
