@@ -35,7 +35,7 @@ cargo install soppo
 
 ## Quick Look
 
-```go
+````go
 // Enums with struct variants
 type Shape enum {
 	Circle struct {
@@ -47,6 +47,17 @@ type Shape enum {
 	}
 }
 
+// calcArea returns the area of a shape.
+//
+// Doctests - code examples that run as tests:
+// ```sop
+// import "fmt"
+//
+// circle := Shape.Circle{radius: 2.0}
+// fmt.Println(calcArea(circle))
+// // Output:
+// // 12.56636
+// ```
 func calcArea(s Shape) float64 {
 	var area float64
 
@@ -80,7 +91,7 @@ func main() {
 		os.Exit(1)
 	}
 }
-```
+````
 
 ### Error Messages
 
