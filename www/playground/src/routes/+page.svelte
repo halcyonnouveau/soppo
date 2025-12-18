@@ -23,14 +23,12 @@ type Shape enum {
 }
 
 func area(s Shape) float64 {
-    var result float64
     match s {
     case Shape.Circle{radius: r, ...}:
-        result = 3.14 * r * r
+        return 3.14 * r * r
     case Shape.Rectangle{width: w, height: h}:
-        result = w * h
+        return w * h
     }
-    return result
 }
 
 func main() {

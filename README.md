@@ -66,12 +66,10 @@ func calcArea(s Shape) float64 {
 	// Pattern matching with destructuring
 	match s {
 	case Shape.Circle{radius: r}:
-		area = 3.14159 * r * r
+		return 3.14159 * r * r
 	case Shape.Rectangle{width: w, height: h}:
-		area = w * h
+		return w * h
 	}
-
-	return area
 }
 
 func printArea() error {
