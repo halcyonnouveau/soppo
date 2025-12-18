@@ -1,0 +1,16 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::try_captures_error
+
+  × Cannot capture error with `?` operator
+    ╭─[try_captures_error.sop:9:10]
+  8 │     // This should fail: trying to capture error with ? operator
+  9 │     result, err := foo() ?
+    ·             ─┬─
+    ·              ╰── extra variable would capture error, but `?` already handles it
+ 10 │ }
+    ╰────
+  help: the `?` operator handles errors automatically; use `result, err :=
+        expr` without `?` to capture the error

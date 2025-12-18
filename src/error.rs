@@ -102,6 +102,18 @@ pub enum SoppoError {
         span: Span,
     },
 
+    #[error("Cannot capture error with `?` operator")]
+    #[diagnostic(
+        code(soppo::try_captures_error),
+        help(
+            "the `?` operator handles errors automatically; use `result, err := expr` without `?` to capture the error"
+        )
+    )]
+    TryCapturesError {
+        #[label("extra variable would capture error, but `?` already handles it")]
+        span: Span,
+    },
+
     #[error("Cannot assign `nil` to non-nilable type `{ty}`")]
     #[diagnostic(
         code(soppo::nil_to_non_nilable),
@@ -176,6 +188,42 @@ pub enum SoppoError {
     ShadowsImport {
         name: String,
         #[label("shadows import")]
+        span: Span,
+    },
+
+    #[error("Variable `{name}` redeclared in this block")]
+    #[diagnostic(
+        code(soppo::redeclared),
+        help("remove the redundant declaration, or use a different name")
+    )]
+    Redeclared {
+        name: String,
+        #[label("redeclared here")]
+        span: Span,
+        #[label("previous declaration")]
+        prev_span: Span,
+    },
+
+    #[error("Imported package `{name}` is not used")]
+    #[diagnostic(
+        code(soppo::unused_import),
+        help("remove the import, or use `_ \"{path}\"` to import for side effects only")
+    )]
+    UnusedImport {
+        name: String,
+        path: String,
+        #[label("unused import")]
+        span: Span,
+    },
+
+    #[error("Variable `{name}` is declared but not used")]
+    #[diagnostic(
+        code(soppo::unused_variable),
+        help("remove the variable, or use `_ = {name}` to suppress this error")
+    )]
+    UnusedVariable {
+        name: String,
+        #[label("unused variable")]
         span: Span,
     },
 }

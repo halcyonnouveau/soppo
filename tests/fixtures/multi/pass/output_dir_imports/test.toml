@@ -1,0 +1,2 @@
+module = "github.com/test/output_dir_imports"
+output = "gen"

@@ -14,6 +14,8 @@ pub struct TestConfig {
     pub module: String,
     /// Optional expected error substring for fail tests
     pub expected_error: Option<String>,
+    /// Optional output directory for generated Go files
+    pub output: Option<String>,
 }
 
 pub fn compile_soppo_file(input_file: &str) -> Result<String, String> {
@@ -105,7 +107,12 @@ pub fn run_multi_test(fixture_dir: &Path) -> Result<Vec<(String, String)>, Strin
     let sop_files = find_sop_files(fixture_dir);
     let go_files = find_go_files(fixture_dir);
 
-    build_test_project(&config.module, &sop_files, &go_files)
+    build_test_project(
+        &config.module,
+        &sop_files,
+        &go_files,
+        config.output.as_deref(),
+    )
 }
 
 /// Create a test project with go.mod and compile it using the library directly
@@ -113,6 +120,7 @@ fn build_test_project(
     module_name: &str,
     sop_files: &[(String, String)],
     go_files: &[(String, String)],
+    output_dir: Option<&str>,
 ) -> Result<Vec<(String, String)>, String> {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let root = temp.path();
@@ -143,20 +151,22 @@ fn build_test_project(
     }
 
     // Build using the library directly
-    // Output goes next to source files (None means no separate output dir)
-    let results = soppo::build::build_project(root, None).map_err(|e| {
+    let output_path = output_dir.map(|d| root.join(d));
+    let results = soppo::build::build_project(root, output_path.as_deref()).map_err(|e| {
         // Render the full miette diagnostic for better error messages
         format!("{:?}", e)
     })?;
 
     // Write generated files to disk for go build validation
-    // Files are written next to source files (relative to project root)
+    // When output_dir is set, files go there; otherwise next to source files
+    let root_buf = root.to_path_buf();
+    let base_dir = output_path.as_ref().unwrap_or(&root_buf);
     for (relative_path, go_code) in &results {
-        let output_path = root.join(relative_path);
-        if let Some(parent) = output_path.parent() {
+        let file_path = base_dir.join(relative_path);
+        if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).expect("Failed to create output directories");
         }
-        fs::write(&output_path, go_code).expect("Failed to write generated file");
+        fs::write(&file_path, go_code).expect("Failed to write generated file");
     }
 
     // Run go build to verify the generated code compiles

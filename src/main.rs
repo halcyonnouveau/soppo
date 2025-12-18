@@ -191,11 +191,14 @@ fn main() -> Result<()> {
 fn build_from_config(cwd: &std::path::Path, output: Option<PathBuf>) -> Result<()> {
     let project = Project::discover(cwd)?;
 
-    if project.config.is_none() {
-        return Err(ConfigError::NoFilesSpecified.into());
-    }
+    let config = project
+        .config
+        .as_ref()
+        .ok_or(ConfigError::NoFilesSpecified)?;
 
-    let count = build::build_project_to_disk(cwd, output.as_deref())?;
+    // CLI --output overrides config output, otherwise use config's output
+    let output_dir = output.or_else(|| config.output.clone());
+    let count = build::build_project_to_disk(cwd, output_dir.as_deref())?;
 
     if count == 0 {
         println!("No .sop files found matching patterns");

@@ -98,13 +98,19 @@ fn resolve_stdlib_package(pkg_name: &str) -> Option<String> {
     }
 }
 
+/// Scope entry: (type, definition span, used flag)
+type ScopeEntry = (Type, Option<Span>, bool);
+
+/// Import entry: (import path, span, used flag)
+type ImportEntry = (String, Span, bool);
+
 /// Type inference engine
 pub struct Infer {
     /// Global state tracking all modules
     pub(super) global_state: GlobalCtxt,
 
-    /// Current scope: variable name -> (type, definition span)
-    pub(super) scopes: Vec<HashMap<String, (Type, Option<Span>)>>,
+    /// Current scope: variable name -> (type, definition span, used flag)
+    pub(super) scopes: Vec<HashMap<String, ScopeEntry>>,
 
     /// Type variable substitutions (solutions)
     pub(super) substitutions: HashMap<i32, Type>,
@@ -124,9 +130,9 @@ pub struct Infer {
     /// Current project (for external module resolution, optional)
     pub(super) project: Option<Project>,
 
-    /// Imported Go packages: short name -> import path
-    /// e.g., "fmt" -> "fmt", "strings" -> "strings"
-    pub(super) imported_packages: HashMap<String, String>,
+    /// Imported Go packages: short name -> (import path, span, used flag)
+    /// e.g., "fmt" -> ("fmt", span, false)
+    pub(super) imported_packages: HashMap<String, ImportEntry>,
 
     /// Imported Soppo modules: short name -> ModuleId
     /// e.g., "helpers" -> ModuleId("util/helpers")
@@ -313,6 +319,9 @@ impl Infer {
         for import in imports {
             let import_path = import.path.trim_matches('"');
 
+            // Check for blank import (_ "package")
+            let is_blank_import = import.alias.as_deref() == Some("_");
+
             // Check if this is a local Soppo package and get the local path if so
             let soppo_local_path = self.project.as_ref().and_then(|project| {
                 if crate::deps::is_soppo_import(import_path, &project.module_path, &project.root) {
@@ -323,6 +332,11 @@ impl Infer {
             });
 
             if let Some(local_path) = soppo_local_path {
+                // Blank imports don't add a usable package name
+                if is_blank_import {
+                    continue;
+                }
+
                 // Use alias if provided, otherwise derive from path
                 let package_name = import
                     .alias
@@ -339,9 +353,11 @@ impl Infer {
                 self.global_state
                     .register_soppo_import(package_name.to_string(), module_id);
 
-                // Also track in imported_packages for `is_imported_package` checks
-                self.imported_packages
-                    .insert(package_name.to_string(), import_path.to_string());
+                // Also track in imported_packages for `is_imported_package` and unused import checks
+                self.imported_packages.insert(
+                    package_name.to_string(),
+                    (import_path.to_string(), import.span, false),
+                );
 
                 // Add package name to scope with a special "soppo_package" type
                 let _ = self.insert_var(
@@ -350,6 +366,11 @@ impl Infer {
                     None,
                 );
             } else {
+                // Blank imports don't add a usable package name
+                if is_blank_import {
+                    continue;
+                }
+
                 // Go package import
                 // Use alias if provided, otherwise derive from path
                 let package_name = import
@@ -357,9 +378,11 @@ impl Infer {
                     .as_deref()
                     .unwrap_or_else(|| import_path.rsplit('/').next().unwrap_or(import_path));
 
-                // Track the import for later lookup
-                self.imported_packages
-                    .insert(package_name.to_string(), import_path.to_string());
+                // Track the import for later lookup and unused import checks
+                self.imported_packages.insert(
+                    package_name.to_string(),
+                    (import_path.to_string(), import.span, false),
+                );
 
                 // Check if Go package has soppo type markers and register them
                 if let Ok(pkg) = self
@@ -478,8 +501,10 @@ impl Infer {
         package_name: &str,
         func_name: &str,
     ) -> Option<Type> {
-        // Get the import path for this package
-        let import_path = self.imported_packages.get(package_name)?.clone();
+        // Get the import path for this package and mark as used
+        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let import_path = import_path.clone();
+        self.mark_import_used(package_name);
 
         // Try to get the package info (project is optional - stdlib works without it)
         let pkg = self
@@ -575,8 +600,10 @@ impl Infer {
 
     /// Look up a type in an imported Go package
     pub(super) fn lookup_go_type(&mut self, package_name: &str, type_name: &str) -> Option<Type> {
-        // Get the import path for this package
-        let import_path = self.imported_packages.get(package_name)?.clone();
+        // Get the import path for this package and mark as used
+        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let import_path = import_path.clone();
+        self.mark_import_used(package_name);
 
         // Try to get the package info (project is optional - stdlib works without it)
         let pkg = self
@@ -648,7 +675,9 @@ impl Infer {
         type_name: &str,
         field_name: &str,
     ) -> Option<Type> {
-        let import_path = self.imported_packages.get(package_name)?.clone();
+        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let import_path = import_path.clone();
+        self.mark_import_used(package_name);
 
         let pkg = self
             .go_cache
@@ -712,7 +741,9 @@ impl Infer {
         type_name: &str,
         method_name: &str,
     ) -> Option<Type> {
-        let import_path = self.imported_packages.get(package_name)?.clone();
+        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let import_path = import_path.clone();
+        self.mark_import_used(package_name);
 
         let pkg = self
             .go_cache
@@ -774,8 +805,10 @@ impl Infer {
         let import_path = self
             .imported_packages
             .get(&package_name)
-            .cloned()
+            .map(|(path, _, _)| path.clone())
             .unwrap_or_else(|| package_name.clone());
+
+        self.mark_import_used(&package_name);
 
         // Try to get the package info
         let pkg = match self
@@ -905,7 +938,9 @@ impl Infer {
         package_name: &str,
         type_name: &str,
     ) -> Option<String> {
-        let import_path = self.imported_packages.get(package_name)?.clone();
+        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let import_path = import_path.clone();
+        self.mark_import_used(package_name);
         self.resolve_underlying_type_recursive(&import_path, type_name, 0)
     }
 
@@ -962,8 +997,11 @@ impl Infer {
             let inner_import_path = self
                 .imported_packages
                 .get(&pkg_name)
-                .cloned()
+                .map(|(path, _, _)| path.clone())
                 .or_else(|| resolve_stdlib_package(&pkg_name));
+            if self.imported_packages.contains_key(&pkg_name) {
+                self.mark_import_used(&pkg_name);
+            }
 
             if let Some(inner_import_path) = inner_import_path {
                 return self.resolve_underlying_type_recursive(
@@ -1476,35 +1514,172 @@ impl Infer {
         self.nil_state.pop();
     }
 
+    /// Check for unused variables in the current scope
+    /// Returns an error for the first unused variable found
+    pub(super) fn check_unused_vars_in_scope(&self) -> Result<()> {
+        if let Some(scope) = self.scopes.last() {
+            for (name, (_, span, used)) in scope {
+                if !used
+                    && name != "_"
+                    && let Some(span) = span
+                {
+                    return Err(SoppoError::UnusedVariable {
+                        name: name.clone(),
+                        span: *span,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Check for unused imports after file inference
+    /// Returns an error for the first unused import found
+    pub fn check_unused_imports(&self) -> Result<()> {
+        for (name, (path, span, used)) in &self.imported_packages {
+            if !used {
+                return Err(SoppoError::UnusedImport {
+                    name: name.clone(),
+                    path: path.clone(),
+                    span: *span,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Mark an import as used
+    pub(super) fn mark_import_used(&mut self, name: &str) {
+        if let Some((_, _, used)) = self.imported_packages.get_mut(name) {
+            *used = true;
+        }
+    }
+
     /// Insert a variable into the current scope
     /// Returns an error if the variable name shadows an imported package
+    /// or if it's already declared in the current scope
     pub(super) fn insert_var(
         &mut self,
         name: String,
         ty: Type,
         def_span: Option<Span>,
     ) -> Result<()> {
+        // Blank identifier `_` is special - it discards values and can be used multiple times
+        if name == "_" {
+            return Ok(());
+        }
+
         // Check if the variable name shadows an imported package
         if self.is_imported_package(&name)
             && let Some(span) = def_span
         {
             return Err(SoppoError::ShadowsImport { name, span });
         }
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, (ty, def_span));
+
+        // Check if the variable is already declared in the current scope
+        if let Some(scope) = self.scopes.last()
+            && let Some((_, prev_span, _)) = scope.get(&name)
+            && let (Some(span), Some(prev)) = (def_span, prev_span)
+        {
+            return Err(SoppoError::Redeclared {
+                name,
+                span,
+                prev_span: *prev,
+            });
         }
+
+        if let Some(scope) = self.scopes.last_mut() {
+            // Insert with used=false, will be marked used when accessed via lookup_var
+            scope.insert(name, (ty, def_span, false));
+        }
+        Ok(())
+    }
+
+    /// Check if a variable exists in the current (innermost) scope only
+    /// Used for Go's short declaration rules where `:=` with multiple variables
+    /// allows redeclaration if at least one variable is new
+    pub(super) fn var_in_current_scope(&self, name: &str) -> bool {
+        if let Some(scope) = self.scopes.last() {
+            scope.contains_key(name)
+        } else {
+            false
+        }
+    }
+
+    /// Update a variable's type in the current scope without redeclaration check
+    /// Used for Go's short declaration where existing variables are reassigned
+    pub(super) fn update_var(&mut self, name: String, ty: Type, def_span: Option<Span>) {
+        if let Some(scope) = self.scopes.last_mut() {
+            // Insert with used=false, will be marked used when accessed via lookup_var
+            scope.insert(name, (ty, def_span, false));
+        }
+    }
+
+    /// Insert variables for Go's short declaration (`:=`) with multi-variable semantics.
+    /// In Go, `a, b := expr` is valid if at least one of a, b is new.
+    /// Existing variables are reassigned, new variables are declared.
+    /// Returns an error if ALL variables already exist (no new declarations).
+    pub(super) fn insert_short_decl_vars(
+        &mut self,
+        vars: &[(String, Type, Option<Span>)],
+    ) -> Result<()> {
+        // Check how many variables are new vs existing
+        let new_vars: Vec<_> = vars
+            .iter()
+            .filter(|(name, _, _)| name != "_" && !self.var_in_current_scope(name))
+            .collect();
+
+        // If no new variables, this is a redeclaration error
+        if new_vars.is_empty() {
+            // Find a span to report the error on
+            if let Some((name, _, Some(span))) = vars.iter().find(|(n, _, _)| n != "_") {
+                return Err(SoppoError::Redeclared {
+                    name: name.clone(),
+                    span: *span,
+                    prev_span: self
+                        .scopes
+                        .last()
+                        .and_then(|s| s.get(name))
+                        .and_then(|(_, span, _)| *span)
+                        .unwrap_or(*span),
+                });
+            }
+        }
+
+        // Insert/update all variables
+        for (name, ty, span) in vars {
+            if name == "_" {
+                continue; // Skip blank identifier
+            }
+            // Just update - either new or existing, we put it in scope
+            self.update_var(name.clone(), ty.clone(), *span);
+        }
+
         Ok(())
     }
 
     /// Lookup a variable in scopes (from innermost to outermost)
     /// Returns the type and optionally the definition span
-    pub(super) fn lookup_var(&self, name: &str) -> Option<(Type, Option<Span>)> {
-        for scope in self.scopes.iter().rev() {
-            if let Some((ty, span)) = scope.get(name) {
+    /// Also marks the variable as used
+    pub(super) fn lookup_var(&mut self, name: &str) -> Option<(Type, Option<Span>)> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some((ty, span, used)) = scope.get_mut(name) {
+                *used = true;
                 return Some((ty.clone(), *span));
             }
         }
         None
+    }
+
+    /// Mark a variable as used without looking up its type
+    /// Used for `_ = var` patterns that suppress unused variable warnings
+    pub(super) fn mark_var_used(&mut self, name: &str) {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some((_, _, used)) = scope.get_mut(name) {
+                *used = true;
+                return;
+            }
+        }
     }
 
     /// Get the nil state for a variable (from innermost to outermost scope)
@@ -1857,7 +2032,9 @@ impl Infer {
 
         match &expr.kind {
             // Type assertion: x.(T) -> (T, bool)
-            ExprKind::TypeAssert { expr: _, ty } => {
+            ExprKind::TypeAssert { expr: inner, ty } => {
+                // Infer the inner expression to mark variables as used
+                self.infer_expr(inner)?;
                 let asserted_ty = self.resolve_type(ty);
                 Ok(Some((asserted_ty, Type::simple("bool"))))
             }
@@ -1865,9 +2042,11 @@ impl Infer {
             // Map index: m[k] -> (V, bool) when m is a map type
             ExprKind::Index {
                 expr: map_expr,
-                index: _,
+                index,
             } => {
                 let map_ty = self.infer_expr(map_expr)?;
+                // Also infer the index to mark variables as used
+                self.infer_expr(index)?;
                 let map_ty = self.substitute(map_ty);
 
                 // Check if this is a map type
@@ -1930,7 +2109,7 @@ mod tests {
         // Import io package to look up Reader interface
         infer
             .imported_packages
-            .insert("io".to_string(), "io".to_string());
+            .insert("io".to_string(), ("io".to_string(), Span::dummy(), false));
 
         // io.Reader is an interface
         let reader_type = Type::Con {
@@ -1970,9 +2149,10 @@ mod tests {
         let mut infer = Infer::new().unwrap();
 
         // Only import bufio, not io
-        infer
-            .imported_packages
-            .insert("bufio".to_string(), "bufio".to_string());
+        infer.imported_packages.insert(
+            "bufio".to_string(),
+            ("bufio".to_string(), Span::dummy(), false),
+        );
 
         // io.Reader should still be detected as interface (stdlib fallback)
         let reader_type = Type::Con {

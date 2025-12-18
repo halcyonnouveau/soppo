@@ -2,4 +2,6 @@ package main
 
 import "github.com/test/missing/nonexistent"
 
-func main() {}
+func main() {
+	nonexistent.DoSomething()
+}

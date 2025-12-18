@@ -5,6 +5,39 @@ use crate::types::ctx::TypeDefKind;
 use crate::types::{SymbolKind, Type};
 
 impl Infer {
+    /// Infer the type of a function body, adding named return parameters to scope
+    pub fn infer_func_body(
+        &mut self,
+        block: &Block,
+        returns: &[crate::syntax::Param],
+    ) -> Result<Type> {
+        self.push_scope();
+
+        // Add named return parameters to the body scope
+        // Mark them as used since they're implicitly used by return
+        for ret in returns {
+            if !ret.ident.name.is_empty() {
+                let ret_ty = self.resolve_type(&ret.ty);
+                self.insert_var(ret.ident.name.clone(), ret_ty, Some(ret.ident.span))?;
+                // Named returns are implicitly used - mark as used
+                self.mark_var_used(&ret.ident.name);
+            }
+        }
+
+        let mut last_ty = Type::unit();
+
+        for stmt in &block.stmts {
+            last_ty = self.infer_stmt(stmt)?;
+        }
+
+        // Check for unused variables before popping scope
+        self.check_unused_vars_in_scope()?;
+
+        self.pop_scope();
+
+        Ok(last_ty)
+    }
+
     /// Infer the type of a block
     /// The type of a block is the type of its last expression (if any), otherwise unit
     pub fn infer_block(&mut self, block: &Block) -> Result<Type> {
@@ -76,7 +109,10 @@ impl Infer {
 
         // Store function type in outermost scope so it can be called
         if let Some(scope) = self.scopes.first_mut() {
-            scope.insert(func.ident.name.clone(), (func_ty.clone(), Some(func.span)));
+            scope.insert(
+                func.ident.name.clone(),
+                (func_ty.clone(), Some(func.span), false),
+            );
         }
 
         // Record function definition for LSP
@@ -177,8 +213,8 @@ impl Infer {
             self.record_type_annotation(&ret.ty);
         }
 
-        // Infer body type
-        let body_ty = self.infer_block(&func.body)?;
+        // Infer body type, passing named returns to add to the body scope
+        let body_ty = self.infer_func_body(&func.body, &func.returns)?;
 
         // Check against declared return type (for single return)
         if func.returns.len() == 1 {
@@ -218,7 +254,7 @@ impl Infer {
         if let Some(scope) = self.scopes.first_mut() {
             scope.insert(
                 const_decl.ident.name.clone(),
-                (const_ty.clone(), Some(const_decl.span)),
+                (const_ty.clone(), Some(const_decl.span), false),
             );
         }
 
@@ -289,7 +325,8 @@ impl Infer {
                             // They act like constructors with no arguments
                             let enum_ty = Type::simple(&type_decl.ident.name);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope.insert(ident.name.clone(), (enum_ty, Some(ident.span)));
+                                scope
+                                    .insert(ident.name.clone(), (enum_ty, Some(ident.span), false));
                             }
                         }
                         EnumVariant::Single { ident, ty, .. } => {
@@ -298,8 +335,10 @@ impl Infer {
                             let enum_ty = Type::simple(&type_decl.ident.name);
                             let constructor_ty = Type::fun(vec![value_ty], enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope
-                                    .insert(ident.name.clone(), (constructor_ty, Some(ident.span)));
+                                scope.insert(
+                                    ident.name.clone(),
+                                    (constructor_ty, Some(ident.span), false),
+                                );
                             }
                         }
                         EnumVariant::Struct { ident, fields, .. } => {
@@ -309,8 +348,10 @@ impl Infer {
                             let enum_ty = Type::simple(&type_decl.ident.name);
                             let constructor_ty = Type::fun(field_tys, enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope
-                                    .insert(ident.name.clone(), (constructor_ty, Some(ident.span)));
+                                scope.insert(
+                                    ident.name.clone(),
+                                    (constructor_ty, Some(ident.span), false),
+                                );
                             }
                         }
                     }

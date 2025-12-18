@@ -924,7 +924,7 @@ impl Parser {
         })
     }
 
-    /// Parse a single import: "path" or alias "path"
+    /// Parse a single import: "path", alias "path", or _ "path"
     fn parse_single_import(&mut self) -> Result<Import> {
         match self.advance() {
             Some((Token::String(path), span)) => {
@@ -952,6 +952,24 @@ impl Parser {
                     }),
                     None => Err(SoppoError::Parse {
                         message: "Expected import path string after alias".to_string(),
+                        span: start_span,
+                    }),
+                }
+            }
+            Some((Token::Underscore, start_span)) => {
+                // Blank import: _ "path" (for side effects only)
+                match self.advance() {
+                    Some((Token::String(path), _end_span)) => Ok(Import {
+                        alias: Some("_".to_string()),
+                        path,
+                        span: start_span,
+                    }),
+                    Some((tok, span)) => Err(SoppoError::Parse {
+                        message: format!("Expected import path string after _, found {:?}", tok),
+                        span,
+                    }),
+                    None => Err(SoppoError::Parse {
+                        message: "Expected import path string after _".to_string(),
                         span: start_span,
                     }),
                 }

@@ -1,0 +1,10 @@
+package main
+
+func bar() error {
+	return nil
+}
+
+func main() {
+	// This should fail: trying to assign error-only return with ?
+	err := bar() ?
+}

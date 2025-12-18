@@ -1,0 +1,13 @@
+package main
+
+func parseVersion(version string) (major, minor int, err error) {
+	// This should fail: major, minor are already declared as named returns
+	var major, minor int
+	major = 1
+	minor = 2
+	return major, minor, nil
+}
+
+func main() {
+	parseVersion("1.2")
+}

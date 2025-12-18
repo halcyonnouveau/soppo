@@ -1,0 +1,14 @@
+package main
+
+import "strconv"
+
+// Test ? operator with assignment to named return parameters
+func parseVersion(version string) (major, minor int, err error) {
+	major = strconv.Atoi(version) ?
+	minor = strconv.Atoi(version) ?
+	return major, minor, nil
+}
+
+func main() {
+	parseVersion("1")
+}

@@ -133,8 +133,12 @@ impl Infer {
                     if names.len() == 2
                         && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)?
                     {
-                        self.insert_var(names[0].name.clone(), value_ty, Some(names[0].span))?;
-                        self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span))?;
+                        // Use Go's short decl semantics - at least one var must be new
+                        let vars = vec![
+                            (names[0].name.clone(), value_ty, Some(names[0].span)),
+                            (names[1].name.clone(), ok_ty, Some(names[1].span)),
+                        ];
+                        self.insert_short_decl_vars(&vars)?;
                         return Ok(Type::unit());
                     }
 
@@ -150,9 +154,13 @@ impl Infer {
                         && type_name.name == "tuple"
                         && args.len() == names.len()
                     {
-                        for (ident, ty) in names.iter().zip(args.iter()) {
-                            self.insert_var(ident.name.clone(), ty.clone(), Some(ident.span))?;
-                        }
+                        // Use Go's short decl semantics - at least one var must be new
+                        let vars: Vec<_> = names
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(ident, ty)| (ident.name.clone(), ty.clone(), Some(ident.span)))
+                            .collect();
+                        self.insert_short_decl_vars(&vars)?;
 
                         // Track error companions: if last return is error, other returns are companions
                         // This enables narrowing like: `resp, err := f(); if err != nil { return }`
@@ -183,10 +191,12 @@ impl Infer {
                     })
                 } else {
                     // a, b := expr1, expr2 (one value per name)
+                    let mut vars = Vec::with_capacity(names.len());
                     for (ident, value) in names.iter().zip(values.iter()) {
                         let value_ty = self.infer_expr(value)?;
-                        self.insert_var(ident.name.clone(), value_ty, Some(ident.span))?;
+                        vars.push((ident.name.clone(), value_ty, Some(ident.span)));
                     }
+                    self.insert_short_decl_vars(&vars)?;
                     Ok(Type::unit())
                 }
             }
@@ -556,6 +566,9 @@ impl Infer {
                         (self.fresh_ty_var(), self.fresh_ty_var())
                     };
 
+                // Create a scope for the loop variables (scoped to the for statement)
+                self.push_scope();
+
                 // Bind the key variable
                 self.insert_var(key.name.clone(), key_ty, Some(key.span))?;
 
@@ -567,6 +580,8 @@ impl Infer {
                 // Type check body
                 self.infer_block(body)?;
 
+                self.pop_scope();
+
                 Ok(Type::unit())
             }
 
@@ -576,6 +591,13 @@ impl Infer {
                 then_block,
                 else_block,
             } => {
+                // If there's an init, create a new scope for it that covers the entire if/else
+                // This matches Go's scoping: `if x := 1; cond { }` - x is only in scope for the if
+                let has_init = init.is_some();
+                if has_init {
+                    self.push_scope();
+                }
+
                 // Process init statement if present (Go-style: if x := expr; cond { })
                 if let Some(init_stmt) = init {
                     self.infer_stmt(init_stmt)?;
@@ -647,6 +669,11 @@ impl Infer {
                             }
                         }
                     }
+                }
+
+                // Pop the init scope if we pushed one
+                if has_init {
+                    self.pop_scope();
                 }
 
                 // If both branches diverge (return never), the if statement also diverges
@@ -1094,6 +1121,12 @@ impl Infer {
                         let value_ty = self.infer_expr(value)?;
                         let value_ty_sub = self.substitute(value_ty.clone());
 
+                        // If expression returns only `error`, can't assign to a variable with `?`
+                        // The `?` strips the error, leaving nothing to assign
+                        if self.is_error_type(&value_ty_sub) {
+                            return Err(SoppoError::TryCapturesError { span: ident.span });
+                        }
+
                         // Strip error from tuple type for the variable
                         let var_ty = self.strip_error_from_tuple(&value_ty_sub);
                         self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))?;
@@ -1116,6 +1149,16 @@ impl Infer {
                         {
                             // Exclude the last element (error) when assigning
                             let non_error_count = args.len().saturating_sub(1);
+
+                            // Error if user provides more names than non-error values
+                            // e.g., `result, err := foo() ?` when foo returns (T, error)
+                            // The `?` already handles the error, so capturing it is wrong
+                            if names.len() > non_error_count {
+                                return Err(SoppoError::TryCapturesError {
+                                    span: names[non_error_count].span,
+                                });
+                            }
+
                             for (i, var_ident) in names.iter().enumerate() {
                                 if i < non_error_count
                                     && let Some(ty) = args.get(i)
@@ -1274,7 +1317,7 @@ mod tests {
     }
 
     #[test]
-    fn test_variable_shadowing() {
+    fn test_variable_redeclaration_error() {
         let source = r#"
             func test() int {
                 x := 1
@@ -1288,8 +1331,15 @@ mod tests {
 
         for decl in &file.decls {
             if let Decl::Func(func) = decl {
-                // Shadowing is allowed in Soppo
-                assert!(infer.infer_func_decl(func).is_ok());
+                // Redeclaration in the same scope is not allowed
+                let result = infer.infer_func_decl(func);
+                assert!(result.is_err());
+                let err = result.unwrap_err().to_string();
+                assert!(
+                    err.contains("redeclared"),
+                    "Expected redeclaration error, got: {}",
+                    err
+                );
             }
         }
     }

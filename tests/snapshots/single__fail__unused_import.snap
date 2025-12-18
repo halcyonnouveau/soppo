@@ -1,0 +1,16 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::unused_import
+
+  × Imported package `strings` is not used
+   ╭─[unused_import.sop:4:8]
+ 3 │ import "fmt"
+ 4 │ import "strings"
+   ·        ────┬────
+   ·            ╰── unused import
+ 5 │ 
+   ╰────
+  help: remove the import, or use `_ "strings"` to import for side effects
+        only

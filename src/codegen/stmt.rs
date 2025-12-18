@@ -481,6 +481,18 @@ impl Codegen {
                 let err_var = self.fresh_error_var();
                 let discard = discard_count.get();
 
+                // For assignments (not declarations), we need to declare the error variable first
+                // because Go doesn't allow mixing := and = in the same statement
+                let needs_err_decl = matches!(
+                    &inner_stmt.kind,
+                    StmtKind::Assign { .. } | StmtKind::MultiAssign { .. }
+                );
+
+                if needs_err_decl {
+                    self.emit_indent();
+                    self.emit(format!("var {} error\n", err_var));
+                }
+
                 // Emit the inner statement with error variable added
                 self.emit_indent();
                 self.gen_try_inner_stmt(inner_stmt, &err_var, discard);

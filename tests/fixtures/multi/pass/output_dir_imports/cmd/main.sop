@@ -1,0 +1,12 @@
+package main
+
+import (
+	"fmt"
+
+	"github.com/test/output_dir_imports/pkg" // sop: import
+)
+
+func main() {
+	result := pkg.Add(1, 2)
+	fmt.Println(result)
+}

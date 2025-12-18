@@ -1,0 +1,10 @@
+package main
+
+func foo() (int, error) {
+	return 1, nil
+}
+
+func main() {
+	// This should fail: trying to capture error with ? operator
+	result, err := foo() ?
+}

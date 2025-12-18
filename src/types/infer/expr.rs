@@ -607,6 +607,9 @@ impl Infer {
         {
             // For Soppo imports, look up from GlobalCtxt
             if self.is_soppo_import(name) {
+                // Mark the import as used
+                self.mark_import_used(name);
+
                 // Try to look up as a function first
                 if let Some((func_ty, def_span, name_span, doc_comment)) =
                     self.lookup_soppo_function(name, field)
@@ -1315,6 +1318,9 @@ impl Infer {
         {
             // For Soppo imports, look up the function from GlobalCtxt
             if self.is_soppo_import(pkg_name) {
+                // Mark the import as used
+                self.mark_import_used(pkg_name);
+
                 if let Some((func_ty, def_span, name_span, doc_comment)) =
                     self.lookup_soppo_function(pkg_name, name)
                 {

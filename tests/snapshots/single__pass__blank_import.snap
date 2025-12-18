@@ -1,0 +1,13 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+import _ "strings"
+
+func main() {
+    fmt.Println("hello")
+}

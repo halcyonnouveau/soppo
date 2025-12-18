@@ -1,0 +1,19 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::redeclared
+
+  × Variable `major` redeclared in this block
+   ╭─[redeclare_named_return.sop:3:36]
+ 2 │ 
+ 3 │ func parseVersion(version string) (major, minor int, err error) {
+   ·                                    ──┬──
+   ·                                      ╰── previous declaration
+ 4 │     // This should fail: major, minor are already declared as named returns
+ 5 │     var major, minor int
+   ·         ──┬──
+   ·           ╰── redeclared here
+ 6 │     major = 1
+   ╰────
+  help: remove the redundant declaration, or use a different name

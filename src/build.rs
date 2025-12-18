@@ -33,10 +33,16 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
     // Compute output directory (absolute) and relative path for Go imports
     // When output_dir is None, output next to source (no import rewriting needed)
     // When output_dir is Some, use that directory (with import rewriting if under project root)
-    let output_dir_relative = output_dir.and_then(|dir| {
-        dir.strip_prefix(&project.root)
-            .map(|p| p.to_string_lossy().to_string())
-            .ok()
+    let output_dir_relative = output_dir.map(|dir| {
+        if dir.is_relative() {
+            // Relative path is already the relative portion
+            dir.to_string_lossy().to_string()
+        } else {
+            // Absolute path - strip project root prefix
+            dir.strip_prefix(&project.root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| dir.to_string_lossy().to_string())
+        }
     });
 
     let sources = project.find_sources();
@@ -226,6 +232,11 @@ fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Resul
         infer_decl(infer, decl, source, filename)?;
     }
 
+    // Check for unused imports
+    infer.check_unused_imports().map_err(|e| {
+        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
+    })?;
+
     Ok(file)
 }
 
@@ -346,6 +357,11 @@ pub fn typecheck_workspace(
         for decl in &file.decls {
             infer_decl(&mut infer, decl, &source, filename)?;
         }
+
+        // Check for unused imports
+        infer.check_unused_imports().map_err(|e| {
+            miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
+        })?;
 
         // Extract results
         let symbols = infer.symbols().clone();

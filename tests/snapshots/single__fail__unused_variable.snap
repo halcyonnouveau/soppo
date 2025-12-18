@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::unused_variable
+
+  × Variable `x` is declared but not used
+   ╭─[unused_variable.sop:4:2]
+ 3 │ func main() {
+ 4 │     x := 1
+   ·     ┬
+   ·     ╰── unused variable
+ 5 │ }
+   ╰────
+  help: remove the variable, or use `_ = x` to suppress this error

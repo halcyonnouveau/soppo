@@ -1,2 +1,2 @@
 module = "github.com/test/missing"
-expected_error = "no required module provides"
+expected_error = "not found in package"

@@ -1,0 +1,27 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "strconv"
+
+// Test ? operator with assignment to named return parameters
+func parseVersion(version string) (major int, minor int, err error) {
+    var _err0 error
+    major, _err0 = strconv.Atoi(version)
+    if _err0 != nil {
+        return 0, 0, _err0
+    }
+    var _err1 error
+    minor, _err1 = strconv.Atoi(version)
+    if _err1 != nil {
+        return 0, 0, _err1
+    }
+    return major, minor, nil
+}
+
+func main() {
+    parseVersion("1")
+}
