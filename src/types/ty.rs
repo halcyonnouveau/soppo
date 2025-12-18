@@ -180,21 +180,79 @@ impl Type {
 
     /// Convert an AST type to a runtime type
     pub fn from_ast(ast_ty: &AstType) -> Self {
+        Self::from_ast_in_module(ast_ty, &ModuleId::empty())
+    }
+
+    /// Convert an AST type to a runtime type, with module context for non-builtin types
+    pub fn from_ast_in_module(ast_ty: &AstType, module: &ModuleId) -> Self {
         // Handle variadic types: ...T -> variadic[T]
         if ast_ty.name.starts_with("...") {
             let inner_name = &ast_ty.name[3..];
             return Type::generic("variadic", vec![Type::simple(inner_name)]);
         }
 
+        // Determine the module for this type
+        // - Built-in types get empty module
+        // - Pointer/slice prefixes: extract base name for module check
+        // - Qualified names (pkg.Type): use the package name as module
+        // - Otherwise: use the provided module context
+        let base_name = ast_ty
+            .name
+            .strip_prefix('*')
+            .or_else(|| ast_ty.name.strip_prefix("[]"))
+            .unwrap_or(&ast_ty.name);
+
+        let type_module = if Self::is_builtin_type(base_name) {
+            ModuleId::empty()
+        } else if let Some(dot_idx) = base_name.find('.') {
+            // Qualified name like "config.Config" - extract package
+            ModuleId::new(&base_name[..dot_idx])
+        } else {
+            // Unqualified user type - use context module
+            module.clone()
+        };
+
         Type::Con {
             sym: Symbol {
-                module: ModuleId::empty(),
+                module: type_module,
                 name: ast_ty.name.clone(),
                 span: ast_ty.span,
             },
-            args: ast_ty.args.iter().map(Type::from_ast).collect(),
+            args: ast_ty
+                .args
+                .iter()
+                .map(|arg| Type::from_ast_in_module(arg, module))
+                .collect(),
             nullable: ast_ty.nullable,
         }
+    }
+
+    /// Check if a type name is a Go/Soppo built-in type
+    pub fn is_builtin_type(name: &str) -> bool {
+        matches!(
+            name,
+            "string"
+                | "int"
+                | "int8"
+                | "int16"
+                | "int32"
+                | "int64"
+                | "uint"
+                | "uint8"
+                | "uint16"
+                | "uint32"
+                | "uint64"
+                | "uintptr"
+                | "byte"
+                | "rune"
+                | "float32"
+                | "float64"
+                | "bool"
+                | "complex64"
+                | "complex128"
+                | "error"
+                | "any"
+        )
     }
 
     /// Check if this type is nullable
@@ -432,5 +490,107 @@ mod tests {
             ],
         );
         assert_eq!(result.to_string(), "Result[Option[int], string]");
+    }
+
+    #[test]
+    fn test_is_builtin_type() {
+        // Primitive types
+        assert!(Type::is_builtin_type("int"));
+        assert!(Type::is_builtin_type("int8"));
+        assert!(Type::is_builtin_type("int16"));
+        assert!(Type::is_builtin_type("int32"));
+        assert!(Type::is_builtin_type("int64"));
+        assert!(Type::is_builtin_type("uint"));
+        assert!(Type::is_builtin_type("uint8"));
+        assert!(Type::is_builtin_type("uint16"));
+        assert!(Type::is_builtin_type("uint32"));
+        assert!(Type::is_builtin_type("uint64"));
+        assert!(Type::is_builtin_type("uintptr"));
+        assert!(Type::is_builtin_type("float32"));
+        assert!(Type::is_builtin_type("float64"));
+        assert!(Type::is_builtin_type("complex64"));
+        assert!(Type::is_builtin_type("complex128"));
+        assert!(Type::is_builtin_type("bool"));
+        assert!(Type::is_builtin_type("string"));
+        assert!(Type::is_builtin_type("byte"));
+        assert!(Type::is_builtin_type("rune"));
+        assert!(Type::is_builtin_type("error"));
+        assert!(Type::is_builtin_type("any"));
+
+        // User-defined types
+        assert!(!Type::is_builtin_type("Config"));
+        assert!(!Type::is_builtin_type("MyStruct"));
+        assert!(!Type::is_builtin_type("Result"));
+    }
+
+    #[test]
+    fn test_from_ast_in_module() {
+        let module = ModuleId::new("mypackage");
+
+        // Built-in type should have empty module
+        let int_ast = AstType {
+            name: "int".to_string(),
+            args: vec![],
+            span: Span::dummy(),
+            nullable: false,
+        };
+        let int_ty = Type::from_ast_in_module(&int_ast, &module);
+        if let Type::Con { sym, .. } = int_ty {
+            assert!(sym.module.0.is_empty());
+        } else {
+            panic!("Expected Con type");
+        }
+
+        // User type should have the provided module
+        let config_ast = AstType {
+            name: "Config".to_string(),
+            args: vec![],
+            span: Span::dummy(),
+            nullable: false,
+        };
+        let config_ty = Type::from_ast_in_module(&config_ast, &module);
+        if let Type::Con { sym, .. } = config_ty {
+            assert_eq!(sym.module.0, "mypackage");
+        } else {
+            panic!("Expected Con type");
+        }
+
+        // Qualified type should use the package from the name
+        let qualified_ast = AstType {
+            name: "http.Request".to_string(),
+            args: vec![],
+            span: Span::dummy(),
+            nullable: false,
+        };
+        let qualified_ty = Type::from_ast_in_module(&qualified_ast, &module);
+        if let Type::Con { sym, .. } = qualified_ty {
+            assert_eq!(sym.module.0, "http");
+        } else {
+            panic!("Expected Con type");
+        }
+
+        // Pointer to user type should have module on inner type
+        let ptr_ast = AstType {
+            name: "*Config".to_string(),
+            args: vec![AstType {
+                name: "Config".to_string(),
+                args: vec![],
+                span: Span::dummy(),
+                nullable: false,
+            }],
+            span: Span::dummy(),
+            nullable: false,
+        };
+        let ptr_ty = Type::from_ast_in_module(&ptr_ast, &module);
+        if let Type::Con { sym, args, .. } = ptr_ty {
+            // The outer type (*Config) should also have the module
+            assert_eq!(sym.module.0, "mypackage");
+            // And the inner type should have it too
+            if let Type::Con { sym: inner_sym, .. } = &args[0] {
+                assert_eq!(inner_sym.module.0, "mypackage");
+            }
+        } else {
+            panic!("Expected Con type");
+        }
     }
 }

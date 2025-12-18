@@ -1,0 +1,24 @@
+package main
+
+import (
+	"fmt"
+
+	"github.com/test/cross_module_methods/models" // sop: import
+)
+
+func main() {
+	// Create user via function from imported module
+	user := models.NewUser("Alice", 30)
+
+	// Call value receiver methods on imported type
+	name := user.GetName()
+	age := user.GetAge()
+	greeting := user.Greet()
+
+	fmt.Printf("%s is %d years old: %s\n", name, age, greeting)
+
+	// Call pointer receiver method on value (Go auto-addresses)
+	user.SetAge(31)
+	newAge := user.GetAge()
+	fmt.Printf("New age: %d\n", newAge)
+}

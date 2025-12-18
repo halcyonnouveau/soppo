@@ -1,0 +1,32 @@
+package models
+
+// User represents a user in the system
+type User struct {
+	name string
+	age  int
+}
+
+// NewUser creates a new User
+func NewUser(name string, age int) User {
+	return User{name: name, age: age}
+}
+
+// GetName returns the user's name (value receiver)
+func (u User) GetName() string {
+	return u.name
+}
+
+// GetAge returns the user's age (value receiver)
+func (u User) GetAge() int {
+	return u.age
+}
+
+// SetAge sets the user's age (pointer receiver)
+func (u *User) SetAge(age int) {
+	u.age = age
+}
+
+// Greet returns a greeting string
+func (u User) Greet() string {
+	return "Hello, " + u.name
+}

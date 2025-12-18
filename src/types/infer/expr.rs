@@ -831,6 +831,25 @@ impl Infer {
             return Ok(method_ty);
         }
 
+        // Check if this is a method call on a type from another Soppo module
+        // The module_name in the type IS the module ID (e.g., "internal/config")
+        if let (Some(struct_name), Some(module_name)) = (&struct_name, &module_name) {
+            let module_id = crate::syntax::ModuleId::new(module_name);
+            if let Some(method) = self
+                .global_state
+                .lookup_method_in(&module_id, struct_name, field)
+            {
+                // Build function type from method signature
+                let param_tys: Vec<Type> = method.params.iter().map(|(_, ty)| ty.clone()).collect();
+                let ret_ty = match method.return_types.len() {
+                    0 => Type::unit(),
+                    1 => method.return_types[0].clone(),
+                    _ => Type::generic("tuple", method.return_types.clone()),
+                };
+                return Ok(Type::fun(param_tys, ret_ty));
+            }
+        }
+
         if let Some(struct_name) = &struct_name {
             // Check if this is an enum variant type (EnumName.VariantName)
             if let Some(dot_idx) = struct_name.find('.') {
@@ -1245,34 +1264,8 @@ impl Infer {
         }
 
         // Check if this is a type conversion: TypeName(value) or pkg.TypeName(value)
-        // Built-in types that can be used for type conversion
-        let is_builtin_type = |name: &str| -> bool {
-            matches!(
-                name,
-                "string"
-                    | "int"
-                    | "int8"
-                    | "int16"
-                    | "int32"
-                    | "int64"
-                    | "uint"
-                    | "uint8"
-                    | "uint16"
-                    | "uint32"
-                    | "uint64"
-                    | "uintptr"
-                    | "byte"
-                    | "rune"
-                    | "float32"
-                    | "float64"
-                    | "bool"
-                    | "complex64"
-                    | "complex128"
-            )
-        };
-
         if let ExprKind::Ident(type_name) = &func.kind
-            && (self.global_state.has_type(type_name) || is_builtin_type(type_name))
+            && (self.global_state.has_type(type_name) || Type::is_builtin_type(type_name))
         {
             // This is a type conversion, not a function call
             // Type conversions take exactly one argument

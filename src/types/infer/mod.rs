@@ -524,30 +524,7 @@ impl Infer {
             } => {
                 // Set module if empty and this looks like a type from the package
                 // (not a built-in like int, string, etc.)
-                let is_builtin = matches!(
-                    name.name.as_str(),
-                    "int"
-                        | "int8"
-                        | "int16"
-                        | "int32"
-                        | "int64"
-                        | "uint"
-                        | "uint8"
-                        | "uint16"
-                        | "uint32"
-                        | "uint64"
-                        | "uintptr"
-                        | "float32"
-                        | "float64"
-                        | "complex64"
-                        | "complex128"
-                        | "bool"
-                        | "string"
-                        | "byte"
-                        | "rune"
-                        | "error"
-                        | "any"
-                );
+                let is_builtin = Type::is_builtin_type(&name.name);
 
                 // Don't set module on:
                 // - Builtin types (int, string, etc.)

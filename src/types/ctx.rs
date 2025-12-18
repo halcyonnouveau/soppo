@@ -292,6 +292,7 @@ impl GlobalCtxt {
 
     /// Register a function definition
     pub fn register_function(&mut self, func_decl: &FuncDecl) {
+        let current_module = self.current_module.clone();
         let func_def = FuncDef {
             name: func_decl.ident.name.clone(),
             generics: func_decl
@@ -302,12 +303,17 @@ impl GlobalCtxt {
             params: func_decl
                 .params
                 .iter()
-                .map(|p| (p.ident.name.clone(), Type::from_ast(&p.ty)))
+                .map(|p| {
+                    (
+                        p.ident.name.clone(),
+                        Type::from_ast_in_module(&p.ty, &current_module),
+                    )
+                })
                 .collect(),
             return_types: func_decl
                 .returns
                 .iter()
-                .map(|p| Type::from_ast(&p.ty))
+                .map(|p| Type::from_ast_in_module(&p.ty, &current_module))
                 .collect(),
             span: Some(func_decl.span),
             name_span: Some(func_decl.ident.span),
@@ -402,6 +408,26 @@ impl GlobalCtxt {
             .unwrap_or(receiver_type);
 
         self.current_module()
+            .methods
+            .get(base_type)?
+            .get(method_name)
+    }
+
+    /// Lookup a method by receiver type and method name in a specific module
+    pub fn lookup_method_in(
+        &self,
+        module: &ModuleId,
+        receiver_type: &str,
+        method_name: &str,
+    ) -> Option<&FuncDef> {
+        // Strip pointer prefix if present
+        let base_type = receiver_type
+            .strip_prefix('*')
+            .or_else(|| receiver_type.strip_prefix("?*"))
+            .unwrap_or(receiver_type);
+
+        self.modules
+            .get(module)?
             .methods
             .get(base_type)?
             .get(method_name)
