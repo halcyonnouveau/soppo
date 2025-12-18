@@ -74,7 +74,8 @@ pub enum Token {
     #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+", priority = 2, callback = |lex| lex.slice().parse::<f64>().ok())]
     Float(f64),
 
-    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
+    // Integer literals: decimal, hex (0x), binary (0b), octal (0o or leading 0)
+    #[regex(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-7]+|[0-9]+", priority = 3, callback = parse_integer)]
     Integer(i64),
 
     #[regex(r#""([^"\\]|\\["\\bnfrt])*""#, |lex| {
@@ -318,6 +319,23 @@ impl<'a> Lexer<'a> {
     }
 }
 
+/// Parse integer literals with various bases (decimal, hex, binary, octal)
+fn parse_integer(lex: &logos::Lexer<Token>) -> Option<i64> {
+    let s = lex.slice();
+    if s.starts_with("0x") || s.starts_with("0X") {
+        i64::from_str_radix(&s[2..], 16).ok()
+    } else if s.starts_with("0b") || s.starts_with("0B") {
+        i64::from_str_radix(&s[2..], 2).ok()
+    } else if s.starts_with("0o") || s.starts_with("0O") {
+        i64::from_str_radix(&s[2..], 8).ok()
+    } else if s.starts_with('0') && s.len() > 1 && s.chars().all(|c| c.is_ascii_digit()) {
+        // Legacy octal: 0755 (but not 0 itself or 09 which would be invalid)
+        i64::from_str_radix(&s[1..], 8).ok()
+    } else {
+        s.parse::<i64>().ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,5 +440,41 @@ mod tests {
                 Token::Integer(2)
             ]
         );
+    }
+
+    #[test]
+    fn test_integer_literals() {
+        // Decimal
+        let mut lexer = Lexer::new("42", FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![Token::Integer(42)]);
+
+        // Hex
+        let mut lexer = Lexer::new("0xFF 0x1a 0X10", FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(
+            tokens,
+            vec![Token::Integer(255), Token::Integer(26), Token::Integer(16)]
+        );
+
+        // Binary
+        let mut lexer = Lexer::new("0b1010 0B11", FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![Token::Integer(10), Token::Integer(3)]);
+
+        // Octal (new style 0o)
+        let mut lexer = Lexer::new("0o755 0O644", FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![Token::Integer(493), Token::Integer(420)]);
+
+        // Octal (legacy style leading 0)
+        let mut lexer = Lexer::new("0755 0644", FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![Token::Integer(493), Token::Integer(420)]);
+
+        // Zero itself should still work
+        let mut lexer = Lexer::new("0", FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![Token::Integer(0)]);
     }
 }
