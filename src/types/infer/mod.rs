@@ -1579,8 +1579,9 @@ impl Infer {
         }
     }
 
-    /// Extract element type from a slice type ([]T -> T)
-    /// Returns None if not a slice type
+    /// Extract element type from a slice or variadic type ([]T -> T, variadic[T] -> T)
+    /// Returns None if not a slice or variadic type
+    /// Variadic parameters are slices at runtime, so they're handled here
     pub(super) fn extract_slice_element(ty: &Type) -> Option<Type> {
         match ty {
             Type::Con {
@@ -1591,6 +1592,19 @@ impl Infer {
                 } else {
                     // Fallback: parse from name "[]T" -> "T"
                     Some(Type::simple(&name.name[2..]))
+                }
+            }
+            // Variadic types: variadic[T] or ...T
+            Type::Con {
+                sym: name, args, ..
+            } if name.name == "variadic" || name.name.starts_with("...") => {
+                if !args.is_empty() {
+                    Some(args[0].clone())
+                } else if name.name.starts_with("...") {
+                    // Fallback: parse from name "...T" -> "T"
+                    Some(Type::simple(&name.name[3..]))
+                } else {
+                    None
                 }
             }
             _ => None,

@@ -1,0 +1,43 @@
+package main
+
+import "fmt"
+
+// Helper function that sums variadic int args
+func sum(nums ...int) int {
+	total := 0
+	for _, n := range nums {
+		total = total + n
+	}
+	return total
+}
+
+// Helper that accepts variadic strings
+func join(sep string, parts ...string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	result := parts[0]
+	for _, p := range parts[1:] {
+		result = result + sep + p
+	}
+	return result
+}
+
+func main() {
+	// Direct variadic args
+	fmt.Println(sum(1, 2, 3))
+
+	// Spread slice into variadic
+	nums := []int{4, 5, 6}
+	fmt.Println(sum(nums...))
+
+	// Spread string slice
+	parts := []string{"hello", "world"}
+	fmt.Println(join(", ", parts...))
+
+	// append uses spread - the common use case
+	a := []int{1, 2, 3}
+	b := []int{4, 5, 6}
+	c := append(a, b...)
+	fmt.Println(c)
+}

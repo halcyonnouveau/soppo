@@ -1058,15 +1058,21 @@ impl Infer {
                 return Ok(Type::generic(&ptr_name, vec![inner_ty]));
             }
 
-            // len(v) - returns length of array, slice, string, map, or channel
+            // len(v) - returns length of array, slice, string, map, channel, or variadic
             if name == "len" && args.len() == 1 {
                 let arg_ty = self.infer_expr(&args[0].1)?;
                 let arg_ty = self.substitute(arg_ty);
                 // Verify it's a valid type for len
+                // Variadic parameters (variadic[T] or ...T) are slices at runtime
                 let valid = Self::is_slice_type(&arg_ty)
                     || Self::is_map_type(&arg_ty)
                     || Self::is_channel_type(&arg_ty)
-                    || matches!(&arg_ty, Type::Con { sym, .. } if sym.name == "string" || sym.name == "array" || sym.name.starts_with("["));
+                    || matches!(&arg_ty, Type::Con { sym, .. } if
+                        sym.name == "string"
+                        || sym.name == "array"
+                        || sym.name.starts_with("[")
+                        || sym.name == "variadic"
+                        || sym.name.starts_with("..."));
                 if !valid {
                     return Err(SoppoError::Type {
                         message: format!(
@@ -1079,14 +1085,19 @@ impl Infer {
                 return Ok(Type::simple("int"));
             }
 
-            // cap(v) - returns capacity of slice or channel
+            // cap(v) - returns capacity of slice, channel, or variadic
             if name == "cap" && args.len() == 1 {
                 let arg_ty = self.infer_expr(&args[0].1)?;
                 let arg_ty = self.substitute(arg_ty);
                 // Verify it's a valid type for cap
+                // Variadic parameters (variadic[T] or ...T) are slices at runtime
                 let valid = Self::is_slice_type(&arg_ty)
                     || Self::is_channel_type(&arg_ty)
-                    || matches!(&arg_ty, Type::Con { sym, .. } if sym.name == "array" || sym.name.starts_with("["));
+                    || matches!(&arg_ty, Type::Con { sym, .. } if
+                        sym.name == "array"
+                        || sym.name.starts_with("[")
+                        || sym.name == "variadic"
+                        || sym.name.starts_with("..."));
                 if !valid {
                     return Err(SoppoError::Type {
                         message: format!("cap requires array, slice, or channel; got {}", arg_ty),
@@ -1114,9 +1125,16 @@ impl Infer {
                     }
                 };
                 // Type check remaining arguments against element type
-                for (_, arg, _) in args.iter().skip(1) {
+                // Handle spread: append(a, b...) where b is a slice
+                for (_, arg, is_spread) in args.iter().skip(1) {
                     let arg_ty = self.infer_expr(arg)?;
-                    self.unify(&elem_ty, &arg_ty, &arg.span)?;
+                    if *is_spread {
+                        // Spread arg: extract element type from slice and unify
+                        let spread_elem = Self::extract_slice_element(&arg_ty).unwrap_or(arg_ty);
+                        self.unify(&elem_ty, &spread_elem, &arg.span)?;
+                    } else {
+                        self.unify(&elem_ty, &arg_ty, &arg.span)?;
+                    }
                 }
                 return Ok(slice_ty);
             }
@@ -1487,9 +1505,12 @@ impl Infer {
         let has_named = args.iter().any(|(name, _, _)| name.is_some());
 
         // Reorder arguments based on named arguments
-        let ordered_args: Vec<(&Expr, Span)> = if !has_named {
+        // Track spread flag along with args: (expr, span, is_spread)
+        let ordered_args: Vec<(&Expr, Span, bool)> = if !has_named {
             // All positional - just use them in order
-            args.iter().map(|(_, e, _)| (e, e.span)).collect()
+            args.iter()
+                .map(|(_, e, spread)| (e, e.span, *spread))
+                .collect()
         } else if let Some(param_names) = &param_names {
             // We have named args and know parameter names - reorder
             // Rules:
@@ -1497,13 +1518,13 @@ impl Infer {
             // - Positional args fill remaining slots in order
             // - Positional args after named args only allowed for variadic functions
             // - Extra positional args go to variadic
-            let mut result: Vec<Option<(&Expr, Span)>> = vec![None; param_names.len()];
-            let mut variadic_args: Vec<(&Expr, Span)> = Vec::new();
-            let mut positional_args: Vec<&Expr> = Vec::new();
+            let mut result: Vec<Option<(&Expr, Span, bool)>> = vec![None; param_names.len()];
+            let mut variadic_args: Vec<(&Expr, Span, bool)> = Vec::new();
+            let mut positional_args: Vec<(&Expr, bool)> = Vec::new();
             let mut seen_named = false;
 
             // First pass: process named args to reserve their slots, collect positional args
-            for (name, arg_expr, _) in args {
+            for (name, arg_expr, spread) in args {
                 match name {
                     Some((n, name_span)) => {
                         seen_named = true;
@@ -1514,7 +1535,7 @@ impl Infer {
                                     span: *name_span,
                                 });
                             }
-                            result[idx] = Some((arg_expr, arg_expr.span));
+                            result[idx] = Some((arg_expr, arg_expr.span, *spread));
                         } else {
                             return Err(SoppoError::Type {
                                 message: format!("Unknown parameter name: `{}`", n),
@@ -1530,7 +1551,7 @@ impl Infer {
                                 span: arg_expr.span,
                             });
                         }
-                        positional_args.push(arg_expr);
+                        positional_args.push((arg_expr, *spread));
                     }
                 }
             }
@@ -1539,22 +1560,22 @@ impl Infer {
             let mut positional_iter = positional_args.into_iter();
             for slot in result.iter_mut() {
                 if slot.is_none()
-                    && let Some(arg_expr) = positional_iter.next()
+                    && let Some((arg_expr, spread)) = positional_iter.next()
                 {
-                    *slot = Some((arg_expr, arg_expr.span));
+                    *slot = Some((arg_expr, arg_expr.span, spread));
                 }
             }
 
             // Any remaining positional args go to variadic
-            for arg_expr in positional_iter {
-                variadic_args.push((arg_expr, arg_expr.span));
+            for (arg_expr, spread) in positional_iter {
+                variadic_args.push((arg_expr, arg_expr.span, spread));
             }
 
             // Check all required params are provided
             let mut ordered = Vec::new();
             for (i, slot) in result.iter().enumerate() {
                 match slot {
-                    Some((arg, span)) => ordered.push((*arg, *span)),
+                    Some((arg, span, spread)) => ordered.push((*arg, *span, *spread)),
                     None => {
                         return Err(SoppoError::Type {
                             message: format!("Missing required argument: `{}`", param_names[i]),
@@ -1576,12 +1597,12 @@ impl Infer {
             });
         };
 
-        // Infer argument types with their spans and track if they're nil expressions
+        // Infer argument types with their spans, nil check, and spread flag
         // Use infer_expr_narrowed to apply nil-state narrowing
         let mut arg_tys = Vec::new();
-        for (arg, span) in &ordered_args {
+        for (arg, span, is_spread) in &ordered_args {
             let is_nil = matches!(arg.kind, ExprKind::Nil);
-            arg_tys.push((self.infer_expr_narrowed(arg)?, *span, is_nil));
+            arg_tys.push((self.infer_expr_narrowed(arg)?, *span, is_nil, *is_spread));
         }
 
         // Check function call with detailed error spans
@@ -1627,7 +1648,7 @@ impl Infer {
                     }
 
                     // Check fixed params
-                    for ((_, param_ty), (arg_ty, arg_span, is_nil)) in
+                    for ((_, param_ty), (arg_ty, arg_span, is_nil, _is_spread)) in
                         fixed_params.iter().zip(arg_tys.iter())
                     {
                         check_nil_arg(param_ty, *arg_span, *is_nil)?;
@@ -1635,15 +1656,28 @@ impl Infer {
                     }
 
                     // Check variadic args
-                    for (arg_ty, arg_span, is_nil) in arg_tys.iter().skip(fixed_params.len()) {
+                    for (arg_ty, arg_span, is_nil, is_spread) in
+                        arg_tys.iter().skip(fixed_params.len())
+                    {
                         // For "any" type (or nullable any), any argument is valid
                         let is_any = match &variadic_elem {
                             Type::Con { sym, .. } => sym.name == "any",
                             _ => false,
                         };
                         if !is_any {
-                            check_nil_arg(&variadic_elem, *arg_span, *is_nil)?;
-                            self.unify(&variadic_elem, arg_ty, arg_span)?;
+                            if *is_spread {
+                                // Spread arg: extract element type from slice
+                                // arg_ty should be []T or ?[]T, extract T
+                                let elem_ty =
+                                    Self::extract_slice_element(arg_ty).unwrap_or_else(|| {
+                                        // If not a slice, unify directly (will fail with good error)
+                                        arg_ty.clone()
+                                    });
+                                self.unify(&variadic_elem, &elem_ty, arg_span)?;
+                            } else {
+                                check_nil_arg(&variadic_elem, *arg_span, *is_nil)?;
+                                self.unify(&variadic_elem, arg_ty, arg_span)?;
+                            }
                         }
                     }
                 } else {
@@ -1660,7 +1694,7 @@ impl Infer {
                     }
 
                     // Check each argument type
-                    for ((_, param_ty), (arg_ty, arg_span, is_nil)) in
+                    for ((_, param_ty), (arg_ty, arg_span, is_nil, _is_spread)) in
                         param_tys.iter().zip(arg_tys.iter())
                     {
                         check_nil_arg(param_ty, *arg_span, *is_nil)?;
@@ -1673,7 +1707,7 @@ impl Infer {
             Type::Var(_) => {
                 // Function type is unknown, use standard unification
                 let result_ty = self.fresh_ty_var();
-                let arg_types: Vec<Type> = arg_tys.into_iter().map(|(ty, _, _)| ty).collect();
+                let arg_types: Vec<Type> = arg_tys.into_iter().map(|(ty, _, _, _)| ty).collect();
                 let expected_func_ty = Type::fun(arg_types, result_ty.clone());
                 self.unify(&func_ty, &expected_func_ty, expr_span)?;
                 Ok(self.substitute(result_ty))
