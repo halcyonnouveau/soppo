@@ -78,7 +78,8 @@ pub enum Token {
     #[regex(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-7]+|[0-9]+", priority = 3, callback = parse_integer)]
     Integer(i64),
 
-    #[regex(r#""([^"\\]|\\["\\bnfrt])*""#, |lex| {
+    // String literals with escape sequences: \n, \t, \033 (octal), \x1b (hex), \uXXXX, \UXXXXXXXX
+    #[regex(r#""([^"\\]|\\["\\bnfrt]|\\[0-7]{1,3}|\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\U[0-9a-fA-F]{8})*""#, |lex| {
         let s = lex.slice();
         s[1..s.len()-1].to_string()
     })]
@@ -476,5 +477,37 @@ mod tests {
         let mut lexer = Lexer::new("0", FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
         assert_eq!(tokens, vec![Token::Integer(0)]);
+    }
+
+    #[test]
+    fn test_string_escape_sequences() {
+        // Basic escapes
+        let mut lexer = Lexer::new(r#""hello\nworld""#, FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![Token::String(r"hello\nworld".to_string())]);
+
+        // Octal escapes (ANSI color codes)
+        let mut lexer = Lexer::new(r#""\033[32mgreen\033[0m""#, FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(
+            tokens,
+            vec![Token::String(r"\033[32mgreen\033[0m".to_string())]
+        );
+
+        // Hex escapes
+        let mut lexer = Lexer::new(r#""\x1b[32mgreen\x1b[0m""#, FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(
+            tokens,
+            vec![Token::String(r"\x1b[32mgreen\x1b[0m".to_string())]
+        );
+
+        // Unicode escapes
+        let mut lexer = Lexer::new(r#""\u0048\u0065\u006c\u006c\u006f""#, FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+        assert_eq!(
+            tokens,
+            vec![Token::String(r"\u0048\u0065\u006c\u006c\u006f".to_string())]
+        );
     }
 }
