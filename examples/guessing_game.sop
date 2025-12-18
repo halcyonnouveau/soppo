@@ -1,36 +1,40 @@
 package main
 
-import "bufio"
-import "fmt"
-import "math/rand"
-import "os"
-import "strconv"
-import "strings"
+import (
+	"bufio"
+	"fmt"
+	"math/rand"
+	"os"
+	"strconv"
+	"strings"
+)
 
 func main() {
-    reader := bufio.NewReader(os.Stdin).(!nil)
-    secret := rand.Intn(100) + 1
+	reader := bufio.NewReader(os.Stdin).(!nil)
+	secret := rand.Intn(100) + 1
 
-    for {
-        fmt.Println("Please input your guess.")
+	for {
+		fmt.Println("Please input your guess.")
 
-        text, _ := reader.ReadString('\n')
-        text = strings.TrimSpace(text)
+		text, _ := reader.ReadString('\n')
+		text = strings.TrimSpace(text)
 
-        guess, err := strconv.Atoi(text)
-        if err != nil {
-            continue
-        }
+		guess, err := strconv.Atoi(text)
+		if err != nil {
+			continue
+		}
 
-        fmt.Println("You guessed:", guess)
+		fmt.Println("You guessed:", guess)
 
-        if guess < secret {
-            fmt.Println("Too small!")
-        } else if guess > secret {
-            fmt.Println("Too big!")
-        } else {
-            fmt.Println("Correct!")
-            break
-        }
-    }
+		if guess < secret {
+			fmt.Println("Too small!")
+		} else {
+			if guess > secret {
+				fmt.Println("Too big!")
+			} else {
+				fmt.Println("Correct!")
+				break
+			}
+		}
+	}
 }

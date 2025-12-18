@@ -31,20 +31,27 @@ func log(level string, msg string, args ...int) string {
 func main() {
     // All positional
     fmt.Println(createUser("alice", 30, true))
+
     // All named
     fmt.Println(createUser("bob", 25, false))
+
     // Mixed (positional first, then named)
     fmt.Println(createUser("charlie", 35, true))
+
     // Named in different order than parameters
     fmt.Println(createUser("dave", 40, true))
+
     // Named arguments with reordering
     fmt.Println(formatPoint(1, 2, 3))
+
     // Positional args fill remaining slots after named args reserve theirs
     // z: 3 reserves slot 2, positional 1 fills slot 0, positional 2 fills slot 1
     fmt.Println(formatPoint(1, 2, 3))
+
     // Named arg for FIRST param - positional args fill remaining slots
     // x: 1 reserves slot 0, positional 2 fills slot 1, positional 3 fills slot 2
     fmt.Println(formatPoint(1, 2, 3))
+
     // Variadic with named fixed params
     fmt.Println(log("INFO", "test", 1, 2, 3))
 }

@@ -106,19 +106,24 @@ func main() {
     ok := Result_Ok{Value: 42}
     okJson, _ := ok.MarshalJSON()
     fmt.Println(string(okJson))
+
     err := Result_Err{Value: "something went wrong"}
     errJson, _ := err.MarshalJSON()
     fmt.Println(string(errJson))
+
     // Test Shape marshaling
     circle := Shape_Circle{radius: 5.0}
     circleJson, _ := circle.MarshalJSON()
     fmt.Println(string(circleJson))
+
     rect := Shape_Rectangle{width: 10.0, height: 20.0}
     rectJson, _ := rect.MarshalJSON()
     fmt.Println(string(rectJson))
+
     // Test custom method
     doubled := ok.Double()
     fmt.Println(doubled)
+
     // Test pointer receiver
     circle.Scale(2.0)
     fmt.Println(circle.radius)

@@ -62,7 +62,7 @@ pub fn extract_from_source(source: &str, filename: &str) -> Result<FileDocTests>
     let file = parser.parse_file()?;
     let _ = filename; // Used for error context in future
 
-    let package = file.package.clone();
+    let package = file.package.name.clone();
     let doctests = extract_from_ast(&file)?;
 
     Ok(FileDocTests {

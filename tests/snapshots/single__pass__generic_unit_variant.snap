@@ -37,5 +37,6 @@ func main() {
     // Generic unit variant with explicit type args
     none := OptionNone[int]()
     some := OptionSome(42)
+
     fmt.Printf("%v %v\n", none, some)
 }

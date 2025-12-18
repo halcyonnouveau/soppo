@@ -814,9 +814,10 @@ impl Parser {
         self.skip_terminators();
 
         // Parse package declaration
-        let package = if self.consume(&Token::Package) {
-            let name = match self.advance() {
-                Some((Token::Ident(name), _)) => name,
+        let package = if self.check(&Token::Package) {
+            self.advance(); // consume 'package'
+            let (name, span) = match self.advance() {
+                Some((Token::Ident(name), span)) => (name, span),
                 Some((tok, span)) => {
                     return Err(SoppoError::Parse {
                         message: format!("Expected package name, found {:?}", tok),
@@ -832,9 +833,12 @@ impl Parser {
             };
             // Skip terminators after package declaration
             self.skip_terminators();
-            name
+            Ident { name, span }
         } else {
-            "main".to_string()
+            Ident {
+                name: "main".to_string(),
+                span: Span::dummy(),
+            }
         };
 
         // Parse imports

@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -11,36 +11,49 @@ func main() {
     // len - works on string, slice, map, array, channel
     s := "hello"
     strLen := len(s)
+
     slice := []int{1, 2, 3}
     sliceLen := len(slice)
+
     arr := [3]int{1, 2, 3}
     arrLen := len(arr)
+
     m := map[string]int{"a": 1, "b": 2}
     mapLen := len(m)
+
     ch := make(chan int, 10)
     chanLen := len(ch)
+
     // cap - works on slice and channel
     sliceCap := cap(slice)
     chanCap := cap(ch)
+
     // append - adds elements to slice
     slice = append(slice, 4)
     slice = append(slice, 5, 6, 7)
+
     // copy - copies elements between slices
     dst := make([]int, 3)
     n := copy(dst, slice)
+
     // copy string to []byte
     bytes := make([]byte, 10)
     copy(bytes, "hello")
+
     // delete - removes key from map
     delete(m, "a")
+
     // make and new (already tested elsewhere but included for completeness)
     newSlice := make([]string, 0, 10)
     ptr := new(int)
+
     // close - closes a channel
     close(ch)
+
     // print/println - debug output
     println("debug:", strLen, sliceLen, arrLen, mapLen, chanLen)
     print("more debug")
+
     // Use variables to avoid unused warnings
     fmt.Println(sliceCap, chanCap, n, newSlice, ptr, bytes)
 }

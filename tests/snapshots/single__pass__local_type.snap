@@ -12,8 +12,10 @@ func main() {
         X int
         Y int
     }
+
     p := Point{X: 10, Y: 20}
     fmt.Println(p.X, p.Y)
+
     // Type alias
     type MyInt = int
     var n MyInt = 42

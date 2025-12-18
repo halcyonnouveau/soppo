@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -183,24 +183,29 @@ func testBasicIfInit() {
     if x := 5; (x > 0) {
         fmt.Println("x is positive:", x)
     }
+
     // If-init with multi-return (comma-ok idiom)
     if val, ok := maybeValue(); ok {
         fmt.Println("Got value:", val)
     }
+
     // If-init with error check
     if result, err := maybeError(); (err == nil) {
         fmt.Println("Result:", result)
     }
+
     // If-init with nil check on pointer
     if p := getPointer(); (p != nil) {
         fmt.Println("Pointer value:", (*p))
     }
+
     // If-init with else
     if n := 0; (n > 0) {
         fmt.Println("positive")
     } else {
         fmt.Println("not positive")
     }
+
     // If-init with else-if chain
     if x := 10; (x < 0) {
         fmt.Println("negative")
@@ -211,12 +216,14 @@ func testBasicIfInit() {
             fmt.Println("positive")
         }
     }
+
     // If-init with inline function call
     if result := func() int {
         return 100
     }(); (result > 50) {
         fmt.Println("Large result:", result)
     }
+
     // Map lookup (single value form)
     m := map[string]int{"a": 1, "b": 2}
     if v := m["a"]; (v != 0) {
@@ -238,22 +245,30 @@ func main() {
     // Test enum type assertions
     some := OptionSome(42)
     none := OptionNone
+
     fmt.Printf("unwrapOr(some, 0) = %d\n", unwrapOr(some, 0))
     fmt.Printf("unwrapOr(none, 99) = %d\n", unwrapOr(none, 99))
     fmt.Printf("unwrapOrElse(some, 0) = %d\n", unwrapOrElse(some, 0))
     fmt.Printf("unwrapOrElse(none, 99) = %d\n", unwrapOrElse(none, 99))
+
     circle := Shape_Circle{radius: 5.0}
     rect := Shape_Rectangle{width: 3.0, height: 4.0}
+
     fmt.Printf("getRadius(circle) = %f\n", getRadius(circle))
     fmt.Printf("getRadius(rect) = %f\n", getRadius(rect))
+
     red := ColourRed
     green := ColourGreen
+
     fmt.Printf("isRed(red) = %t\n", isRed(red))
     fmt.Printf("isRed(green) = %t\n", isRed(green))
+
     ok := ResultOk("done")
     err := ResultErr("failed")
+
     fmt.Printf("processResult(ok) = %s\n", processResult(ok))
     fmt.Printf("processResult(err) = %s\n", processResult(err))
+
     // Test regular if-init
     testBasicIfInit()
 }

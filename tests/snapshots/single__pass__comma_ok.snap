@@ -14,12 +14,14 @@ func main() {
     if ok {
         fmt.Println("int:", n)
     }
+
     // Map comma-ok
     m := map[string]int{"a": 1}
     v, exists := m["b"]
     if exists {
         fmt.Println("found:", v)
     }
+
     // Channel comma-ok
     ch := make(chan int, 1)
     ch <- 42

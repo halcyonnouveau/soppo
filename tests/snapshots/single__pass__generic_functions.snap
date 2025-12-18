@@ -51,30 +51,39 @@ func main() {
     // Explicit type args
     x := identity[int](42)
     y := identity[string]("hello")
+
     // Inferred type args
     z := identity(3.14)
+
     // Pointer return with explicit type
     p1 := wrap[int](100)
+
     // Pointer return with inferred type
     p2 := wrap("test")
+
     // Nilable pointer return
     n1 := wrapNilable[int](50)
     if (n1 != nil) {
         fmt.Println((*n1))
     }
+
     // Slice parameter with inference
     nums := []int{1, 2, 3, 4, 5}
     f := first(nums)
     if (f != nil) {
         fmt.Println((*f))
     }
+
     // Comparable constraint
     found := contains(nums, 3)
     notFound := contains[int](nums, 10)
+
     // Multiple type parameters
     a, b := pair[int, string](1, "one")
     c, d := pair(true, 2.5)
+
     fmt.Println(x, y, z)
+
     // Note: wrap returns *T (non-nilable) but nil checker requires explicit check
     // for return values from generic functions
     if ((p1 != nil) && (p2 != nil)) {

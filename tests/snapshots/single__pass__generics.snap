@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -64,7 +64,9 @@ func main() {
     x := OptionSome(42)
     y := OptionSome("hello")
     z := OptionSome[int](100)
+
     r1 := ResultOk[int, string](1)
     r2 := ResultErr[int, string]("failed")
+
     fmt.Printf("%v %v %v %v %v\n", x, y, z, r1, r2)
 }

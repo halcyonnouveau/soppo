@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -85,6 +85,7 @@ func processString(s string) string {
     if (s == "") {
         return "empty"
     }
+
     upper := strings.ToUpper(s)
     return upper
 }
@@ -93,11 +94,13 @@ func processString(s string) string {
 func arrayOps() int {
     arr := [5]int{1, 2, 3, 4, 5}
     sum := 0
+
     i := 0
     for (i < 5) {
         sum = (sum + arr[i])
         i = (i + 1)
     }
+
     return sum
 }
 
@@ -132,6 +135,7 @@ func calculate(x int, y int) int {
     c := (x * y)
     d := (x / y)
     e := (x % y)
+
     result := ((((a + b) + c) + d) + e)
     return result
 }
@@ -146,6 +150,7 @@ func minMax(a int, b int, c int) (int, int, int) {
     min := a
     max := a
     mid := a
+
     if (b < min) {
         min = b
     }
@@ -158,6 +163,7 @@ func minMax(a int, b int, c int) (int, int, int) {
     if (c > max) {
         max = c
     }
+
     if ((a != min) && (a != max)) {
         mid = a
     } else {
@@ -167,42 +173,54 @@ func minMax(a int, b int, c int) (int, int, int) {
             mid = c
         }
     }
+
     return min, mid, max
 }
 
 func main() {
     var a = 1
     var b int = 1
+
     const c = 1
     const d int = 1
+
     // Multi-var declarations
     var e, f, g int
     var h, i = 2, 3
     var j, k int = 4, 5
+
     // Multi-const declarations
     const l, m = 6, 7
     const n, o int = 8, 9
+
     // Integer operations
     x := 42
     y := (((((((((((((((10 + a) + b) + c) + d) + e) + f) + g) + h) + i) + j) + k) + l) + m) + n) + o)
     sum := (x + y)
+
     // Float operations
     radius := 5.0
     area := ((PI * radius) * radius)
+
     // String operations
     message := "Hello, World"
     processed := processString(message)
+
     // Boolean operations
     isValid := validateInput(50, true)
+
     // Struct operations
     user := createUser("Alice", 30)
     category := checkAge(user.age)
+
     // Counter with methods
     counter := Counter{value: 0}
     counter = counter.increment()
     count := counter.getValue()
+
     // Array operations
     arraySum := arrayOps()
+
     // Conditional
     status := ""
     if (y > 0) {
@@ -210,13 +228,17 @@ func main() {
     } else {
         status = "failure"
     }
+
     // Multi-value returns
     quot, rem := divide(17, 5)
     small, medium, large := minMax(3, 1, 2)
+
     // Multi-value short declaration with literals
     p, q := 100, 200
+
     // Multi-var with multi-return function
     var q2, r2 = divide(20, 6)
+
     // === Pointers ===
     px := (&x)
     fmt.Println((*px))
@@ -225,18 +247,21 @@ func main() {
     pq := new(int)
     (*pq) = 55
     fmt.Println((*pq))
+
     // === Slices ===
     nums := []int{1, 2, 3, 4, 5}
     fmt.Println(nums[0])
     data := make([]int, 10)
     data[0] = 42
     fmt.Println(data[0])
+
     // === Maps ===
     ages := map[string]int{"Alice": 30, "Bob": 25}
     fmt.Println(ages["Alice"])
     scores := make(map[string]int)
     scores["test"] = 100
     fmt.Println(scores["test"])
+
     // === Channels ===
     ch := make(chan int, 1)
     ch <- 100
@@ -246,11 +271,13 @@ func main() {
     sender(ch2)
     result := receiver(ch2)
     fmt.Println(result)
+
     // === Goroutines ===
     go worker(1)
     go func() {
         fmt.Println("anonymous goroutine")
     }()
+
     // === Select ===
     selectCh1 := make(chan int, 1)
     selectCh2 := make(chan string, 1)
@@ -263,6 +290,7 @@ func main() {
     default:
         fmt.Println("no message")
     }
+
     // Select with send
     select {
     case selectCh2 <- "hello":
@@ -270,6 +298,7 @@ func main() {
     default:
         fmt.Println("could not send")
     }
+
     // Select with recv (discard value)
     selectCh3 := make(chan int, 1)
     selectCh3 <- 99
@@ -279,6 +308,7 @@ func main() {
     default:
         fmt.Println("channel empty")
     }
+
     // Select with ok check (closed channel)
     selectCh4 := make(chan int)
     close(selectCh4)
@@ -288,9 +318,11 @@ func main() {
     default:
         fmt.Println("channel empty")
     }
+
     // === Defer ===
     defer cleanup()
     defer fmt.Println("deferred")
+
     // === Break/Continue ===
     loopIdx := 0
     for (loopIdx < 10) {
@@ -304,6 +336,7 @@ func main() {
         fmt.Println(loopIdx)
         loopIdx = (loopIdx + 1)
     }
+
     // === Range loops ===
     for idx, val := range nums {
         fmt.Println(idx, val)
@@ -314,20 +347,24 @@ func main() {
     for rangeIdx := range nums {
         fmt.Println(rangeIdx)
     }
+
     // === Anonymous functions ===
     add := func(a int, b int) int {
         return (a + b)
     }
     fmt.Println(add(1, 2))
+
     multiply := func(a int, b int) int {
         return (a * b)
     }
     fmt.Println(multiply(3, 4))
+
     // === Unary operators ===
     unaryNum := 10
     fmt.Println((-unaryNum))
     boolVal := true
     fmt.Println((!boolVal))
+
     // === Bitwise operators ===
     bitwiseA := 10 // 0b1010
     bitwiseB := 12 // 0b1100
@@ -337,6 +374,7 @@ func main() {
     shlResult := (bitwiseA << 2) // 40 (10 << 2)
     shrResult := (bitwiseB >> 1) // 6 (12 >> 1)
     fmt.Printf("Bitwise: AND=%d OR=%d XOR=%d SHL=%d SHR=%d\n", andResult, orResult, xorResult, shlResult, shrResult)
+
     // === Compound assignments ===
     compoundVal := 10
     compoundVal += 5 // 15
@@ -345,6 +383,7 @@ func main() {
     compoundVal /= 4 // 6
     compoundVal %= 4 // 2
     fmt.Printf("Compound assignments: %d\n", compoundVal)
+
     // Bitwise compound assignments
     bitwiseVal := 15 // 0b1111
     bitwiseVal &= 10 // 10 (0b1010)
@@ -353,12 +392,14 @@ func main() {
     bitwiseVal <<= 1 // 24
     bitwiseVal >>= 2 // 6
     fmt.Printf("Bitwise compound: %d\n", bitwiseVal)
+
     // === Increment/decrement ===
     incVal := 5
     incVal++
     fmt.Printf("After ++: %d\n", incVal) // 6
     incVal--
     fmt.Printf("After --: %d\n", incVal) // 5
+
     // === Slice expressions ===
     sliceArr := []int{1, 2, 3, 4, 5}
     slice1 := sliceArr[1:3] // [2, 3]
@@ -366,9 +407,11 @@ func main() {
     slice3 := sliceArr[3:] // [4, 5]
     slice4 := sliceArr[:] // [1, 2, 3, 4, 5]
     fmt.Printf("Slices: %v, %v, %v, %v\n", slice1, slice2, slice3, slice4)
+
     // 3-index slice (with capacity)
     slice5 := sliceArr[1:3:4] // [2, 3] with cap 3
     fmt.Printf("3-index slice: %v\n", slice5)
+
     // === Type assertions ===
     // Note: Type assertions are parsed and code-generated correctly.
     // Full type inference for interfaces requires additional work.
@@ -377,6 +420,7 @@ func main() {
     _ = "ignored value"
     _, remainder := divide(10, 3)
     fmt.Printf("Remainder only: %d\n", remainder)
+
     // === Duration arithmetic (tests const type inheritance + underlying type compatibility) ===
     // time.Millisecond is a const with inherited type Duration (underlying int64)
     // These test that Duration * int works via underlying type resolution
@@ -386,7 +430,9 @@ func main() {
     dur4 := (dur1 + dur2) // Duration + Duration (variables)
     dur5 := (time.Duration(500) * 2) // Explicit conversion
     fmt.Println(dur1, dur2, dur3, dur4, dur5)
+
     fmt.Println("done")
+
     // Print results
     fmt.Printf("Sum: %d\n", sum)
     fmt.Printf("Area: %f\n", area)

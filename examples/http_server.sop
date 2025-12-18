@@ -1,37 +1,39 @@
 package main
 
-import "fmt"
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
 // Handler for the root path
 func handleHome(w http.ResponseWriter, r *http.Request) {
-    fmt.Fprintln(w, "Welcome to the Soppo HTTP server!")
-    fmt.Fprintln(w, "Try /hello?name=World or /health")
+	fmt.Fprintln(w, "Welcome to the Soppo HTTP server!")
+	fmt.Fprintln(w, "Try /hello?name=World or /health")
 }
 
 // Handler for /hello with query parameter
 func handleHello(w http.ResponseWriter, r *http.Request) {
-    name := r.URL.(!nil).Query().Get("name")
-    if name == "" {
-        name = "Anonymous"
-    }
-    fmt.Fprintf(w, "Hello, %s!\n", name)
+	name := r.URL.(!nil).Query().Get("name")
+	if name == "" {
+		name = "Anonymous"
+	}
+	fmt.Fprintf(w, "Hello, %s!\n", name)
 }
 
 // Handler for /health endpoint
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "OK")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "OK")
 }
 
 func main() {
-    http.HandleFunc("/", handleHome)
-    http.HandleFunc("/hello", handleHello)
-    http.HandleFunc("/health", handleHealth)
+	http.HandleFunc("/", handleHome)
+	http.HandleFunc("/hello", handleHello)
+	http.HandleFunc("/health", handleHealth)
 
-    fmt.Println("Server starting on http://localhost:8080")
-    err := http.ListenAndServe(":8080", nil)
-    if err != nil {
-        fmt.Println("Server error:", err)
-    }
+	fmt.Println("Server starting on http://localhost:8080")
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		fmt.Println("Server error:", err)
+	}
 }

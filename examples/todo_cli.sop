@@ -1,119 +1,129 @@
 package main
 
-import "bufio"
-import "fmt"
-import "os"
-import "strconv"
-import "strings"
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
 
 // Todo status as an enum
 type Status enum {
-    Pending
-    Done
-    Cancelled
+	Pending
+	Done
+	Cancelled
 }
 
 // Get display string for status
 func statusString(s Status) string {
-    var result string
-    match s {
-    case Status.Pending:
-        result = "[ ]"
-    case Status.Done:
-        result = "[x]"
-    case Status.Cancelled:
-        result = "[-]"
-    }
-    return result
+	var result string
+	match s {
+	case Status.Pending:
+		result = "[ ]"
+	case Status.Done:
+		result = "[x]"
+	case Status.Cancelled:
+		result = "[-]"
+	}
+	return result
 }
 
 // Todo item
 type Todo struct {
-    id int
-    title string
-    status Status
+	id int
+	title string
+	status Status
 }
 
 func (t Todo) display() {
-    fmt.Printf("%d. %s %s\n", t.id, statusString(t.status), t.title)
+	fmt.Printf("%d. %s %s\n", t.id, statusString(t.status), t.title)
 }
 
 func main() {
-    reader := bufio.NewReader(os.Stdin).(!nil)
-    todos := []Todo{}
-    nextId := 1
+	reader := bufio.NewReader(os.Stdin).(!nil)
+	todos := []Todo{}
+	nextId := 1
 
-    fmt.Println("Todo List - Commands: add <title>, done <id>, cancel <id>, list, quit")
+	fmt.Println("Todo List - Commands: add <title>, done <id>, cancel <id>, list, quit")
 
-    for {
-        fmt.Print("> ")
-        input, _ := reader.ReadString('\n')
-        input = strings.TrimSpace(input)
+	for {
+		fmt.Print("> ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
 
-        if input == "" {
-            continue
-        }
+		if input == "" {
+			continue
+		}
 
-        parts := strings.SplitN(input, " ", 2)
-        cmd := parts[0]
+		parts := strings.SplitN(input, " ", 2)
+		cmd := parts[0]
 
-        if cmd == "quit" || cmd == "q" {
-            fmt.Println("Goodbye!")
-            break
-        } else if cmd == "list" || cmd == "ls" {
-            if len(todos) == 0 {
-                fmt.Println("No todos yet. Add one with: add <title>")
-            } else {
-                for _, todo := range todos {
-                    todo.display()
-                }
-            }
-        } else if cmd == "add" {
-            if len(parts) < 2 {
-                fmt.Println("Usage: add <title>")
-                continue
-            }
-            title := parts[1]
-            todo := Todo{id: nextId, title: title, status: Status.Pending}
-            todos = append(todos, todo)
-            fmt.Printf("Added: %s\n", title)
-            nextId = nextId + 1
-        } else if cmd == "done" {
-            if len(parts) < 2 {
-                fmt.Println("Usage: done <id>")
-                continue
-            }
-            id, err := strconv.Atoi(parts[1])
-            if err != nil {
-                fmt.Println("Invalid id")
-                continue
-            }
-            todos = updateStatus(todos, id, Status.Done)
-        } else if cmd == "cancel" {
-            if len(parts) < 2 {
-                fmt.Println("Usage: cancel <id>")
-                continue
-            }
-            id, err := strconv.Atoi(parts[1])
-            if err != nil {
-                fmt.Println("Invalid id")
-                continue
-            }
-            todos = updateStatus(todos, id, Status.Cancelled)
-        } else {
-            fmt.Println("Unknown command. Try: add, done, cancel, list, quit")
-        }
-    }
+		if cmd == "quit" || cmd == "q" {
+			fmt.Println("Goodbye!")
+			break
+		} else {
+			if cmd == "list" || cmd == "ls" {
+				if len(todos) == 0 {
+					fmt.Println("No todos yet. Add one with: add <title>")
+				} else {
+					for _, todo := range todos {
+						todo.display()
+					}
+				}
+			} else {
+				if cmd == "add" {
+					if len(parts) < 2 {
+						fmt.Println("Usage: add <title>")
+						continue
+					}
+					title := parts[1]
+					todo := Todo{id: nextId, title: title, status: Status.Pending}
+					todos = append(todos, todo)
+					fmt.Printf("Added: %s\n", title)
+					nextId = nextId + 1
+				} else {
+					if cmd == "done" {
+						if len(parts) < 2 {
+							fmt.Println("Usage: done <id>")
+							continue
+						}
+						id, err := strconv.Atoi(parts[1])
+						if err != nil {
+							fmt.Println("Invalid id")
+							continue
+						}
+						todos = updateStatus(todos, id, Status.Done)
+					} else {
+						if cmd == "cancel" {
+							if len(parts) < 2 {
+								fmt.Println("Usage: cancel <id>")
+								continue
+							}
+							id, err := strconv.Atoi(parts[1])
+							if err != nil {
+								fmt.Println("Invalid id")
+								continue
+							}
+							todos = updateStatus(todos, id, Status.Cancelled)
+						} else {
+							fmt.Println("Unknown command. Try: add, done, cancel, list, quit")
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 func updateStatus(todos []Todo, id int, status Status) []Todo {
-    for i, todo := range todos {
-        if todo.id == id {
-            todos[i].status = status
-            fmt.Printf("Updated: %s\n", todo.title)
-            return todos
-        }
-    }
-    fmt.Println("Todo not found")
-    return todos
+	for i, todo := range todos {
+		if todo.id == id {
+			todos[i].status = status
+			fmt.Printf("Updated: %s\n", todo.title)
+			return todos
+		}
+	}
+	fmt.Println("Todo not found")
+	return todos
 }

@@ -464,8 +464,14 @@ impl Codegen {
         self.emit("{\n");
         self.indent();
 
+        let mut prev_end_line = 0;
         for stmt in &block.stmts {
+            // Preserve blank lines between statements
+            if prev_end_line > 0 && stmt.span.start.line > prev_end_line + 1 {
+                self.emit("\n");
+            }
             self.gen_stmt(stmt);
+            prev_end_line = stmt.span.end.line;
         }
 
         self.dedent();

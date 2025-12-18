@@ -31,16 +31,19 @@ func getUser(id int) *User {
 func main() {
     // === Basic nil checks ===
     user := getUser(1)
+
     // After nil check, user is known to be non-nil
     if (user != nil) {
         fmt.Println(user.name)
     }
+
     // Early return pattern
     user2 := getUser(2)
     if (user2 == nil) {
         return
     }
     fmt.Println(user2.name)
+
     // Else branch knows opposite
     user3 := getUser(3)
     if (user3 == nil) {
@@ -48,32 +51,39 @@ func main() {
     } else {
         fmt.Println(user3.name)
     }
+
     // === Automatically non-nil expressions ===
     // &expr is always non-nil
     u := User{name: "Alice", age: 30}
     ptr := (&u)
     fmt.Println(ptr.name)
+
     // new(T) is always non-nil
     newUser := new(User)
     newUser.name = "Bob"
     fmt.Println(newUser.name)
+
     // === Nested struct access ===
     user4 := getUser(4)
     if (user4 != nil) {
         fmt.Println(user4.name)
+
         // Direct field nil check works too
         if (user4.profile != nil) {
             fmt.Println(user4.profile.bio)
+
             // And deeper nesting
             if (user4.profile.address != nil) {
                 fmt.Println(user4.profile.address.city)
             }
         }
     }
+
     // === .(!nil) escape hatch ===
     // When you know it's non-nil from external context
     user5 := getUser(5)
     fmt.Println(user5.name)
+
     // === Nil narrowing preserved in loops ===
     // Early return before loop
     user6 := getUser(6)
@@ -83,6 +93,7 @@ func main() {
     for i := 0; (i < 3); i++ {
         fmt.Println(user6.name) // user6 is non-nil here
     }
+
     // Nil check with nested loop
     user7 := getUser(7)
     if (user7 != nil) {

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use miette::Diagnostic as MietteDiagnostic;
 use soppo::build::{typecheck, typecheck_with_symbols, typecheck_workspace};
 use soppo::error::SoppoError;
+use soppo::format::format_source;
 use soppo::syntax::{FileId, FileRegistry, Span};
 use soppo::types::{GlobalCtxt, SymbolKind as SoppoSymbolKind, SymbolTable};
 use tokio::sync::RwLock;
@@ -564,6 +565,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: Default::default(),
                 }),
                 references_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -1261,6 +1263,52 @@ impl LanguageServer for Backend {
         } else {
             Ok(Some(locations))
         }
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+
+        // Get the document text
+        let text = if let Some(path) = Self::uri_to_path(&uri) {
+            let open_docs = self.open_documents.read().await;
+            open_docs.get(&path).cloned()
+        } else {
+            let docs = self.documents.read().await;
+            docs.get(&uri).map(|d| d.text.clone())
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+
+        // Format the source
+        let formatted = match format_source(&text) {
+            Ok(f) => f,
+            Err(_) => return Ok(None), // Can't format if parsing fails
+        };
+
+        // If no change, return empty
+        if formatted == text {
+            return Ok(Some(vec![]));
+        }
+
+        // Return a single edit that replaces the entire document
+        let line_count = text.lines().count() as u32;
+        let last_line_len = text.lines().last().map(|l| l.len()).unwrap_or(0) as u32;
+
+        Ok(Some(vec![TextEdit {
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: line_count,
+                    character: last_line_len,
+                },
+            },
+            new_text: formatted,
+        }]))
     }
 }
 

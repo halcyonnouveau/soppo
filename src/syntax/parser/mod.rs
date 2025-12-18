@@ -213,9 +213,9 @@ impl Parser {
 
         for comment in relevant_comments {
             if comment.span.end.line == expected_line {
-                // Strip comment markers and trim
+                // Strip comment marker but preserve spacing after //
                 let text = comment.text.trim();
-                let text = text.strip_prefix("//").unwrap_or(text).trim();
+                let text = text.strip_prefix("//").unwrap_or(text);
                 doc_lines.push(text);
                 expected_line = comment.span.start.line.saturating_sub(1);
             } else if comment.span.end.line < expected_line {

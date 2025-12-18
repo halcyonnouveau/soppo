@@ -1,7 +1,3 @@
-//! Property-based tests for the Soppo compiler.
-//!
-//! These tests generate random AST fragments and verify compiler invariants.
-
 use proptest::prelude::*;
 use soppo::syntax::{
     BinOp, Block, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Ident,
@@ -314,8 +310,11 @@ fn arb_decl() -> impl Strategy<Value = Decl> {
 
 /// Generate a complete file with package and declarations
 fn arb_file() -> impl Strategy<Value = File> {
-    (arb_ident_name(), prop::collection::vec(arb_decl(), 1..5)).prop_map(|(package, decls)| File {
-        package,
+    (arb_ident_name(), prop::collection::vec(arb_decl(), 1..5)).prop_map(|(name, decls)| File {
+        package: Ident {
+            name,
+            span: Span::dummy(),
+        },
         imports: vec![],
         decls,
         comments: vec![],

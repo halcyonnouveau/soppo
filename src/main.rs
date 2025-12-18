@@ -1,10 +1,13 @@
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, Stdio};
 
 use clap::{Parser as ClapParser, Subcommand};
 use miette::{IntoDiagnostic, Result};
 use soppo::build;
 use soppo::config::{ConfigError, resolve_globs};
+use soppo::format;
 use soppo::go::Project;
 use soppo::test::TestConfig;
 
@@ -57,6 +60,25 @@ enum Command {
         /// Additional arguments to pass to `go test`
         #[arg(last = true)]
         args: Vec<String>,
+    },
+    /// Format source files
+    Fmt {
+        /// Files or glob patterns to format.
+        /// If empty, uses sop.mod config or errors if no config exists.
+        #[arg()]
+        files: Vec<String>,
+
+        /// Write result to (source) file instead of stdout
+        #[arg(short, long)]
+        write: bool,
+
+        /// List files whose formatting differs from sop fmt's
+        #[arg(short, long)]
+        list: bool,
+
+        /// Display diffs instead of rewriting files
+        #[arg(short, long)]
+        diff: bool,
     },
 }
 
@@ -131,6 +153,31 @@ fn main() -> Result<()> {
             };
 
             soppo::test::run_tests(&config)?;
+        }
+        Command::Fmt {
+            files,
+            write,
+            list,
+            diff,
+        } => {
+            let cwd = std::env::current_dir().into_diagnostic()?;
+
+            let resolved = if files.is_empty() {
+                // No CLI args - try sop.mod
+                let project = Project::discover(&cwd)?;
+                if project.config.is_none() {
+                    return Err(ConfigError::NoFilesSpecified.into());
+                }
+                project.find_sources()
+            } else {
+                resolve_globs(&files, &cwd)?
+            };
+
+            if resolved.is_empty() {
+                return Err(ConfigError::NoFilesSpecified.into());
+            }
+
+            format_files(&resolved, write, list, diff)?;
         }
     }
 
@@ -246,5 +293,75 @@ fn check_files(files: &[PathBuf]) -> Result<()> {
     }
 
     println!("✓ Checked {} file(s)", files.len());
+    Ok(())
+}
+
+/// Format files
+fn format_files(files: &[PathBuf], write: bool, list: bool, diff: bool) -> Result<()> {
+    let mut exit_code = 0;
+
+    for file in files {
+        let source = fs::read_to_string(file)
+            .into_diagnostic()
+            .map_err(|e| e.context(format!("Failed to read file: {}", file.display())))?;
+
+        let formatted = format::format_source(&source)?;
+
+        if source == formatted {
+            // Already formatted
+            continue;
+        }
+
+        if list {
+            println!("{}", file.display());
+            exit_code = 1;
+        } else if diff {
+            // Show diff using diff -u
+            show_diff(file, &source, &formatted)?;
+            exit_code = 1;
+        } else if write {
+            fs::write(file, &formatted)
+                .into_diagnostic()
+                .map_err(|e| e.context(format!("Failed to write file: {}", file.display())))?;
+        } else {
+            // Print to stdout
+            print!("{}", formatted);
+        }
+    }
+
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+
+    Ok(())
+}
+
+/// Show diff between original and formatted using diff -u
+fn show_diff(file: &Path, original: &str, formatted: &str) -> Result<()> {
+    use tempfile::NamedTempFile;
+
+    // Create temp files for diff
+    let mut orig_file = NamedTempFile::new().into_diagnostic()?;
+    let mut fmt_file = NamedTempFile::new().into_diagnostic()?;
+
+    orig_file.write_all(original.as_bytes()).into_diagnostic()?;
+    fmt_file.write_all(formatted.as_bytes()).into_diagnostic()?;
+
+    // Run diff -u
+    let output = ProcessCommand::new("diff")
+        .arg("-u")
+        .arg("--label")
+        .arg(format!("a/{}", file.display()))
+        .arg("--label")
+        .arg(format!("b/{}", file.display()))
+        .arg(orig_file.path())
+        .arg(fmt_file.path())
+        .stdout(Stdio::piped())
+        .output()
+        .into_diagnostic()?;
+
+    // Print diff output (diff returns exit code 1 when files differ, which is expected)
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+
     Ok(())
 }

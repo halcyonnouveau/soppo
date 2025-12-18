@@ -12,6 +12,7 @@ import "github.com/test/nilable_cross/types"
 func main() {
     cfg1 := types.Config{Name: "app", Logger: nil}
     cfg2 := types.Config{Name: "app", Logger: (&types.Logger{Prefix: "[INFO]"})}
+
     fmt.Println(cfg1.Name)
     if (cfg2.Logger != nil) {
         fmt.Println(cfg2.Logger.Prefix)

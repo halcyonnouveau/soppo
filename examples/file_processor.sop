@@ -1,53 +1,55 @@
 package main
 
-import "bufio"
-import "fmt"
-import "os"
-import "strings"
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+)
 
 func main() {
-    err := run()
-    if err != nil {
-        fmt.Println("Error: {err}")
-        os.Exit(1)
-    }
+	err := run()
+	if err != nil {
+		fmt.Println("Error: {err}")
+		os.Exit(1)
+	}
 }
 
 func run() error {
-    lines := readLines("input.txt") ?
+	lines := readLines("input.txt") ?
 
-    upper := []string{}
-    for _, line := range lines {
-        upper = append(upper, strings.ToUpper(line))
-    }
+	upper := []string{}
+	for _, line := range lines {
+		upper = append(upper, strings.ToUpper(line))
+	}
 
-    writeLines("output.txt", upper) ?
+	writeLines("output.txt", upper) ?
 
-    fmt.Println("Processed {len(lines)} lines")
-    return nil
+	fmt.Println("Processed {len(lines)} lines")
+	return nil
 }
 
 func readLines(path string) ([]string, error) {
-    file := os.Open(path) ?
-    defer file.Close()
+	file := os.Open(path) ?
+	defer file.Close()
 
-    lines := []string{}
-    scanner := bufio.NewScanner(file).(!nil)
+	lines := []string{}
+	scanner := bufio.NewScanner(file).(!nil)
 
-    for scanner.Scan() {
-        lines = append(lines, scanner.Text())
-    }
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
 
-    return lines, scanner.Err()
+	return lines, scanner.Err()
 }
 
 func writeLines(path string, lines []string) error {
-    file := os.Create(path) ?
-    defer file.Close()
+	file := os.Create(path) ?
+	defer file.Close()
 
-    for _, line := range lines {
-        fmt.Fprintln(file, line) ?
-    }
+	for _, line := range lines {
+		fmt.Fprintln(file, line) ?
+	}
 
-    return nil
+	return nil
 }

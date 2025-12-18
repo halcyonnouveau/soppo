@@ -3,6 +3,8 @@ grammar = "soppo"
 path_suffixes = ["sop"]
 line_comments = ["//"]
 block_comment = ["/*", "*/"]
+tab_size = 4
+hard_tabs = true
 brackets = [
   { start = "{", end = "}", close = true, newline = true },
   { start = "[", end = "]", close = true, newline = false },

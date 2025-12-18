@@ -55,7 +55,7 @@ impl DepGraph {
                 .parse_file()
                 .map_err(|e| miette!("Failed to parse {}: {:?}", source_path.display(), e))?;
 
-            file_packages.insert(source_path.clone(), file.package.clone());
+            file_packages.insert(source_path.clone(), file.package.name.clone());
 
             // Extract local Soppo imports and resolve to package files
             let mut import_edges = Vec::new();

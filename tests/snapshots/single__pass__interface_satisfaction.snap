@@ -40,8 +40,10 @@ func printString(s Stringer) {
 func main() {
     var s Stringer = MyInt(42)
     printString(s)
+
     var p Stringer = Person{Name: "Alice"}
     printString(p)
+
     var g Greeter = Person{Name: "Bob"}
     fmt.Println(g.Greet("World"))
 }

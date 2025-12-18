@@ -20,9 +20,11 @@ func main() {
     backslash := '\\'
     letter := 'a'
     digit := '0'
+
     fmt.Printf("newline: %c, tab: %c, letter: %c, digit: %c\n", newline, tab, letter, digit)
     _ = quote
     _ = backslash
+
     // Rune in function call (like reader.ReadString('\n'))
     delimTest(newline)
 }

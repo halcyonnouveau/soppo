@@ -35,11 +35,14 @@ func compareDesc(a int, b int) bool {
 
 func main() {
     nums := []int{1, 2, 3, 4, 5}
+
     // Pass function reference to our own higher-order function
     doubled := applyToAll(nums, double)
     fmt.Println(doubled)
+
     tripled := applyToAll(nums, triple)
     fmt.Println(tripled)
+
     // Pass function reference to Go stdlib (sort.Slice uses func(i, j int) bool)
     data := []int{3, 1, 4, 1, 5, 9, 2, 6}
     sort.Slice(data, func(i int, j int) bool {

@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -155,6 +155,7 @@ func testNestedMatch() string {
     mat := MaterialWood("oak")
     props := TriangleProps{material: mat}
     shape := ShapeTriangle(props)
+
     var result string
     switch __v := shape.(type) {
     case Shape_Circle:
@@ -201,6 +202,7 @@ func unwrapOr(r MyResult, defaultVal int) int {
 
 func test() int {
     colour := ColourRed
+
     var message string
     switch colour.(type) {
     case Colour_Red:
@@ -210,7 +212,9 @@ func test() int {
     case Colour_Green:
         return 1
     }
+
     fmt.Printf("%s\n", message)
+
     return 0
 }
 
@@ -255,10 +259,14 @@ func isSmall(x int) bool {
 func main() {
     ok := MyResultOk(42)
     err := MyResultErr("failed")
+
     result1 := unwrapOr(ok, 0)
     result2 := unwrapOr(err, 99)
+
     circle := Shape_Circle{radius: 5.0}
     rect := Shape_Rectangle{width: 3.0, height: 4.0}
+
     nested := testNestedMatch()
+
     fmt.Printf("%d %d %d %f %f %s\n", test(), result1, result2, area(circle), area(rect), nested)
 }

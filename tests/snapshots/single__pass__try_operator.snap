@@ -99,6 +99,7 @@ func nilSafety() error {
     if _err0 != nil {
         return _err0
     }
+
     // After ?, user is known to be non-nil
     fmt.Println(user.name)
     return nil
@@ -118,6 +119,7 @@ func nilSafetySlice() error {
     if _err0 != nil {
         return _err0
     }
+
     // After ?, slice is known to be non-nil
     fmt.Println(len(names))
     fmt.Println(names[0])
@@ -129,6 +131,7 @@ func nilSafetyMap() error {
     if _err0 != nil {
         return _err0
     }
+
     // After ?, map is known to be non-nil
     fmt.Println(len(scores))
     fmt.Println(scores["alice"])

@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -37,36 +37,46 @@ type Container struct {
 func main() {
     // === Nullable types can hold nil ===
     var maybeUser *User = nil
+
     // === Nullable types can hold values ===
     maybeUser = (&User{name: "Bob", age: 25})
+
     // === Use maybeUser after nil check ===
     if (maybeUser != nil) {
         fmt.Println(maybeUser.name)
     }
+
     // === Calling function that returns nullable ===
     result := findUser(0) // result is ?*User
+
     // === Nil check narrows type ===
     if (result != nil) {
         // Here result is known non-nil, can access fields
         fmt.Println(result.name)
+
         // Can pass to function expecting non-nullable
         printUser(result)
     }
+
     // === .(!nil) assertion converts nullable to non-nullable ===
     user := findUser(1)
     fmt.Println(user.name)
     printUser(user)
+
     // === Non-nullable from &expr (always non-nil) ===
     u := User{name: "Charlie", age: 35}
     ptr := (&u) // ptr is *User (non-nullable)
     printUser(ptr)
+
     // === Non-nullable from new(T) ===
     newUser := new(User)
     newUser.name = "Dave"
     printUser(newUser)
+
     // === Struct with nullable field ===
     container := Container{required: (&User{name: "Required", age: 1}), optional: nil}
     printUser(container.required)
+
     if (container.optional != nil) {
         printUser(container.optional)
     }

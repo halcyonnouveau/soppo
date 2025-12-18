@@ -61,7 +61,7 @@ impl PartialEq<String> for Ident {
 /// A complete source file
 #[derive(Debug, Clone)]
 pub struct File {
-    pub package: String,
+    pub package: Ident,
     pub imports: Vec<Import>,
     pub decls: Vec<Decl>,
     pub comments: Vec<Comment>,

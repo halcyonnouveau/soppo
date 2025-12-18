@@ -14,6 +14,7 @@ func main() {
     // Method call on bufio.Reader (returned from bufio.NewReader)
     reader := bufio.NewReader(os.Stdin)
     text, _ := reader.ReadString('\n')
+
     // Method call on result of strings.TrimSpace
     trimmed := strings.TrimSpace(text)
     _ = trimmed

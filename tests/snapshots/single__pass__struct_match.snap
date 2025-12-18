@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -69,15 +69,19 @@ func main() {
     onY := Point{x: 0, y: 5}
     onX := Point{x: 3, y: 0}
     other := Point{x: 2, y: 7}
+
     fmt.Println(describePoint(origin))
     fmt.Println(describePoint(onY))
     fmt.Println(describePoint(onX))
     fmt.Println(describePoint(other))
+
     fmt.Println(isOrigin(origin))
     fmt.Println(isOrigin(other))
+
     alice := Person{name: "Alice", age: 30}
     bob := Person{name: "Bob", age: 25}
     charlie := Person{name: "Charlie", age: 40}
+
     fmt.Println(greet(alice))
     fmt.Println(greet(bob))
     fmt.Println(greet(charlie))
