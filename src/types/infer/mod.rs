@@ -101,8 +101,17 @@ fn resolve_stdlib_package(pkg_name: &str) -> Option<String> {
 /// Scope entry: (type, definition span, used flag)
 type ScopeEntry = (Type, Option<Span>, bool);
 
-/// Import entry: (import path, span, used flag)
-type ImportEntry = (String, Span, bool);
+/// Kind of import
+#[derive(Debug, Clone)]
+pub enum ImportKind {
+    /// Standard Go import
+    Go,
+    /// Soppo module import with its ModuleId
+    Soppo(ModuleId),
+}
+
+/// Import entry: (import path, span, used flag, kind)
+type ImportEntry = (String, Span, bool, ImportKind);
 
 /// Type inference engine
 pub struct Infer {
@@ -130,13 +139,10 @@ pub struct Infer {
     /// Current project (for external module resolution, optional)
     pub(super) project: Option<Project>,
 
-    /// Imported Go packages: short name -> (import path, span, used flag)
-    /// e.g., "fmt" -> ("fmt", span, false)
-    pub(super) imported_packages: HashMap<String, ImportEntry>,
-
-    /// Imported Soppo modules: short name -> ModuleId
-    /// e.g., "helpers" -> ModuleId("util/helpers")
-    pub(super) soppo_imports: HashMap<String, ModuleId>,
+    /// All imports: short name -> (import path, span, used flag, kind)
+    /// e.g., "fmt" -> ("fmt", span, false, Go)
+    /// e.g., "helpers" -> ("sop:util/helpers", span, false, Soppo(ModuleId))
+    pub(super) imports: HashMap<String, ImportEntry>,
 
     /// Nil state tracking for pointer variables (scoped like variable bindings)
     /// Each scope maps variable names to their current nullability state
@@ -164,8 +170,7 @@ impl Infer {
             generic_params: HashMap::new(),
             go_cache,
             project,
-            imported_packages: HashMap::new(),
-            soppo_imports: HashMap::new(),
+            imports: HashMap::new(),
             nil_state: vec![HashMap::new()],
             error_companions: HashMap::new(),
             symbols: SymbolTable::new(),
@@ -210,8 +215,10 @@ impl Infer {
     /// Consume the Infer and return the symbol table
     pub fn into_symbols(mut self) -> SymbolTable {
         // Copy soppo imports to symbol table for cross-file completion
-        for (alias, module_id) in self.soppo_imports {
-            self.symbols.add_import(alias, module_id);
+        for (alias, (_, _, _, kind)) in self.imports {
+            if let ImportKind::Soppo(module_id) = kind {
+                self.symbols.add_import(alias, module_id);
+            }
         }
         self.symbols
     }
@@ -346,17 +353,20 @@ impl Infer {
                 // Track the Soppo import with its ModuleId for cross-package lookups
                 // The local_path is the module ID (e.g., "helpers" or "util/helpers")
                 let module_id = ModuleId::new(local_path);
-                self.soppo_imports
-                    .insert(package_name.to_string(), module_id.clone());
 
-                // Also register in GlobalCtxt for codegen to access
+                // Register in GlobalCtxt for codegen to access
                 self.global_state
-                    .register_soppo_import(package_name.to_string(), module_id);
+                    .register_soppo_import(package_name.to_string(), module_id.clone());
 
-                // Also track in imported_packages for `is_imported_package` and unused import checks
-                self.imported_packages.insert(
+                // Track in unified imports map
+                self.imports.insert(
                     package_name.to_string(),
-                    (import_path.to_string(), import.span, false),
+                    (
+                        import_path.to_string(),
+                        import.span,
+                        false,
+                        ImportKind::Soppo(module_id),
+                    ),
                 );
 
                 // Add package name to scope with a special "soppo_package" type
@@ -379,9 +389,9 @@ impl Infer {
                     .unwrap_or_else(|| import_path.rsplit('/').next().unwrap_or(import_path));
 
                 // Track the import for later lookup and unused import checks
-                self.imported_packages.insert(
+                self.imports.insert(
                     package_name.to_string(),
-                    (import_path.to_string(), import.span, false),
+                    (import_path.to_string(), import.span, false, ImportKind::Go),
                 );
 
                 // Check if Go package has soppo type markers and register them
@@ -409,12 +419,18 @@ impl Infer {
 
     /// Check if a package name refers to a Soppo module import
     pub fn is_soppo_import(&self, package_name: &str) -> bool {
-        self.soppo_imports.contains_key(package_name)
+        matches!(
+            self.imports.get(package_name),
+            Some((_, _, _, ImportKind::Soppo(_)))
+        )
     }
 
     /// Get the ModuleId for a Soppo import
     pub fn get_soppo_module(&self, package_name: &str) -> Option<&ModuleId> {
-        self.soppo_imports.get(package_name)
+        match self.imports.get(package_name) {
+            Some((_, _, _, ImportKind::Soppo(module_id))) => Some(module_id),
+            _ => None,
+        }
     }
 
     /// Look up a function in an imported Soppo module.
@@ -425,7 +441,7 @@ impl Infer {
         func_name: &str,
     ) -> LookupResult {
         // Get the ModuleId for this package
-        let module_id = self.soppo_imports.get(package_name)?;
+        let module_id = self.get_soppo_module(package_name)?;
 
         // Look up the function in GlobalCtxt
         let func_def = self.global_state.lookup_function_in(module_id, func_name)?;
@@ -458,7 +474,7 @@ impl Infer {
     /// Returns the type, definition span, name span (for go-to-definition), and doc comment.
     pub(super) fn lookup_soppo_type(&self, package_name: &str, type_name: &str) -> LookupResult {
         // Get the ModuleId for this package
-        let module_id = self.soppo_imports.get(package_name)?;
+        let module_id = self.get_soppo_module(package_name)?;
 
         // Look up the type in GlobalCtxt
         let type_def = self.global_state.lookup_type_in(module_id, type_name)?;
@@ -480,7 +496,7 @@ impl Infer {
         const_name: &str,
     ) -> LookupResult {
         // Get the ModuleId for this package
-        let module_id = self.soppo_imports.get(package_name)?;
+        let module_id = self.get_soppo_module(package_name)?;
 
         // Look up the constant in GlobalCtxt
         let const_def = self
@@ -502,7 +518,7 @@ impl Infer {
         func_name: &str,
     ) -> Option<Type> {
         // Get the import path for this package and mark as used
-        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
         self.mark_import_used(package_name);
 
@@ -601,7 +617,7 @@ impl Infer {
     /// Look up a type in an imported Go package
     pub(super) fn lookup_go_type(&mut self, package_name: &str, type_name: &str) -> Option<Type> {
         // Get the import path for this package and mark as used
-        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
         self.mark_import_used(package_name);
 
@@ -675,7 +691,7 @@ impl Infer {
         type_name: &str,
         field_name: &str,
     ) -> Option<Type> {
-        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
         self.mark_import_used(package_name);
 
@@ -741,7 +757,7 @@ impl Infer {
         type_name: &str,
         method_name: &str,
     ) -> Option<Type> {
-        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
         self.mark_import_used(package_name);
 
@@ -774,7 +790,7 @@ impl Infer {
 
     /// Check if a name refers to an imported Go package
     pub(super) fn is_imported_package(&self, name: &str) -> bool {
-        self.imported_packages.contains_key(name)
+        self.imports.contains_key(name)
     }
 
     /// Check if a type is an interface from a Go package
@@ -803,9 +819,9 @@ impl Infer {
         // First check if it's explicitly imported, otherwise try the package name directly
         // (for stdlib packages that are dependencies of imported packages)
         let import_path = self
-            .imported_packages
+            .imports
             .get(&package_name)
-            .map(|(path, _, _)| path.clone())
+            .map(|(path, _, _, _)| path.clone())
             .unwrap_or_else(|| package_name.clone());
 
         self.mark_import_used(&package_name);
@@ -938,7 +954,7 @@ impl Infer {
         package_name: &str,
         type_name: &str,
     ) -> Option<String> {
-        let (import_path, _, _) = self.imported_packages.get(package_name)?;
+        let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
         self.mark_import_used(package_name);
         self.resolve_underlying_type_recursive(&import_path, type_name, 0)
@@ -995,11 +1011,11 @@ impl Infer {
 
             // Look up the package's import path (first from imports, then try stdlib)
             let inner_import_path = self
-                .imported_packages
+                .imports
                 .get(&pkg_name)
-                .map(|(path, _, _)| path.clone())
+                .map(|(path, _, _, _)| path.clone())
                 .or_else(|| resolve_stdlib_package(&pkg_name));
-            if self.imported_packages.contains_key(&pkg_name) {
+            if self.imports.contains_key(&pkg_name) {
                 self.mark_import_used(&pkg_name);
             }
 
@@ -1377,8 +1393,10 @@ impl Infer {
         }
 
         // Check if it's a known type in any imported Soppo module
-        for module_id in self.soppo_imports.values() {
-            if self.global_state.lookup_type_in(module_id, name).is_some() {
+        for (_, _, _, kind) in self.imports.values() {
+            if let ImportKind::Soppo(module_id) = kind
+                && self.global_state.lookup_type_in(module_id, name).is_some()
+            {
                 for arg in &ast_ty.args {
                     self.validate_type_arg(arg)?;
                 }
@@ -1536,7 +1554,7 @@ impl Infer {
     /// Check for unused imports after file inference
     /// Returns an error for the first unused import found
     pub fn check_unused_imports(&self) -> Result<()> {
-        for (name, (path, span, used)) in &self.imported_packages {
+        for (name, (path, span, used, _)) in &self.imports {
             if !used {
                 return Err(SoppoError::UnusedImport {
                     name: name.clone(),
@@ -1550,7 +1568,7 @@ impl Infer {
 
     /// Mark an import as used
     pub(super) fn mark_import_used(&mut self, name: &str) {
-        if let Some((_, _, used)) = self.imported_packages.get_mut(name) {
+        if let Some((_, _, used, _)) = self.imports.get_mut(name) {
             *used = true;
         }
     }
@@ -2107,9 +2125,10 @@ mod tests {
         let mut infer = Infer::new().unwrap();
 
         // Import io package to look up Reader interface
-        infer
-            .imported_packages
-            .insert("io".to_string(), ("io".to_string(), Span::dummy(), false));
+        infer.imports.insert(
+            "io".to_string(),
+            ("io".to_string(), Span::dummy(), false, ImportKind::Go),
+        );
 
         // io.Reader is an interface
         let reader_type = Type::Con {
@@ -2149,9 +2168,9 @@ mod tests {
         let mut infer = Infer::new().unwrap();
 
         // Only import bufio, not io
-        infer.imported_packages.insert(
+        infer.imports.insert(
             "bufio".to_string(),
-            ("bufio".to_string(), Span::dummy(), false),
+            ("bufio".to_string(), Span::dummy(), false, ImportKind::Go),
         );
 
         // io.Reader should still be detected as interface (stdlib fallback)
