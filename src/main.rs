@@ -252,33 +252,18 @@ fn build_files(files: &[PathBuf], output: Option<PathBuf>) -> Result<()> {
 
 /// Check using sop.mod configuration
 fn check_from_config(cwd: &std::path::Path) -> Result<()> {
-    let project = Project::discover(cwd)?;
+    let checked = build::typecheck_project(cwd)?;
 
-    if project.config.is_none() {
-        return Err(ConfigError::NoFilesSpecified.into());
-    }
-
-    let sources = project.find_sources();
-    if sources.is_empty() {
+    if checked.is_empty() {
         println!("No .sop files found matching patterns");
         return Ok(());
     }
 
-    for source_path in &sources {
-        let source = fs::read_to_string(source_path)
-            .into_diagnostic()
-            .map_err(|e| e.context(format!("Failed to read file: {}", source_path.display())))?;
-
-        let filename = source_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("input.sop");
-
-        build::typecheck(&source, filename)?;
-        println!("  ✓ {}", source_path.display());
+    for path in &checked {
+        println!("  ✓ {}", path.display());
     }
 
-    println!("✓ Checked {} file(s)", sources.len());
+    println!("✓ Checked {} file(s)", checked.len());
     Ok(())
 }
 

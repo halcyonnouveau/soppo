@@ -213,6 +213,81 @@ pub fn typecheck_with_symbols(source: &str, filename: &str) -> Result<SymbolTabl
     Ok(infer.into_symbols())
 }
 
+/// Type-check a project with proper cross-module import resolution.
+/// Returns a list of (filename, success) pairs for reporting.
+pub fn typecheck_project(root: &Path) -> Result<Vec<PathBuf>> {
+    let project = Project::discover(root)?;
+
+    let sources = project.find_sources();
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Build dependency graph and topologically sort
+    let dep_graph = DepGraph::build(&sources, &project.root, &project.module_path)?;
+    let ordered_sources = dep_graph.topological_sort()?;
+
+    // Type-check files in dependency order
+    let mut global_ctxt = GlobalCtxt::new();
+    let mut checked = Vec::new();
+
+    for source_path in &ordered_sources {
+        // Compute module ID from package directory
+        let module_id = source_path
+            .strip_prefix(&project.root)
+            .ok()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("main");
+
+        let source = fs::read_to_string(source_path)
+            .into_diagnostic()
+            .map_err(|e| e.context(format!("Failed to read file: {}", source_path.display())))?;
+
+        let filename = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("input.sop");
+
+        global_ctxt = typecheck_with_context(
+            &source,
+            filename,
+            global_ctxt,
+            &project.module_path,
+            module_id,
+            &project.root,
+        )?;
+
+        checked.push(source_path.clone());
+    }
+
+    Ok(checked)
+}
+
+/// Type-check with existing GlobalCtxt, returning the updated GlobalCtxt
+fn typecheck_with_context(
+    source: &str,
+    filename: &str,
+    mut global_ctxt: GlobalCtxt,
+    module_path: &str,
+    module_id: &str,
+    project_root: &Path,
+) -> Result<GlobalCtxt> {
+    global_ctxt.set_current_module(ModuleId::new(module_id));
+
+    let project = Project {
+        root: project_root.to_path_buf(),
+        module_path: module_path.to_string(),
+        config: None,
+    };
+
+    let mut infer = Infer::with_global_state_and_project(global_ctxt, project)?;
+    parse_and_typecheck(source, filename, &mut infer)?;
+
+    Ok(infer.into_global_state())
+}
+
 /// Parse source and run two-pass type checking
 fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Result<File> {
     let mut parser = Parser::new(source, FileId(0));
