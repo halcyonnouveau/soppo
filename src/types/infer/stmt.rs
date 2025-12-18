@@ -647,6 +647,35 @@ impl Infer {
             StmtKind::Return { values } => {
                 // Check return values against expected return types
                 if let Some(expected_types) = self.expected_return_types.clone() {
+                    // Handle `return f()` where f() returns a tuple matching expected types
+                    // This is the Go idiom: `return someFunc()` when both have same return signature
+                    if values.len() == 1 && expected_types.len() > 1 {
+                        let value_ty = self.infer_expr(&values[0])?;
+                        let value_ty = self.substitute(value_ty);
+
+                        // Check if it's a tuple type with matching arity
+                        if let Type::Con { sym, args, .. } = &value_ty
+                            && sym.name == "tuple"
+                            && args.len() == expected_types.len()
+                        {
+                            // Unify each tuple element with expected type
+                            for (arg_ty, expected) in args.iter().zip(expected_types.iter()) {
+                                self.unify(expected, arg_ty, &values[0].span)?;
+                            }
+                            return Ok(Type::never());
+                        }
+
+                        // Not a matching tuple - fall through to error
+                        return Err(SoppoError::Type {
+                            message: format!(
+                                "Expected {} return value(s), got {}",
+                                expected_types.len(),
+                                values.len()
+                            ),
+                            span: stmt.span,
+                        });
+                    }
+
                     if values.len() != expected_types.len() {
                         return Err(SoppoError::Type {
                             message: format!(

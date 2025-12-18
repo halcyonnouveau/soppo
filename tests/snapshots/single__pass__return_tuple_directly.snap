@@ -1,0 +1,38 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "errors"
+
+// Test that `return f()` works when f() returns a tuple matching expected returns.
+// This is a common Go idiom.
+func inner() (string, error) {
+    return "hello", nil
+}
+
+func outer() (string, error) {
+    // Should be able to return the tuple directly
+    return inner()
+}
+
+func withCondition(fail bool) (string, error) {
+    if fail {
+        return "", errors.New("failed")
+    }
+
+    // Return tuple from another function
+    return inner()
+}
+
+func main() {
+    s, err := outer()
+    _ = s
+    _ = err
+
+    s2, err2 := withCondition(false)
+    _ = s2
+    _ = err2
+}
