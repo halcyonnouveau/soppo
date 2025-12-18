@@ -190,10 +190,13 @@ impl Resolver {
             .trim_start_matches('/');
 
         // Build path in module cache: $GOMODCACHE/module@version/subpath
-        let cache_path = self
-            .gomodcache
-            .join(encode_module_path(&module_info.path))
-            .join(format!("@{}", module_info.version));
+        // Note: version is appended directly (no path separator) - e.g., toml@v1.5.0
+        let encoded_path = format!(
+            "{}@{}",
+            encode_module_path(&module_info.path),
+            module_info.version
+        );
+        let cache_path = self.gomodcache.join(encoded_path);
 
         let source_dir = if subpath.is_empty() {
             cache_path
