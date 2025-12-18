@@ -184,15 +184,15 @@ fn extract_soppo_markers(source: &str, pkg: &mut GoPackage) {
 
     while i < bytes.len().saturating_sub(2) {
         if bytes[i] == b'/' && bytes[i + 1] == b'*' {
-            // Found start of block comment
-            if let Some(end) = source[i..].find("*/") {
-                let comment = &source[i + 2..i + end];
+            // Found start of block comment, search for */ after the /*
+            if let Some(end) = source[i + 2..].find("*/") {
+                let comment = &source[i + 2..i + 2 + end];
                 if let Some(rest) = comment.strip_prefix("soppo:enum")
                     && let Some(soppo_type) = parse_soppo_enum(rest.trim())
                 {
                     pkg.soppo_types.insert(soppo_type.name.clone(), soppo_type);
                 }
-                i += end + 2;
+                i += 2 + end + 2; // skip past /*comment*/
             } else {
                 break;
             }
@@ -1068,6 +1068,44 @@ type Result[T any, E any] interface {{
         assert_eq!(soppo_type.name, "Result");
         assert_eq!(soppo_type.generics, vec!["T", "E"]);
         assert_eq!(soppo_type.variants.len(), 2);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_with_edge_case_comments() {
+        // Test that various edge case block comments don't cause panics
+        let dir = std::env::temp_dir().join("soppo-treesitter-edge-comments-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("edge_comments.go");
+        let mut file = File::create(&file_path).unwrap();
+        // Include empty comments /**/, comments with asterisks /***/, and normal comments
+        writeln!(
+            file,
+            r#"
+package test
+
+/**/ // empty block comment
+/***/ // block comment with extra asterisk
+/* normal comment */
+/** doc comment style */
+/*
+multiline
+comment
+*/
+
+type Foo struct {{
+    X int
+}}
+"#
+        )
+        .unwrap();
+
+        // Should not panic
+        let pkg = extract(&file_path).unwrap();
+        assert!(pkg.types.contains_key("Foo"));
 
         fs::remove_dir_all(&dir).unwrap();
     }
