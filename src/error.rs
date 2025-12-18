@@ -1,4 +1,4 @@
-// Rustc false positive: fields are used in #[error] and #[label] proc macro attributes
+// rustc false positive: fields are used in #[error] and #[label] proc macro attributes
 #![allow(unused_assignments)]
 
 use miette::Diagnostic;

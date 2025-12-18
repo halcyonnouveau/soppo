@@ -12,30 +12,14 @@ Soppo is not production ready.
 
 ## Installation
 
-### SOPMOD: the Sop installer and version manager
-
-The recommended way to install Sop is through [SOPMOD](https://github.com/halcyonnouveau/sopmod), which manages Sop and Go versions for you.
+The recommended way to install Sop is through [SOPMOD](https://github.com/halcyonnouveau/sopmod), an installer and version manager for Sop and Go.
 
 ```sh
 curl -fsSL https://soppolang.dev/install.sh | sh
-```
-
-Then install Sop:
-
-```sh
 sopmod install sop latest
-sopmod default sop latest
 ```
 
-### Manual installation
-
-SOPMOD is optional. You can also install Sop manually:
-
-1. Install [Go](https://go.dev/doc/install/)
-2. Download a pre-built binary from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases), or build from source:
-   ```sh
-   cargo install soppo
-   ```
+You can also install Sop manually by installing [Go](https://go.dev/doc/install/) and downloading a binary from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases), or with Cargo: `cargo install soppo`.
 
 ## Features
 

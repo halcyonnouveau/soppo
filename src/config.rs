@@ -1,3 +1,6 @@
+// rustc false positive: fields are used in #[error] and #[label] proc macro attributes
+#![allow(unused_assignments)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -23,6 +26,19 @@ pub enum ConfigError {
         help("Provide files/globs as arguments, or create a sop.mod file with include patterns")
     )]
     NoFilesSpecified,
+
+    #[error("sop.mod requires {field} {required}, but {current} is installed")]
+    #[diagnostic(
+        code(soppo::version_mismatch),
+        help(
+            "Install the required version, or update sop.mod to match your installed version\n  hint: sopmod can manage multiple versions - https://github.com/halcyonnouveau/sopmod"
+        )
+    )]
+    VersionMismatch {
+        field: String,
+        required: String,
+        current: String,
+    },
 }
 
 /// Raw config as parsed from sop.mod TOML
@@ -31,6 +47,10 @@ pub struct SopModRaw {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
     pub output: Option<PathBuf>,
+    /// Go version requirement (e.g., "1.22") - requires sopmod
+    pub go: Option<String>,
+    /// Sop version requirement (e.g., "0.4.1") - requires sopmod
+    pub sop: Option<String>,
 }
 
 /// Processed config with compiled glob patterns
@@ -44,6 +64,10 @@ pub struct SopConfig {
     pub output: Option<PathBuf>,
     /// Directory containing sop.mod (patterns are relative to this)
     pub config_dir: PathBuf,
+    /// Go version requirement (e.g., "1.22") - requires sopmod
+    pub go: Option<String>,
+    /// Sop version requirement (e.g., "0.4.1") - requires sopmod
+    pub sop: Option<String>,
 }
 
 impl SopConfig {
@@ -75,7 +99,35 @@ impl SopConfig {
             exclude,
             output: raw.output,
             config_dir: dir.to_path_buf(),
+            go: raw.go,
+            sop: raw.sop,
         }))
+    }
+
+    /// Check if version requirements in sop.mod match the current environment.
+    /// Returns an error if version fields are present and don't match.
+    pub fn check_version_requirements(&self) -> Result<(), ConfigError> {
+        if let Some(ref required) = self.sop {
+            let current = env!("CARGO_PKG_VERSION");
+            if !version_matches(required, current) {
+                return Err(ConfigError::VersionMismatch {
+                    field: "sop".to_string(),
+                    required: required.clone(),
+                    current: current.to_string(),
+                });
+            }
+        }
+        if let Some(ref required) = self.go {
+            let current = get_go_version().unwrap_or_else(|| "not found".to_string());
+            if !version_matches(required, &current) {
+                return Err(ConfigError::VersionMismatch {
+                    field: "go".to_string(),
+                    required: required.clone(),
+                    current,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Find files matching include patterns, excluding those matching exclude patterns.
@@ -198,6 +250,42 @@ pub fn resolve_globs(patterns: &[String], base: &Path) -> Result<Vec<PathBuf>, C
     files.sort();
     files.dedup();
     Ok(files)
+}
+
+/// Check if a required version matches the current version.
+/// Allows partial matches: "0.4" matches "0.4.1", "0" matches "0.4.1".
+fn version_matches(required: &str, current: &str) -> bool {
+    let req_parts: Vec<&str> = required.split('.').collect();
+    let cur_parts: Vec<&str> = current.split('.').collect();
+
+    // Required must not have more parts than current
+    if req_parts.len() > cur_parts.len() {
+        return false;
+    }
+
+    // All required parts must match
+    for (req, cur) in req_parts.iter().zip(cur_parts.iter()) {
+        if req != cur {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Get the system Go version.
+fn get_go_version() -> Option<String> {
+    use std::process::Command;
+
+    let output = Command::new("go").args(["version"]).output().ok()?;
+
+    let version_str = String::from_utf8_lossy(&output.stdout);
+    // Output looks like: "go version go1.22.0 linux/amd64"
+    version_str
+        .split_whitespace()
+        .nth(2)
+        .and_then(|v| v.strip_prefix("go"))
+        .map(|s| s.to_string())
 }
 
 #[cfg(test)]
@@ -336,5 +424,29 @@ exclude = ["testdata/**"]
         assert_eq!(files.len(), 2);
 
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn test_version_matches() {
+        use super::version_matches;
+
+        // Exact matches
+        assert!(version_matches("0.4.1", "0.4.1"));
+        assert!(version_matches("1.22.0", "1.22.0"));
+
+        // Partial matches
+        assert!(version_matches("0.4", "0.4.1"));
+        assert!(version_matches("0", "0.4.1"));
+        assert!(version_matches("1.22", "1.22.0"));
+        assert!(version_matches("1", "1.22.0"));
+
+        // Non-matches
+        assert!(!version_matches("0.5", "0.4.1"));
+        assert!(!version_matches("1.23", "1.22.0"));
+        assert!(!version_matches("0.4.2", "0.4.1"));
+        assert!(!version_matches("2", "1.22.0"));
+
+        // Required more specific than current (shouldn't match)
+        assert!(!version_matches("0.4.1.2", "0.4.1"));
     }
 }

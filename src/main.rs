@@ -83,6 +83,9 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    // Check if sop.mod version requirements match current environment
+    check_version_requirements()?;
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -362,6 +365,32 @@ fn show_diff(file: &Path, original: &str, formatted: &str) -> Result<()> {
 
     // Print diff output (diff returns exit code 1 when files differ, which is expected)
     print!("{}", String::from_utf8_lossy(&output.stdout));
+
+    Ok(())
+}
+
+/// Check if sop.mod in current or parent directories has version requirements
+/// that don't match the current environment.
+fn check_version_requirements() -> Result<()> {
+    use soppo::config::SopConfig;
+
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(_) => return Ok(()), // Can't check, just continue
+    };
+
+    // Walk up to find sop.mod
+    let mut current = cwd;
+    loop {
+        if let Ok(Some(config)) = SopConfig::load(&current) {
+            config.check_version_requirements()?;
+            return Ok(());
+        }
+
+        if !current.pop() {
+            break;
+        }
+    }
 
     Ok(())
 }
