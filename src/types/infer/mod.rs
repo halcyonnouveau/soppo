@@ -136,6 +136,11 @@ pub struct Infer {
     /// Each scope maps variable names to their current nullability state
     pub(super) nil_state: Vec<HashMap<String, Nullability>>,
 
+    /// Error companion tracking: maps error variable names to their companion variables.
+    /// When `x, err := f()` is declared, error_companions["err"] = ["x"].
+    /// This allows narrowing x to non-nil after `if err != nil { return }`.
+    pub(super) error_companions: HashMap<String, Vec<String>>,
+
     /// Symbol table for LSP features (hover, go-to-definition)
     /// Maps spans to symbol information
     pub(super) symbols: SymbolTable,
@@ -156,6 +161,7 @@ impl Infer {
             imported_packages: HashMap::new(),
             soppo_imports: HashMap::new(),
             nil_state: vec![HashMap::new()],
+            error_companions: HashMap::new(),
             symbols: SymbolTable::new(),
         }
     }

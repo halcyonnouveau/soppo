@@ -153,6 +153,22 @@ impl Infer {
                         for (ident, ty) in names.iter().zip(args.iter()) {
                             self.insert_var(ident.name.clone(), ty.clone(), Some(ident.span));
                         }
+
+                        // Track error companions: if last return is error, other returns are companions
+                        // This enables narrowing like: `resp, err := f(); if err != nil { return }`
+                        // After the early return, resp is known non-nil.
+                        if let Some(last_ty) = args.last()
+                            && matches!(last_ty, Type::Con { sym, .. } if sym.name == "error" || sym.name == "?error")
+                            && names.len() >= 2
+                        {
+                            let err_name = names.last().unwrap().name.clone();
+                            let companions: Vec<String> = names[..names.len() - 1]
+                                .iter()
+                                .map(|n| n.name.clone())
+                                .collect();
+                            self.error_companions.insert(err_name, companions);
+                        }
+
                         return Ok(Type::unit());
                     }
 
@@ -605,6 +621,18 @@ impl Infer {
                     if matches!(else_ty, Type::Never) && check.is_not_nil && else_block.is_some() {
                         // `if x != nil { ... } else { return }` - x is non-nil after
                         self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
+                    }
+
+                    // Handle error companion narrowing:
+                    // `if err != nil { return }` - after this, err's companions are non-nil
+                    // This is the common Go idiom: `resp, err := f(); if err != nil { return }`
+                    if matches!(then_ty, Type::Never) && check.is_not_nil {
+                        // check.expr_key is the error variable name
+                        if let Some(companions) = self.error_companions.get(&check.expr_key) {
+                            for companion in companions.clone() {
+                                self.set_nil_state(companion, Nullability::NonNull);
+                            }
+                        }
                     }
                 }
 
