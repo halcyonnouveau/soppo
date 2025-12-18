@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::shadows_import
+
+  × Variable `fmt` shadows imported package `fmt`
+   ╭─[shadows_import.sop:7:2]
+ 6 │     // This should fail: variable name shadows import name
+ 7 │     fmt := "hello"
+   ·     ─┬─
+   ·      ╰── shadows import
+ 8 │     println(fmt)
+   ╰────
+  help: use a different variable name to avoid confusion

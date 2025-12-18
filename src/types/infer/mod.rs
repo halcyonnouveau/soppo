@@ -344,7 +344,7 @@ impl Infer {
                     .insert(package_name.to_string(), import_path.to_string());
 
                 // Add package name to scope with a special "soppo_package" type
-                self.insert_var(
+                let _ = self.insert_var(
                     package_name.to_string(),
                     Type::simple("soppo_package"),
                     None,
@@ -379,7 +379,7 @@ impl Infer {
 
                 // Add package name to scope with a special "package" type
                 // This allows field access like fmt.Printf to work
-                self.insert_var(package_name.to_string(), Type::simple("package"), None);
+                let _ = self.insert_var(package_name.to_string(), Type::simple("package"), None);
             }
         }
     }
@@ -1477,10 +1477,23 @@ impl Infer {
     }
 
     /// Insert a variable into the current scope
-    pub(super) fn insert_var(&mut self, name: String, ty: Type, def_span: Option<Span>) {
+    /// Returns an error if the variable name shadows an imported package
+    pub(super) fn insert_var(
+        &mut self,
+        name: String,
+        ty: Type,
+        def_span: Option<Span>,
+    ) -> Result<()> {
+        // Check if the variable name shadows an imported package
+        if self.is_imported_package(&name)
+            && let Some(span) = def_span
+        {
+            return Err(SoppoError::ShadowsImport { name, span });
+        }
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name, (ty, def_span));
         }
+        Ok(())
     }
 
     /// Lookup a variable in scopes (from innermost to outermost)

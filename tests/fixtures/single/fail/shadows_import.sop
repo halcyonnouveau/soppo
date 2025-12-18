@@ -1,0 +1,9 @@
+package main
+
+import "fmt"
+
+func main() {
+	// This should fail: variable name shadows import name
+	fmt := "hello"
+	println(fmt)
+}

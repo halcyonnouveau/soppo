@@ -453,7 +453,7 @@ impl Infer {
                 // Add parameters to scope - use resolve_type for proper qualified type handling
                 for param in params {
                     let param_ty = self.resolve_type(&param.ty);
-                    self.insert_var(param.ident.name.clone(), param_ty, Some(param.ident.span));
+                    self.insert_var(param.ident.name.clone(), param_ty, Some(param.ident.span))?;
                 }
 
                 // Set expected return types for this function

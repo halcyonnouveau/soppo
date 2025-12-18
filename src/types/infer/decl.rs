@@ -135,7 +135,7 @@ impl Infer {
                 receiver.ident.name.clone(),
                 receiver_ty.clone(),
                 Some(receiver.ident.span),
-            );
+            )?;
 
             // Record type annotation for LSP
             self.record_type_annotation(&receiver.ty);
@@ -157,7 +157,7 @@ impl Infer {
                 param.ident.name.clone(),
                 param_ty.clone(),
                 Some(param.ident.span),
-            );
+            )?;
 
             // Record type annotation for LSP
             self.record_type_annotation(&param.ty);

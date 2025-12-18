@@ -102,7 +102,7 @@ impl Infer {
             StmtKind::Decl { ident, value } => {
                 let value_ty = self.infer_expr(value)?;
                 let value_ty_sub = self.substitute(value_ty.clone());
-                self.insert_var(ident.name.clone(), value_ty.clone(), Some(ident.span));
+                self.insert_var(ident.name.clone(), value_ty.clone(), Some(ident.span))?;
 
                 // Record variable definition for LSP
                 self.record_symbol(
@@ -133,8 +133,8 @@ impl Infer {
                     if names.len() == 2
                         && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)?
                     {
-                        self.insert_var(names[0].name.clone(), value_ty, Some(names[0].span));
-                        self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span));
+                        self.insert_var(names[0].name.clone(), value_ty, Some(names[0].span))?;
+                        self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span))?;
                         return Ok(Type::unit());
                     }
 
@@ -151,7 +151,7 @@ impl Infer {
                         && args.len() == names.len()
                     {
                         for (ident, ty) in names.iter().zip(args.iter()) {
-                            self.insert_var(ident.name.clone(), ty.clone(), Some(ident.span));
+                            self.insert_var(ident.name.clone(), ty.clone(), Some(ident.span))?;
                         }
 
                         // Track error companions: if last return is error, other returns are companions
@@ -185,7 +185,7 @@ impl Infer {
                     // a, b := expr1, expr2 (one value per name)
                     for (ident, value) in names.iter().zip(values.iter()) {
                         let value_ty = self.infer_expr(value)?;
-                        self.insert_var(ident.name.clone(), value_ty, Some(ident.span));
+                        self.insert_var(ident.name.clone(), value_ty, Some(ident.span))?;
                     }
                     Ok(Type::unit())
                 }
@@ -244,7 +244,7 @@ impl Infer {
                     }
                 };
                 let var_ty_sub = self.substitute(var_ty.clone());
-                self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span));
+                self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))?;
 
                 // Record variable definition for LSP
                 self.record_symbol(
@@ -289,7 +289,7 @@ impl Infer {
                                 span: stmt.span,
                             })?;
                     for ident in names {
-                        self.insert_var(ident.name.clone(), declared_ty.clone(), Some(ident.span));
+                        self.insert_var(ident.name.clone(), declared_ty.clone(), Some(ident.span))?;
                     }
                 } else if values.len() == 1 && names.len() > 1 {
                     // var a, b = f() (multi-return unpacking)
@@ -308,9 +308,9 @@ impl Infer {
                         } else {
                             value_ty
                         };
-                        self.insert_var(names[0].name.clone(), var_ty, Some(names[0].span));
+                        self.insert_var(names[0].name.clone(), var_ty, Some(names[0].span))?;
                         // Second variable gets the ok type (bool)
-                        self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span));
+                        self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span))?;
                         return Ok(Type::unit());
                     }
 
@@ -334,7 +334,7 @@ impl Infer {
                             } else {
                                 arg_ty.clone()
                             };
-                            self.insert_var(ident.name.clone(), var_ty, Some(ident.span));
+                            self.insert_var(ident.name.clone(), var_ty, Some(ident.span))?;
                         }
                         return Ok(Type::unit());
                     }
@@ -358,7 +358,7 @@ impl Infer {
                         } else {
                             value_ty
                         };
-                        self.insert_var(ident.name.clone(), var_ty, Some(ident.span));
+                        self.insert_var(ident.name.clone(), var_ty, Some(ident.span))?;
                     }
                 }
                 Ok(Type::unit())
@@ -379,7 +379,7 @@ impl Infer {
                     value_ty
                 };
 
-                self.insert_var(ident.name.clone(), const_ty, Some(ident.span));
+                self.insert_var(ident.name.clone(), const_ty, Some(ident.span))?;
                 Ok(Type::unit())
             }
 
@@ -394,7 +394,7 @@ impl Infer {
                     } else {
                         value_ty
                     };
-                    self.insert_var(ident.name.clone(), const_ty, Some(ident.span));
+                    self.insert_var(ident.name.clone(), const_ty, Some(ident.span))?;
                 }
                 Ok(Type::unit())
             }
@@ -557,11 +557,11 @@ impl Infer {
                     };
 
                 // Bind the key variable
-                self.insert_var(key.name.clone(), key_ty, Some(key.span));
+                self.insert_var(key.name.clone(), key_ty, Some(key.span))?;
 
                 // Bind the value variable if present
                 if let Some(val_ident) = value {
-                    self.insert_var(val_ident.name.clone(), value_ty, Some(val_ident.span));
+                    self.insert_var(val_ident.name.clone(), value_ty, Some(val_ident.span))?;
                 }
 
                 // Type check body
@@ -841,7 +841,7 @@ impl Infer {
                             // Add first pattern's bindings to scope
                             let pattern_span = arm.patterns.first().map(|p| p.span);
                             for (name, ty) in first_bindings {
-                                self.insert_var(name, ty, pattern_span);
+                                self.insert_var(name, ty, pattern_span)?;
                             }
                         } else if let Some(pattern) = arm.patterns.first() {
                             // Single pattern
@@ -987,7 +987,7 @@ impl Infer {
                             let elem_ty = Self::extract_channel_element(&channel_ty)
                                 .unwrap_or_else(|| self.fresh_ty_var());
 
-                            self.insert_var(ident.name.clone(), elem_ty, Some(ident.span));
+                            self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))?;
                         }
                         SelectCaseKind::RecvDeclOk {
                             ident,
@@ -1002,12 +1002,12 @@ impl Infer {
                             let elem_ty = Self::extract_channel_element(&channel_ty)
                                 .unwrap_or_else(|| self.fresh_ty_var());
 
-                            self.insert_var(ident.name.clone(), elem_ty, Some(ident.span));
+                            self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))?;
                             self.insert_var(
                                 ok_ident.name.clone(),
                                 Type::simple("bool"),
                                 Some(ok_ident.span),
-                            );
+                            )?;
                         }
                         SelectCaseKind::Send { channel, value } => {
                             // ch <- value: same as Send statement
@@ -1096,7 +1096,7 @@ impl Infer {
 
                         // Strip error from tuple type for the variable
                         let var_ty = self.strip_error_from_tuple(&value_ty_sub);
-                        self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span));
+                        self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))?;
                         self.update_nil_state_for_assignment(&ident.name, value, &var_ty);
                         (value_ty_sub, value.span)
                     }
@@ -1124,7 +1124,7 @@ impl Infer {
                                         var_ident.name.clone(),
                                         ty.clone(),
                                         Some(var_ident.span),
-                                    );
+                                    )?;
                                 }
                             }
                         }
@@ -1180,7 +1180,7 @@ impl Infer {
                 if let Some(block) = handler {
                     self.push_scope();
                     if let Some(name) = error_name {
-                        self.insert_var(name.clone(), Type::simple("error"), Some(stmt.span));
+                        self.insert_var(name.clone(), Type::simple("error"), Some(stmt.span))?;
                         // Error is known to be non-nil in the handler (handler only runs on error)
                         self.set_nil_state(name.clone(), Nullability::NonNull);
                     }

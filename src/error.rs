@@ -167,6 +167,17 @@ pub enum SoppoError {
         #[label("type argument does not satisfy `{constraint}`")]
         span: Span,
     },
+
+    #[error("Variable `{name}` shadows imported package `{name}`")]
+    #[diagnostic(
+        code(soppo::shadows_import),
+        help("use a different variable name to avoid confusion")
+    )]
+    ShadowsImport {
+        name: String,
+        #[label("shadows import")]
+        span: Span,
+    },
 }
 
 fn format_cycle(cycle: &[(String, String)]) -> String {
