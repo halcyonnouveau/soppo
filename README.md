@@ -21,6 +21,8 @@ sopmod install sop latest
 
 You can also install Sop manually by installing [Go](https://go.dev/doc/install/) and downloading a binary from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases), or with Cargo: `cargo install soppo`.
 
+> **Note:** SOPMOD itself is written entirely in Soppo. Check out [its source code](https://github.com/halcyonnouveau/sopmod) for a real-world example.
+
 ## Features
 
 - **Enums:** Tagged unions with struct variants
