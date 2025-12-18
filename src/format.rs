@@ -1005,12 +1005,16 @@ impl Formatter {
                 result.push('(');
                 let arg_strs: Vec<_> = args
                     .iter()
-                    .map(|(name, val)| {
-                        if let Some((n, _)) = name {
+                    .map(|(name, val, spread)| {
+                        let mut s = if let Some((n, _)) = name {
                             format!("{}: {}", n, self.format_expr(val))
                         } else {
                             self.format_expr(val)
+                        };
+                        if *spread {
+                            s.push_str("...");
                         }
+                        s
                     })
                     .collect();
                 result.push_str(&arg_strs.join(", "));

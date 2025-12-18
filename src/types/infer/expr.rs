@@ -933,7 +933,7 @@ impl Infer {
         &mut self,
         func: &Expr,
         type_args: &[crate::syntax::TypeAnnotation],
-        args: &[(Option<(String, Span)>, Expr)],
+        args: &[crate::syntax::CallArg],
         expr_span: &Span,
     ) -> Result<Type> {
         // Handle generic unit variant calls: Option.None[int]
@@ -1006,7 +1006,7 @@ impl Infer {
             if name == "make" && !type_args.is_empty() {
                 // make(type, ...) - returns the type
                 // Validate additional arguments are integers (size, capacity)
-                for (_, arg) in args {
+                for (_, arg, _) in args {
                     let arg_ty = self.infer_expr(arg)?;
                     self.unify(&arg_ty, &Type::simple("int"), &arg.span)?;
                 }
@@ -1083,7 +1083,7 @@ impl Infer {
                     }
                 };
                 // Type check remaining arguments against element type
-                for (_, arg) in args.iter().skip(1) {
+                for (_, arg, _) in args.iter().skip(1) {
                     let arg_ty = self.infer_expr(arg)?;
                     self.unify(&elem_ty, &arg_ty, &arg.span)?;
                 }
@@ -1168,7 +1168,7 @@ impl Infer {
 
             // print and println - variadic, accept any types, return unit
             if name == "print" || name == "println" {
-                for (_, arg) in args {
+                for (_, arg, _) in args {
                     self.infer_expr(arg)?;
                 }
                 return Ok(Type::unit());
@@ -1308,7 +1308,7 @@ impl Infer {
 
                     // Found the function - infer args and check against signature
                     let mut arg_tys = Vec::new();
-                    for (_, arg) in args {
+                    for (_, arg, _) in args {
                         arg_tys.push((self.infer_expr_narrowed(arg)?, arg.span));
                     }
 
@@ -1479,12 +1479,12 @@ impl Infer {
             };
 
         // Check if any args are named
-        let has_named = args.iter().any(|(name, _)| name.is_some());
+        let has_named = args.iter().any(|(name, _, _)| name.is_some());
 
         // Reorder arguments based on named arguments
         let ordered_args: Vec<(&Expr, Span)> = if !has_named {
             // All positional - just use them in order
-            args.iter().map(|(_, e)| (e, e.span)).collect()
+            args.iter().map(|(_, e, _)| (e, e.span)).collect()
         } else if let Some(param_names) = &param_names {
             // We have named args and know parameter names - reorder
             // Rules:
@@ -1498,7 +1498,7 @@ impl Infer {
             let mut seen_named = false;
 
             // First pass: process named args to reserve their slots, collect positional args
-            for (name, arg_expr) in args {
+            for (name, arg_expr, _) in args {
                 match name {
                     Some((n, name_span)) => {
                         seen_named = true;

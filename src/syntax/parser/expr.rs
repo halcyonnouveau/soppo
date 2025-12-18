@@ -197,7 +197,8 @@ impl Parser {
                             if !matches!(self.peek(), Some(Token::RParen)) {
                                 loop {
                                     // Check for named argument: Ident followed by Colon
-                                    let arg = if let Some(Token::Ident(name)) = self.peek()
+                                    let (name, value) = if let Some(Token::Ident(name)) =
+                                        self.peek()
                                         && matches!(self.peek_at(1), Some(Token::Colon))
                                     {
                                         let name = name.clone();
@@ -212,7 +213,9 @@ impl Parser {
                                         // that non-variadic positional args don't follow named args.
                                         (None, self.parse_expr()?)
                                     };
-                                    args.push(arg);
+                                    // Check for spread: expr...
+                                    let spread = self.consume(&Token::DotDotDot);
+                                    args.push((name, value, spread));
 
                                     if !self.consume(&Token::Comma) {
                                         break;
@@ -337,7 +340,7 @@ impl Parser {
                     if !matches!(self.peek(), Some(Token::RParen)) {
                         loop {
                             // Check for named argument: Ident followed by Colon
-                            let arg = if let Some(Token::Ident(name)) = self.peek()
+                            let (name, value) = if let Some(Token::Ident(name)) = self.peek()
                                 && matches!(self.peek_at(1), Some(Token::Colon))
                             {
                                 let name = name.clone();
@@ -352,7 +355,9 @@ impl Parser {
                                 // that non-variadic positional args don't follow named args.
                                 (None, self.parse_expr()?)
                             };
-                            args.push(arg);
+                            // Check for spread: expr...
+                            let spread = self.consume(&Token::DotDotDot);
+                            args.push((name, value, spread));
 
                             if !self.consume(&Token::Comma) {
                                 break;
@@ -726,10 +731,10 @@ impl Parser {
                 // First argument is a type
                 let ty = self.parse_type()?;
 
-                // Optional additional arguments (size, capacity) - always positional
+                // Optional additional arguments (size, capacity) - always positional, no spread
                 let mut args = Vec::new();
                 while self.consume(&Token::Comma) {
-                    args.push((None, self.parse_expr()?));
+                    args.push((None, self.parse_expr()?, false));
                 }
 
                 let end_span = self.expect(Token::RParen)?;
@@ -1288,6 +1293,27 @@ mod tests {
                 assert_eq!(field, "bar");
             }
             _ => panic!("Expected field access"),
+        }
+    }
+
+    #[test]
+    fn test_parse_spread_argument() {
+        // Spread operator for variadic arguments: slice...
+        let expr = parse_expr_helper("append(a, b...)").unwrap();
+        match expr.kind {
+            ExprKind::Call { func, args, .. } => {
+                assert!(matches!(func.kind, ExprKind::Ident(s) if s == "append"));
+                assert_eq!(args.len(), 2);
+                // First arg: no spread
+                assert!(args[0].0.is_none());
+                assert!(matches!(&args[0].1.kind, ExprKind::Ident(s) if s == "a"));
+                assert!(!args[0].2); // not spread
+                // Second arg: spread
+                assert!(args[1].0.is_none());
+                assert!(matches!(&args[1].1.kind, ExprKind::Ident(s) if s == "b"));
+                assert!(args[1].2); // is spread
+            }
+            _ => panic!("Expected call expression"),
         }
     }
 }

@@ -4,6 +4,12 @@ use std::fmt;
 use super::lexer::Comment;
 use super::source::Span;
 
+/// A function call argument: (optional name with span, expression, is_spread)
+/// - name: Some((name, span)) for named arguments like `foo: expr`, None for positional
+/// - expr: The argument expression
+/// - spread: true if this argument uses spread syntax `expr...`
+pub type CallArg = (Option<(String, Span)>, Expr, bool);
+
 /// An identifier with its source location
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ident {
@@ -372,7 +378,7 @@ pub enum ExprKind {
     Call {
         func: Box<Expr>,
         type_args: Vec<TypeAnnotation>,
-        args: Vec<(Option<(String, Span)>, Expr)>, // (name with span, value) - name is Some for named args
+        args: Vec<CallArg>,
     },
     Field {
         expr: Box<Expr>,

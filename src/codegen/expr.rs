@@ -92,9 +92,12 @@ impl Codegen {
                     // Type is first argument
                     self.emit(&type_args[0].name);
                     // Additional arguments
-                    for (_, arg) in args {
+                    for (_, arg, spread) in args {
                         self.emit(", ");
                         self.gen_expr(arg);
+                        if *spread {
+                            self.emit("...");
+                        }
                     }
                     self.emit(")");
                     return;
@@ -116,11 +119,14 @@ impl Codegen {
                     self.emit("]");
                 }
                 self.emit("(");
-                for (i, arg) in ordered_args.iter().enumerate() {
+                for (i, (arg, spread)) in ordered_args.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
                     }
                     self.gen_expr(arg);
+                    if *spread {
+                        self.emit("...");
+                    }
                 }
                 self.emit(")");
             }
@@ -391,17 +397,18 @@ impl Codegen {
     }
 
     /// Reorder function call arguments based on named arguments
+    /// Returns (expr, spread) pairs in the correct order
     fn reorder_call_args<'a>(
         &self,
         func: &Expr,
-        args: &'a [(Option<(String, crate::syntax::Span)>, Expr)],
-    ) -> Vec<&'a Expr> {
+        args: &'a [crate::syntax::CallArg],
+    ) -> Vec<(&'a Expr, bool)> {
         // Check if any args are named
-        let has_named = args.iter().any(|(name, _)| name.is_some());
+        let has_named = args.iter().any(|(name, _, _)| name.is_some());
 
         // If no named args, just return all in order
         if !has_named {
-            return args.iter().map(|(_, arg)| arg).collect();
+            return args.iter().map(|(_, arg, spread)| (arg, *spread)).collect();
         }
 
         // Look up parameter names (exclude variadic params)
@@ -423,20 +430,20 @@ impl Codegen {
             // - Named args reserve their specific slots first
             // - Positional args fill remaining slots in order
             // - Extra positional args go to variadic
-            let mut result: Vec<Option<&Expr>> = vec![None; param_names.len()];
-            let mut variadic_args: Vec<&Expr> = Vec::new();
-            let mut positional_args: Vec<&Expr> = Vec::new();
+            let mut result: Vec<Option<(&Expr, bool)>> = vec![None; param_names.len()];
+            let mut variadic_args: Vec<(&Expr, bool)> = Vec::new();
+            let mut positional_args: Vec<(&Expr, bool)> = Vec::new();
 
             // First pass: process named args to reserve slots, collect positional args
-            for (name, arg) in args {
+            for (name, arg, spread) in args {
                 match name {
                     Some((n, _)) => {
                         if let Some(idx) = param_names.iter().position(|p| p == n) {
-                            result[idx] = Some(arg);
+                            result[idx] = Some((arg, *spread));
                         }
                     }
                     None => {
-                        positional_args.push(arg);
+                        positional_args.push((arg, *spread));
                     }
                 }
             }
@@ -455,7 +462,7 @@ impl Codegen {
             variadic_args.extend(positional_iter);
 
             // Collect results (type checker already validated all are filled)
-            let mut ordered: Vec<&Expr> = result.into_iter().flatten().collect();
+            let mut ordered: Vec<(&Expr, bool)> = result.into_iter().flatten().collect();
 
             // Add variadic args at the end
             ordered.extend(variadic_args);
@@ -463,7 +470,7 @@ impl Codegen {
             ordered
         } else {
             // Unknown function - just use positional order (type checker would have errored)
-            args.iter().map(|(_, arg)| arg).collect()
+            args.iter().map(|(_, arg, spread)| (arg, *spread)).collect()
         }
     }
 
