@@ -864,7 +864,7 @@ impl Formatter {
     fn format_pattern(&self, pat: &Pattern) -> String {
         match &pat.kind {
             PatternKind::Default => "default".to_string(),
-            PatternKind::Variant(name) => name.clone(),
+            PatternKind::Variant(name, _) => name.clone(),
             PatternKind::Literal(lit) => self.format_literal(lit),
             PatternKind::Destructor { name, binding } => {
                 format!("{}({})", name, binding.name)

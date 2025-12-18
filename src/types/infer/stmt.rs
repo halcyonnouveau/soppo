@@ -757,6 +757,39 @@ impl Infer {
                     (None, None)
                 };
 
+                // Annotate Variant patterns based on scrutinee type
+                // If scrutinee is a soppo enum, patterns are soppo enums
+                // Otherwise (e.g., byte, int), patterns are Go constants
+                let is_soppo_enum_scrutinee = scrutinee_ty
+                    .as_ref()
+                    .map(|ty| {
+                        if let Type::Con { sym, .. } = ty {
+                            if sym.module.0.is_empty() {
+                                // Local type in current module
+                                self.global_state
+                                    .lookup_type(&sym.name)
+                                    .map(|td| matches!(td.kind, TypeDefKind::Enum { .. }))
+                                    .unwrap_or(false)
+                            } else {
+                                // Cross-package type - use is_soppo_enum which checks both
+                                // soppo imports and Go packages with soppo:enum markers
+                                self.global_state.is_soppo_enum(&sym.module.0, &sym.name)
+                            }
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+
+                // Set the is_soppo_enum flag on all Variant patterns
+                for arm in arms.iter() {
+                    for pattern in &arm.patterns {
+                        if let PatternKind::Variant(_, is_soppo_enum) = &pattern.kind {
+                            is_soppo_enum.set(is_soppo_enum_scrutinee);
+                        }
+                    }
+                }
+
                 // Check if scrutinee is nilable (for nil narrowing in non-nil arms)
                 let scrutinee_is_nilable = scrutinee_ty
                     .as_ref()
@@ -777,7 +810,7 @@ impl Infer {
                         .iter()
                         .flat_map(|arm| arm.patterns.iter())
                         .filter_map(|pattern| match &pattern.kind {
-                            PatternKind::Variant(v) => {
+                            PatternKind::Variant(v, _) => {
                                 Some(v.rsplit('.').next().unwrap_or(v).to_string())
                             }
                             PatternKind::Destructor { name, .. } => {
@@ -927,7 +960,7 @@ impl Infer {
                             .iter()
                             .flat_map(|arm| arm.patterns.iter())
                             .filter_map(|pattern| match &pattern.kind {
-                                PatternKind::Variant(v) => {
+                                PatternKind::Variant(v, _) => {
                                     // Extract variant name from qualified name like "Colour.Red"
                                     Some(v.rsplit('.').next().unwrap_or(v).to_string())
                                 }

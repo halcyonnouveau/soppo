@@ -497,11 +497,16 @@ impl Codegen {
     /// Generate a pattern for match arms
     pub(crate) fn gen_pattern(&mut self, pattern: &Pattern) {
         match &pattern.kind {
-            PatternKind::Variant(name) => {
-                // Convert qualified name to Go type name
-                // Colour.Red → Colour_Red
-                // pkg.Status.Active → pkg.Status_Active
-                self.emit(Self::convert_enum_pattern(name));
+            PatternKind::Variant(name, is_soppo_enum) => {
+                if is_soppo_enum.get() {
+                    // Soppo enum: convert qualified name to Go type name
+                    // Colour.Red → Colour_Red
+                    // pkg.Status.Active → pkg.Status_Active
+                    self.emit(Self::convert_enum_pattern(name));
+                } else {
+                    // Go constant: keep as-is (e.g., tar.TypeDir)
+                    self.emit(name);
+                }
             }
             PatternKind::Literal(lit) => match lit {
                 Literal::Integer(n) => self.emit(n.to_string()),
@@ -529,16 +534,25 @@ impl Codegen {
     }
 
     /// Convert a qualified enum pattern name to Go type name
-    /// - `Colour.Red` → `Colour_Red`
-    /// - `pkg.Status.Active` → `pkg.Status_Active`
+    /// - `Colour.Red` → `Colour_Red` (soppo enum)
+    /// - `pkg.Status.Active` → `pkg.Status_Active` (soppo enum in package)
+    /// - `tar.TypeDir` → `tar.TypeDir` (Go constant, unchanged)
     fn convert_enum_pattern(name: &str) -> String {
         let parts: Vec<&str> = name.split('.').collect();
         match parts.len() {
             0 => name.to_string(),
             1 => name.to_string(),
             2 => {
-                // Type.Variant → Type_Variant
-                format!("{}_{}", parts[0], parts[1])
+                // Check if first part is a Go package (lowercase) or soppo type (PascalCase)
+                // Go packages start with lowercase, soppo types start with uppercase
+                let first_char = parts[0].chars().next().unwrap_or('a');
+                if first_char.is_lowercase() {
+                    // Go constant like tar.TypeDir - keep as-is
+                    name.to_string()
+                } else {
+                    // Soppo enum like Result.Ok → Result_Ok
+                    format!("{}_{}", parts[0], parts[1])
+                }
             }
             _ => {
                 // pkg.Type.Variant or pkg.subpkg.Type.Variant

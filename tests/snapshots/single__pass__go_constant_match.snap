@@ -1,0 +1,69 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "archive/tar"
+
+// Test matching on Go constants (should generate value switch, not type switch)
+func describeType(typeflag byte) string {
+    switch typeflag {
+    case tar.TypeReg:
+        return "regular file"
+    case tar.TypeDir:
+        return "directory"
+    case tar.TypeSymlink:
+        return "symlink"
+    default:
+        return "other"
+    }
+}
+
+// Test matching on soppo enum (should generate type switch)
+/*soppo:enum
+Colour {
+    Red
+    Green
+    Blue
+}
+*/
+type Colour interface {
+    isColour()
+}
+
+type Colour_Red struct {}
+func (Colour_Red) isColour() {}
+func (Colour_Red) String() string { return "Red" }
+
+type Colour_Green struct {}
+func (Colour_Green) isColour() {}
+func (Colour_Green) String() string { return "Green" }
+
+type Colour_Blue struct {}
+func (Colour_Blue) isColour() {}
+func (Colour_Blue) String() string { return "Blue" }
+
+var (
+    ColourRed Colour = Colour_Red{}
+    ColourGreen Colour = Colour_Green{}
+    ColourBlue Colour = Colour_Blue{}
+)
+
+func describeColour(c Colour) string {
+    switch c.(type) {
+    case Colour_Red:
+        return "red"
+    case Colour_Green:
+        return "green"
+    case Colour_Blue:
+        return "blue"
+    }
+    panic("unreachable")
+}
+
+func main() {
+    _ = describeType(tar.TypeDir)
+    _ = describeColour(ColourRed)
+}

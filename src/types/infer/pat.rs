@@ -18,7 +18,7 @@ impl Infer {
                 // Default doesn't bind anything
                 Ok(())
             }
-            PatternKind::Variant(_name) => {
+            PatternKind::Variant(_name, _) => {
                 // Qualified variant names like Colour.Red don't create bindings
                 // They just match against enum variants
                 Ok(())
@@ -154,7 +154,7 @@ impl Infer {
             PatternKind::Default | PatternKind::Literal(_) | PatternKind::Guard(_) => {
                 // These patterns don't bind anything
             }
-            PatternKind::Variant(_name) => {
+            PatternKind::Variant(_name, _) => {
                 // Qualified variant names like Colour.Red don't create bindings
                 // They just match against enum variants
             }

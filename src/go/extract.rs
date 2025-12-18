@@ -725,6 +725,8 @@ fn infer_const_type(node: tree_sitter::Node) -> String {
             "float_literal" => return "float64".to_string(),
             "interpreted_string_literal" | "raw_string_literal" => return "string".to_string(),
             "true" | "false" => return "bool".to_string(),
+            // Rune literals like '0', '5', '\n' - these are compatible with byte
+            "rune_literal" => return "rune".to_string(),
             _ => {}
         }
     }

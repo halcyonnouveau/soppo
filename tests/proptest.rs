@@ -167,7 +167,7 @@ fn arb_pattern() -> impl Strategy<Value = Pattern> {
         }),
         // Variant pattern
         arb_type_name().prop_map(|name| Pattern {
-            kind: PatternKind::Variant(name),
+            kind: PatternKind::Variant(name, std::cell::Cell::new(true)),
             span: Span::dummy()
         }),
         // Literal pattern

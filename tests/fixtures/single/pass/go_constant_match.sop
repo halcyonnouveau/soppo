@@ -1,0 +1,40 @@
+package main
+
+import "archive/tar"
+
+// Test matching on Go constants (should generate value switch, not type switch)
+func describeType(typeflag byte) string {
+    match typeflag {
+    case tar.TypeReg:
+        return "regular file"
+    case tar.TypeDir:
+        return "directory"
+    case tar.TypeSymlink:
+        return "symlink"
+    default:
+        return "other"
+    }
+}
+
+// Test matching on soppo enum (should generate type switch)
+type Colour enum {
+    Red
+    Green
+    Blue
+}
+
+func describeColour(c Colour) string {
+    match c {
+    case Colour.Red:
+        return "red"
+    case Colour.Green:
+        return "green"
+    case Colour.Blue:
+        return "blue"
+    }
+}
+
+func main() {
+    _ = describeType(tar.TypeDir)
+    _ = describeColour(Colour.Red)
+}

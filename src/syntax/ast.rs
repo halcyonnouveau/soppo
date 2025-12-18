@@ -528,12 +528,14 @@ pub struct Pattern {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum PatternKind {
     /// Catch-all case: default
     Default,
-    /// Unit variant with no data: Colour.Red
-    Variant(String),
+    /// Unit variant with no data: Colour.Red or Go constant like tar.TypeDir
+    /// The Cell<bool> indicates if this is a soppo enum (true) or Go constant (false)
+    /// Parser defaults to true; type inference sets to false for Go constants
+    Variant(String, Cell<bool>),
     /// Literal value: 42, "hello", true
     Literal(Literal),
     /// Variant with data extraction: Result.Ok(value)
@@ -546,6 +548,40 @@ pub enum PatternKind {
     },
     /// Guard expression for expression-less match: case x > 0:
     Guard(Box<Expr>),
+}
+
+impl PartialEq for PatternKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PatternKind::Default, PatternKind::Default) => true,
+            (PatternKind::Variant(a, _), PatternKind::Variant(b, _)) => a == b,
+            (PatternKind::Literal(a), PatternKind::Literal(b)) => a == b,
+            (
+                PatternKind::Destructor {
+                    name: n1,
+                    binding: b1,
+                },
+                PatternKind::Destructor {
+                    name: n2,
+                    binding: b2,
+                },
+            ) => n1 == n2 && b1 == b2,
+            (
+                PatternKind::StructDestructor {
+                    name: n1,
+                    fields: f1,
+                    rest: r1,
+                },
+                PatternKind::StructDestructor {
+                    name: n2,
+                    fields: f2,
+                    rest: r2,
+                },
+            ) => n1 == n2 && f1 == f2 && r1 == r2,
+            (PatternKind::Guard(a), PatternKind::Guard(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 /// Field pattern in struct destructuring

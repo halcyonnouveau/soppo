@@ -263,26 +263,32 @@ impl Codegen {
                 self.emit_indent();
                 self.emit("for ");
 
-                // Generate init statement (without newline/indent)
-                if let Some(init_stmt) = init {
-                    self.gen_stmt_inline(init_stmt);
-                }
-                self.emit("; ");
+                // If all parts are None, generate simple infinite loop: for { ... }
+                if init.is_none() && condition.is_none() && post.is_none() {
+                    self.gen_block(body);
+                    self.output.push('\n');
+                } else {
+                    // Generate init statement (without newline/indent)
+                    if let Some(init_stmt) = init {
+                        self.gen_stmt_inline(init_stmt);
+                    }
+                    self.emit("; ");
 
-                // Generate condition
-                if let Some(cond) = condition {
-                    self.gen_expr(cond);
-                }
-                self.emit("; ");
+                    // Generate condition
+                    if let Some(cond) = condition {
+                        self.gen_expr(cond);
+                    }
+                    self.emit("; ");
 
-                // Generate post statement (without newline/indent)
-                if let Some(post_stmt) = post {
-                    self.gen_stmt_inline(post_stmt);
-                }
+                    // Generate post statement (without newline/indent)
+                    if let Some(post_stmt) = post {
+                        self.gen_stmt_inline(post_stmt);
+                    }
 
-                self.emit(" ");
-                self.gen_block(body);
-                self.output.push('\n');
+                    self.emit(" ");
+                    self.gen_block(body);
+                    self.output.push('\n');
+                }
             }
 
             StmtKind::ForRange {
@@ -740,15 +746,14 @@ impl Codegen {
         self.emit_indent();
 
         // Check if this is a type switch or value switch
+        // Type switch is needed for soppo enums (which are interface types)
+        // Value switch is used for Go constants
         let is_type_switch = !is_expression_less
             && arms.iter().any(|arm| {
-                arm.patterns.iter().any(|p| {
-                    matches!(
-                        &p.kind,
-                        PatternKind::Variant(_)
-                            | PatternKind::Destructor { .. }
-                            | PatternKind::StructDestructor { .. }
-                    )
+                arm.patterns.iter().any(|p| match &p.kind {
+                    PatternKind::Variant(_, is_soppo_enum) => is_soppo_enum.get(),
+                    PatternKind::Destructor { .. } | PatternKind::StructDestructor { .. } => true,
+                    _ => false,
                 })
             });
 

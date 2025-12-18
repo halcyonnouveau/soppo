@@ -356,7 +356,7 @@ impl Parser {
                 // Just a variant name
                 else {
                     Ok(Pattern {
-                        kind: PatternKind::Variant(name),
+                        kind: PatternKind::Variant(name, std::cell::Cell::new(true)),
                         span: current_span,
                     })
                 }
