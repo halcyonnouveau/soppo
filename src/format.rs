@@ -1070,7 +1070,10 @@ impl Formatter {
                 result
             }
             ExprKind::StructLit { ty, fields } => {
-                let mut result = self.format_type_annotation(ty);
+                let mut result = match ty {
+                    Some(t) => self.format_type_annotation(t),
+                    None => String::new(),
+                };
                 result.push('{');
                 let field_strs: Vec<_> = fields
                     .iter()

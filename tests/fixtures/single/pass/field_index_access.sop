@@ -1,0 +1,27 @@
+package main
+
+// Test indexing a slice field directly: struct.field[i]
+// Also test nested composite literal syntax: []Item{{Name: "x"}}
+
+type Item struct {
+	Name string
+}
+
+type Container struct {
+	Items []Item
+}
+
+func main() {
+	// Nested composite literal syntax - type inferred from slice element type
+	items := []Item{{Name: "test"}, {Name: "test2"}}
+	c := Container{Items: items}
+
+	// This should work: indexing a slice field
+	for i := range c.Items {
+		_ = c.Items[i].Name
+	}
+
+	// Inline nested composite literal
+	c2 := Container{Items: []Item{{Name: "inline"}}}
+	_ = c2
+}

@@ -264,12 +264,14 @@ impl Codegen {
             }
 
             ExprKind::StructLit { ty, fields } => {
-                // Generate Type{field: value, ...}
+                // Generate Type{field: value, ...} or {field: value, ...} for implicit
                 // For enum variants like Shape.Circle, convert to Shape_Circle
                 // For cross-package types like types.User, keep as types.User
                 // For cross-package enum variants like pkg.Type.Variant, convert to pkg.Type_Variant
-                let type_name = convert_struct_type_name(&ty.name);
-                self.emit(self.go_type(&type_name));
+                if let Some(ty) = ty {
+                    let type_name = convert_struct_type_name(&ty.name);
+                    self.emit(self.go_type(&type_name));
+                }
                 self.emit("{");
                 for (i, (field_name, value)) in fields.iter().enumerate() {
                     if i > 0 {

@@ -410,7 +410,7 @@ pub enum ExprKind {
         elements: Vec<Expr>,
     },
     StructLit {
-        ty: TypeAnnotation,          // The struct type name
+        ty: Option<TypeAnnotation>, // The struct type name (None for implicit like `{Name: "x"}`)
         fields: Vec<(String, Expr)>, // field_name: value pairs
     },
     // Anonymous struct literal: struct { X int; Y int }{X: 1, Y: 2}

@@ -245,7 +245,48 @@ impl Parser {
                         // No call - check if this is a type instantiation for unit enum variant
                         // Pattern: Type.Variant[TypeArgs] without ()
                         // This allows Option.None[int] syntax
-                        if !type_args.is_empty() && matches!(expr.kind, ExprKind::Field { .. }) {
+                        // Don't treat as unit variant if:
+                        // - Followed by `.` (e.g., `arr.Items[i].Name` - index then field access)
+                        // - Type args look like index expressions (single lowercase non-type identifier)
+                        let looks_like_index = type_args.len() == 1
+                            && type_args[0].args.is_empty()
+                            && !type_args[0].nullable
+                            && type_args[0]
+                                .name
+                                .chars()
+                                .next()
+                                .is_some_and(|c| c.is_lowercase())
+                            && !matches!(
+                                type_args[0].name.as_str(),
+                                "int"
+                                    | "int8"
+                                    | "int16"
+                                    | "int32"
+                                    | "int64"
+                                    | "uint"
+                                    | "uint8"
+                                    | "uint16"
+                                    | "uint32"
+                                    | "uint64"
+                                    | "uintptr"
+                                    | "float32"
+                                    | "float64"
+                                    | "complex64"
+                                    | "complex128"
+                                    | "bool"
+                                    | "string"
+                                    | "byte"
+                                    | "rune"
+                                    | "error"
+                                    | "any"
+                            );
+                        let followed_by_dot = matches!(self.peek(), Some(Token::Dot));
+
+                        if !type_args.is_empty()
+                            && matches!(expr.kind, ExprKind::Field { .. })
+                            && !looks_like_index
+                            && !followed_by_dot
+                        {
                             // This is a type instantiation: expr[types] -> treat as call with no args
                             expr = Expr {
                                 span: Span::with_bytes(
@@ -582,12 +623,12 @@ impl Parser {
                                 end_span.byte_end,
                             ),
                             kind: ExprKind::StructLit {
-                                ty: TypeAnnotation {
+                                ty: Some(TypeAnnotation {
                                     name: type_name,
                                     args: Vec::new(),
                                     span: expr.span,
                                     nullable: false,
-                                },
+                                }),
                                 fields,
                             },
                         };
@@ -1024,38 +1065,109 @@ impl Parser {
                 })
             }
 
-            // Implicit composite literal: {expr, expr, ...}
+            // Implicit composite literal: {expr, expr, ...} or {Field: value, ...}
             // Used inside array/slice literals like [][]int{{1, 2}, {3, 4}}
+            // or []Item{{Name: "x"}, {Name: "y"}}
             Token::LBrace => {
-                let mut elements = Vec::new();
+                // Check if this looks like a struct literal (Ident followed by Colon)
+                let is_struct_lit = matches!(self.peek(), Some(Token::Ident(_)))
+                    && matches!(self.peek_at(1), Some(Token::Colon));
 
-                if !matches!(self.peek(), Some(Token::RBrace)) {
-                    loop {
-                        elements.push(self.parse_expr()?);
-                        if !self.consume(&Token::Comma) {
-                            break;
-                        }
-                        if matches!(self.peek(), Some(Token::RBrace)) {
-                            break;
+                if is_struct_lit {
+                    // Parse as implicit struct literal: {Field: value, ...}
+                    let mut fields = Vec::new();
+
+                    if !matches!(self.peek(), Some(Token::RBrace)) {
+                        loop {
+                            // Skip any terminators
+                            self.skip_terminators();
+
+                            if matches!(self.peek(), Some(Token::RBrace)) {
+                                break;
+                            }
+
+                            let field_name = match self.advance() {
+                                Some((Token::Ident(name), _)) => name,
+                                Some((tok, tok_span)) => {
+                                    return Err(SoppoError::Parse {
+                                        message: format!("Expected field name, found {:?}", tok),
+                                        span: tok_span,
+                                    });
+                                }
+                                None => {
+                                    return Err(SoppoError::Parse {
+                                        message: "Expected field name".to_string(),
+                                        span: Span::dummy(),
+                                    });
+                                }
+                            };
+
+                            self.expect(Token::Colon)?;
+                            let value = self.parse_expr()?;
+
+                            fields.push((field_name, value));
+
+                            if !self.consume(&Token::Comma) {
+                                break;
+                            }
+
+                            // Skip terminators after comma
+                            self.skip_terminators();
+
+                            // Allow trailing comma
+                            if matches!(self.peek(), Some(Token::RBrace)) {
+                                break;
+                            }
                         }
                     }
+
+                    let end_span = self.expect(Token::RBrace)?;
+
+                    Ok(Expr {
+                        kind: ExprKind::StructLit {
+                            ty: None, // Type inferred from context
+                            fields,
+                        },
+                        span: Span::with_bytes(
+                            span.start,
+                            end_span.end,
+                            self.file,
+                            span.byte_start,
+                            end_span.byte_end,
+                        ),
+                    })
+                } else {
+                    // Parse as implicit array literal: {expr, expr, ...}
+                    let mut elements = Vec::new();
+
+                    if !matches!(self.peek(), Some(Token::RBrace)) {
+                        loop {
+                            elements.push(self.parse_expr()?);
+                            if !self.consume(&Token::Comma) {
+                                break;
+                            }
+                            if matches!(self.peek(), Some(Token::RBrace)) {
+                                break;
+                            }
+                        }
+                    }
+
+                    let end_span = self.expect(Token::RBrace)?;
+
+                    Ok(Expr {
+                        kind: ExprKind::ArrayLit {
+                            ty: None, // Type inferred from context
+                            elements,
+                        },
+                        span: Span::with_bytes(
+                            span.start,
+                            end_span.end,
+                            self.file,
+                            span.byte_start,
+                            end_span.byte_end,
+                        ),
+                    })
                 }
-
-                let end_span = self.expect(Token::RBrace)?;
-
-                Ok(Expr {
-                    kind: ExprKind::ArrayLit {
-                        ty: None, // Type inferred from context
-                        elements,
-                    },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
-                })
             }
 
             _ => Err(SoppoError::Parse {

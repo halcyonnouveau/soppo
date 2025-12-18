@@ -307,6 +307,16 @@ impl Infer {
             }
 
             ExprKind::StructLit { ty, fields } => {
+                // Handle implicit struct literal (ty is None) - type inferred from context
+                let Some(ty) = ty else {
+                    // Just type check field values, return a fresh type variable
+                    // The type will be unified with the expected type from context
+                    for (_field_name, value) in fields {
+                        self.infer_expr(value)?;
+                    }
+                    return Ok(self.fresh_ty_var());
+                };
+
                 // Look up struct definition to check field types
                 if let Some(type_def) = self.global_state.lookup_type(&ty.name).cloned() {
                     // Record the type name as a symbol for hover/go-to-definition
