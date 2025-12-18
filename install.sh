@@ -6,20 +6,20 @@ INSTALL_DIR="${SOPMOD_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS
 case "$(uname -s)" in
-    Linux*)  OS="unknown-linux-gnu" ;;
-    Darwin*) OS="apple-darwin" ;;
-    MINGW*|MSYS*|CYGWIN*) OS="pc-windows-msvc" ;;
+    Linux*)  OS="linux" ;;
+    Darwin*) OS="darwin" ;;
+    MINGW*|MSYS*|CYGWIN*) OS="windows" ;;
     *) echo "Unsupported OS: $(uname -s)"; exit 1 ;;
 esac
 
 # Detect architecture
 case "$(uname -m)" in
-    x86_64|amd64) ARCH="x86_64" ;;
-    aarch64|arm64) ARCH="aarch64" ;;
+    x86_64|amd64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
     *) echo "Unsupported architecture: $(uname -m)"; exit 1 ;;
 esac
 
-TARGET="${ARCH}-${OS}"
+TARGET="${OS}-${ARCH}"
 
 # Get latest version
 VERSION=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
