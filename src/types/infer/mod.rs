@@ -652,9 +652,11 @@ impl Infer {
             return Some(parse_go_type(const_ty));
         }
 
-        // Check if it's a variable (e.g., os.Stdin, os.Stdout)
+        // Check if it's a variable (e.g., os.Stdin, os.Stdout, http.DefaultClient)
+        // Use parse_go_type_with_module to set the module on types from this package
+        // so that method lookups work correctly (e.g., http.DefaultClient.Do)
         if let Some(var_def) = pkg.variables.get(type_name) {
-            return Some(parse_go_type(&var_def.ty));
+            return Some(Self::parse_go_type_with_module(&var_def.ty, package_name));
         }
 
         None

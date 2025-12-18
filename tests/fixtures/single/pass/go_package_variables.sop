@@ -7,6 +7,7 @@ import (
 
 // Test that Go package variables are accessible.
 // This tests type inference for variables declared with composite literals.
+// Also tests that method calls work on these variables (requires module info).
 
 func main() {
 	// Variables declared as: var DefaultClient = &Client{}
@@ -17,4 +18,12 @@ func main() {
 	_ = os.Stdin
 	_ = os.Stdout
 	_ = os.Stderr
+
+	// Method calls on package variables should work
+	// This requires the module info to be set on the type
+	client := http.DefaultClient.(!nil)
+	req := http.NewRequest("GET", "https://example.com", nil) ?
+	resp, err := client.Do(req)
+	_ = resp
+	_ = err
 }
