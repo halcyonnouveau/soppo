@@ -235,6 +235,47 @@ func discardErrorOnly() error {
     return nil
 }
 
+// === ? with handler in function that doesn't return error ===
+// Handler that returns a fallback value - no error propagation needed
+func tryWithFallback() int {
+    port, _err0 := parsePort("")
+    if _err0 != nil {
+        return 80 // fallback to default port
+    }
+    return port
+}
+
+// Handler with named error that returns a fallback value
+func tryWithFallbackNamed() int {
+    port, _err0 := parsePort("")
+    if _err0 != nil {
+        err := _err0
+        fmt.Println("using default port due to:", err)
+        return 80
+    }
+    return port
+}
+
+// Handler that panics - function doesn't need error return
+func tryWithPanic() string {
+    user, _err0 := getUser(0)
+    if _err0 != nil {
+        err := _err0
+        panic(("failed to get user: " + err.Error()))
+    }
+    return user.name
+}
+
+// Multiple ? with handlers in non-error-returning function
+func tryMultipleWithFallbacks() (string, int) {
+    user, _err0 := getUser(0)
+    if _err0 != nil {
+        u := User{name: "guest", age: 0}
+        return u.name, u.age
+    }
+    return user.name, user.age
+}
+
 func main() {
     simplePropagate()
     customHandler()
@@ -252,4 +293,11 @@ func main() {
     discardSingleReturn()
     discardMultipleReturns()
     discardErrorOnly()
+
+    // New tests for ? with handlers in non-error-returning functions
+    fmt.Println(tryWithFallback())
+    fmt.Println(tryWithFallbackNamed())
+    fmt.Println(tryMultipleWithFallbacks())
 }
+
+// Note: tryWithPanic() would panic, so we don't call it

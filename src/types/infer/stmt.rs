@@ -930,18 +930,21 @@ impl Infer {
                 try_span,
                 discard_count,
             } => {
-                // Check current function returns error as last type
-                let return_types = self
-                    .expected_return_types
-                    .as_ref()
-                    .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
+                // Only require error return type if there's no handler (propagating error)
+                // With a handler, the error is handled locally and doesn't need to propagate
+                if handler.is_none() {
+                    let return_types = self
+                        .expected_return_types
+                        .as_ref()
+                        .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
 
-                let last_type = return_types
-                    .last()
-                    .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
+                    let last_type = return_types
+                        .last()
+                        .ok_or(SoppoError::TryNoErrorReturn { span: *try_span })?;
 
-                if !self.is_error_type(last_type) {
-                    return Err(SoppoError::TryNoErrorReturn { span: *try_span });
+                    if !self.is_error_type(last_type) {
+                        return Err(SoppoError::TryNoErrorReturn { span: *try_span });
+                    }
                 }
 
                 // Infer inner statement and extract expression type + span
@@ -1038,6 +1041,8 @@ impl Infer {
                     self.push_scope();
                     if let Some(name) = error_name {
                         self.insert_var(name.clone(), Type::simple("error"), Some(stmt.span));
+                        // Error is known to be non-nil in the handler (handler only runs on error)
+                        self.set_nil_state(name.clone(), Nullability::NonNull);
                     }
                     self.infer_block(block)?;
                     self.pop_scope();
