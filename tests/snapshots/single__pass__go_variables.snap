@@ -5,10 +5,10 @@ expression: output
 //soppo:generated
 package main
 
-// Tests Go package variable lookup (os.Stdin, os.Stdout, os.Stderr)
 import "fmt"
 import "os"
 
+// Tests Go package variable lookup (os.Stdin, os.Stdout, os.Stderr)
 func main() {
     // Package-level variables from os
     stdin := os.Stdin

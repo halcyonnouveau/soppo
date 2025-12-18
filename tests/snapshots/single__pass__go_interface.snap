@@ -5,10 +5,10 @@ expression: output
 //soppo:generated
 package main
 
-// Tests interface type unification - io.Reader accepts *os.File
 import "bufio"
 import "os"
 
+// Tests interface type unification - io.Reader accepts *os.File
 func main() {
     // os.Stdin is *File, but bufio.NewReader expects io.Reader interface
     // This tests that interface types accept any implementing type

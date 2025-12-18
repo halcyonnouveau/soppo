@@ -46,26 +46,70 @@ impl Infer {
                 if name == "iota" {
                     return Ok(Type::simple("int"));
                 }
-                let (ty, def_span) =
-                    self.lookup_var(name)
-                        .ok_or_else(|| SoppoError::UndefinedVariable {
-                            name: name.clone(),
-                            span: expr.span,
-                        })?;
 
-                // Record the symbol for LSP features
-                // For variable references, name_span is the same as def_span (variable name location)
-                self.record_symbol(
-                    expr.span,
-                    name.clone(),
-                    ty.clone(),
-                    def_span,
-                    def_span, // name_span same as def_span for variables
-                    SymbolKind::Variable,
-                    None, // Variables don't have doc comments
-                );
+                // First, check local scopes
+                if let Some((ty, def_span)) = self.lookup_var(name) {
+                    // Record the symbol for LSP features
+                    // For variable references, name_span is the same as def_span (variable name location)
+                    self.record_symbol(
+                        expr.span,
+                        name.clone(),
+                        ty.clone(),
+                        def_span,
+                        def_span, // name_span same as def_span for variables
+                        SymbolKind::Variable,
+                        None, // Variables don't have doc comments
+                    );
+                    return Ok(ty);
+                }
 
-                Ok(ty)
+                // Then, check GlobalCtxt for same-module functions
+                if let Some(func_def) = self.global_state.lookup_function(name).cloned() {
+                    // Build function type from the function definition
+                    let params: Vec<(Option<String>, Type)> = func_def
+                        .params
+                        .iter()
+                        .map(|(n, t)| (Some(n.clone()), t.clone()))
+                        .collect();
+                    let ret = if func_def.return_types.is_empty() {
+                        Type::unit()
+                    } else if func_def.return_types.len() == 1 {
+                        func_def.return_types[0].clone()
+                    } else {
+                        Type::generic("tuple", func_def.return_types.clone())
+                    };
+                    let ty = Type::fun_named(params, ret);
+
+                    self.record_symbol(
+                        expr.span,
+                        name.clone(),
+                        ty.clone(),
+                        func_def.span,
+                        func_def.name_span,
+                        SymbolKind::Function,
+                        func_def.doc_comment.clone(),
+                    );
+                    return Ok(ty);
+                }
+
+                // Check GlobalCtxt for same-module constants
+                if let Some(const_def) = self.global_state.lookup_constant(name).cloned() {
+                    self.record_symbol(
+                        expr.span,
+                        name.clone(),
+                        const_def.ty.clone(),
+                        const_def.span,
+                        const_def.name_span,
+                        SymbolKind::Constant,
+                        const_def.doc_comment.clone(),
+                    );
+                    return Ok(const_def.ty);
+                }
+
+                Err(SoppoError::UndefinedVariable {
+                    name: name.clone(),
+                    span: expr.span,
+                })
             }
 
             ExprKind::Binary { op, left, right } => {

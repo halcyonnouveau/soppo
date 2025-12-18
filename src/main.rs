@@ -6,6 +6,7 @@ use miette::{IntoDiagnostic, Result};
 use soppo::build;
 use soppo::config::{ConfigError, resolve_globs};
 use soppo::go::Project;
+use soppo::test::TestConfig;
 
 #[derive(ClapParser)]
 #[command(name = "sop", about = "Sop is a tool for managing Soppo source code")]
@@ -33,6 +34,29 @@ enum Command {
         /// If empty, uses sop.mod config or errors if no config exists.
         #[arg()]
         files: Vec<String>,
+    },
+    /// Run tests
+    Test {
+        /// Packages or files to test (e.g., "./pkg/...", "path/to/test.sop").
+        /// If empty, runs all tests in the project.
+        #[arg()]
+        packages: Vec<String>,
+
+        /// Run only tests matching this pattern (passed to `go test -run`)
+        #[arg(short, long)]
+        run: Option<String>,
+
+        /// Verbose output
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Keep temp directory on failure (for debugging)
+        #[arg(long)]
+        keep_temp: bool,
+
+        /// Additional arguments to pass to `go test`
+        #[arg(last = true)]
+        args: Vec<String>,
     },
 }
 
@@ -69,6 +93,44 @@ fn main() -> Result<()> {
                 }
                 check_files(&resolved)?;
             }
+        }
+        Command::Test {
+            packages,
+            run,
+            verbose,
+            keep_temp,
+            args,
+        } => {
+            let cwd = std::env::current_dir().into_diagnostic()?;
+
+            // If the first package argument is a directory with go.mod, use it as root
+            let (root, packages) = if let Some(first) = packages.first() {
+                let path = PathBuf::from(first);
+                if path.is_dir() && path.join("go.mod").exists() {
+                    // Use this directory as the project root
+                    let root = if path.is_absolute() {
+                        path
+                    } else {
+                        cwd.join(path)
+                    };
+                    (root, packages.into_iter().skip(1).collect())
+                } else {
+                    (cwd, packages)
+                }
+            } else {
+                (cwd, packages)
+            };
+
+            let config = TestConfig {
+                root,
+                packages,
+                run_pattern: run,
+                verbose,
+                keep_temp,
+                passthrough_args: args,
+            };
+
+            soppo::test::run_tests(&config)?;
         }
     }
 

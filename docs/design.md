@@ -426,3 +426,32 @@ Without `sop.mod`, you must provide files or glob patterns as arguments.
 
 > [!NOTE]
 > A `go.mod` file is still required for module path resolution.
+
+## Testing
+
+Test files use the `_test.sop` suffix and have access to all symbols in their package. Code examples in doc comments (doctests) are extracted and run as Go Example functions.
+
+```go
+// Add returns the sum of two integers.
+//
+// ```sop
+// import "fmt"
+//
+// result := math.Add(1, 2)
+// fmt.Println(result)
+// // Output:
+// // 3
+// ```
+func Add(a, b int) int {
+    return a + b
+}
+```
+
+Use ` ```sop ` or ` ```soppo ` fences. Imports must be explicit; the documented package is auto-imported. Attributes like `ignore`, `no_run`, and `should_panic` control execution.
+
+```bash
+sop test                         # Run all tests
+sop test -v                      # Verbose output
+sop test -run TestAdd            # Filter by pattern
+sop test -- -cover               # Pass flags to go test
+```

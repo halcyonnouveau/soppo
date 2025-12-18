@@ -33,15 +33,20 @@ impl DepGraph {
     /// Parses each file to extract local Soppo imports and builds the graph.
     /// Local imports are identified by checking if the import path starts with
     /// the module path and corresponds to a local directory with .sop files.
+    ///
+    /// Test files (`*_test.sop`) in the same package implicitly depend on
+    /// all non-test files in their package, ensuring they're processed after
+    /// the package's symbols are available.
     pub fn build(sources: &[PathBuf], project_root: &Path, module_path: &str) -> Result<Self> {
         let mut imports: HashMap<PathBuf, Vec<ImportEdge>> = HashMap::new();
         let mut edges: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         let mut files: HashSet<PathBuf> = HashSet::new();
+        let mut file_packages: HashMap<PathBuf, String> = HashMap::new();
 
+        // First pass: parse all files to get their packages
         for source_path in sources {
             files.insert(source_path.clone());
 
-            // Parse just enough to get imports
             let source = std::fs::read_to_string(source_path)
                 .map_err(|e| miette!("Failed to read {}: {}", source_path.display(), e))?;
 
@@ -49,6 +54,8 @@ impl DepGraph {
             let file = parser
                 .parse_file()
                 .map_err(|e| miette!("Failed to parse {}: {:?}", source_path.display(), e))?;
+
+            file_packages.insert(source_path.clone(), file.package.clone());
 
             // Extract local Soppo imports and resolve to package files
             let mut import_edges = Vec::new();
@@ -69,6 +76,49 @@ impl DepGraph {
 
             imports.insert(source_path.clone(), import_edges);
             edges.insert(source_path.clone(), all_deps);
+        }
+
+        // Second pass: add implicit dependencies for test files
+        // Test files depend on all non-test files in the same package
+        for source_path in sources {
+            let filename = source_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            if filename.ends_with("_test.sop") {
+                let test_package = file_packages.get(source_path).cloned().unwrap_or_default();
+                let test_dir = source_path.parent();
+
+                // Find all non-test files in the same directory with the same package
+                for other_path in sources {
+                    if other_path == source_path {
+                        continue;
+                    }
+
+                    let other_filename = other_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+
+                    // Skip other test files
+                    if other_filename.ends_with("_test.sop") {
+                        continue;
+                    }
+
+                    // Check same directory
+                    if other_path.parent() != test_dir {
+                        continue;
+                    }
+
+                    // Check same package
+                    let other_package = file_packages.get(other_path).cloned().unwrap_or_default();
+                    if other_package == test_package {
+                        // Add implicit dependency
+                        edges.get_mut(source_path).unwrap().push(other_path.clone());
+                    }
+                }
+            }
         }
 
         Ok(Self {
@@ -527,5 +577,78 @@ func main() {}"#,
         let graph = DepGraph::build(std::slice::from_ref(&main), root, TEST_MODULE).unwrap();
         // Should have no dependencies (Go imports are ignored)
         assert!(!graph.has_sop_deps(&main));
+    }
+
+    #[test]
+    fn test_test_file_implicit_dep() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // main.sop has the Add function
+        let main = create_test_file(
+            root,
+            "main.sop",
+            r#"package main
+func Add(a int, b int) int { return a + b }"#,
+        );
+
+        // main_test.sop is in the same package, should depend on main.sop
+        let test = create_test_file(
+            root,
+            "main_test.sop",
+            r#"package main
+import "testing"
+func TestAdd(t *testing.T) { Add(1, 2) }"#,
+        );
+
+        let graph = DepGraph::build(&[main.clone(), test.clone()], root, TEST_MODULE).unwrap();
+        let sorted = graph.topological_sort().unwrap();
+
+        // main.sop should come before main_test.sop
+        let main_idx = sorted.iter().position(|p| p == &main).unwrap();
+        let test_idx = sorted.iter().position(|p| p == &test).unwrap();
+        assert!(
+            main_idx < test_idx,
+            "main.sop should be processed before main_test.sop"
+        );
+    }
+
+    #[test]
+    fn test_test_file_implicit_dep_math() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // math.sop has the Add function (using package basic like the fixture)
+        let math = create_test_file(
+            root,
+            "math.sop",
+            r#"package basic
+func Add(a int, b int) int { return a + b }"#,
+        );
+
+        // math_test.sop is in the same package
+        let test = create_test_file(
+            root,
+            "math_test.sop",
+            r#"package basic
+import "testing"
+func TestAdd(t *testing.T) { Add(1, 2) }"#,
+        );
+
+        let graph = DepGraph::build(&[math.clone(), test.clone()], root, TEST_MODULE).unwrap();
+        let sorted = graph.topological_sort().unwrap();
+
+        println!(
+            "Sorted order: {:?}",
+            sorted.iter().map(|p| p.file_name()).collect::<Vec<_>>()
+        );
+
+        // math.sop should come before math_test.sop
+        let math_idx = sorted.iter().position(|p| p == &math).unwrap();
+        let test_idx = sorted.iter().position(|p| p == &test).unwrap();
+        assert!(
+            math_idx < test_idx,
+            "math.sop should be processed before math_test.sop"
+        );
     }
 }

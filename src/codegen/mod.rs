@@ -2,6 +2,7 @@ mod decl;
 mod expr;
 mod stmt;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::error::Result;
@@ -26,6 +27,8 @@ pub struct Codegen {
     output_dir: Option<String>,
     /// Project root for checking if imports are Soppo packages
     project_root: Option<PathBuf>,
+    /// Imports needed by generated code (e.g., "fmt" for string interpolation)
+    pub(crate) needed_imports: HashSet<String>,
 }
 
 impl Codegen {
@@ -43,6 +46,7 @@ impl Codegen {
             module_path: None,
             output_dir: None,
             project_root: None,
+            needed_imports: HashSet::new(),
         }
     }
 
@@ -289,6 +293,10 @@ impl Codegen {
         // Set up comments for emission
         self.set_comments(file.comments.clone());
 
+        // Generate declarations first to discover needed imports
+        let decls_output = self.gen_declarations(file)?;
+
+        // Now build the final output with header, imports, and declarations
         // Soppo generated marker - allows re-importing with proper nil safety
         self.emit_line("//soppo:generated");
 
@@ -296,8 +304,28 @@ impl Codegen {
         self.emit_line(&format!("package {}", file.package));
         self.emit_line("");
 
-        // Generate imports
-        if !file.imports.is_empty() {
+        // Collect explicit import paths
+        let explicit_imports: HashSet<_> = file.imports.iter().map(|i| i.path.as_str()).collect();
+
+        // Generate imports (explicit + auto-detected)
+        let has_imports = !file.imports.is_empty()
+            || self
+                .needed_imports
+                .iter()
+                .any(|i| !explicit_imports.contains(i.as_str()));
+
+        if has_imports {
+            // Add auto-detected imports that aren't already explicit
+            let auto_imports: Vec<_> = self
+                .needed_imports
+                .iter()
+                .filter(|i| !explicit_imports.contains(i.as_str()))
+                .cloned()
+                .collect();
+            for needed in auto_imports {
+                self.emit_line(&format!("import \"{}\"", needed));
+            }
+
             for import in &file.imports {
                 self.emit_comments_before(import.span.byte_start, import.span.start.line);
 
@@ -341,7 +369,18 @@ impl Codegen {
             self.emit_line("");
         }
 
-        // Generate declarations
+        // Append the pre-generated declarations
+        self.output.push_str(&decls_output);
+
+        // Emit any remaining comments at the end
+        self.emit_remaining_comments();
+        Ok(())
+    }
+
+    /// Generate declarations to a separate buffer (to discover needed imports first)
+    fn gen_declarations(&mut self, file: &File) -> Result<String> {
+        let saved_output = std::mem::take(&mut self.output);
+
         for decl in &file.decls {
             match decl {
                 Decl::Const(const_decl) => {
@@ -353,7 +392,6 @@ impl Codegen {
                     self.emit_line("");
                 }
                 Decl::ConstBlock(consts) => {
-                    // Generate grouped const block for iota support
                     if let Some(first) = consts.first() {
                         self.emit_comments_before(first.span.byte_start, first.span.start.line);
                     }
@@ -373,9 +411,8 @@ impl Codegen {
             }
         }
 
-        // Emit any remaining comments at the end
-        self.emit_remaining_comments();
-        Ok(())
+        let decls = std::mem::replace(&mut self.output, saved_output);
+        Ok(decls)
     }
 
     /// Convert Soppo type to Go type

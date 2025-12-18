@@ -5,10 +5,10 @@ expression: output
 //soppo:generated
 package main
 
-// Test passing function references as arguments to other functions
 import "fmt"
 import "sort"
 
+// Test passing function references as arguments to other functions
 // A simple callback function
 func double(x int) int {
     return (x * 2)

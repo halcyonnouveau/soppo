@@ -7,7 +7,7 @@ use miette::{IntoDiagnostic, NamedSource, Result};
 use crate::codegen::Codegen;
 use crate::deps::DepGraph;
 use crate::go::Project;
-use crate::syntax::{Decl, FileId, FileRegistry, ModuleId, Parser};
+use crate::syntax::{Decl, File, FileId, FileRegistry, ModuleId, Parser};
 use crate::types::{GlobalCtxt, Infer, SymbolTable};
 
 /// Result of compiling a project - maps relative paths to generated Go code
@@ -208,11 +208,7 @@ pub fn typecheck_with_symbols(source: &str, filename: &str) -> Result<SymbolTabl
 }
 
 /// Parse source and run two-pass type checking
-fn parse_and_typecheck(
-    source: &str,
-    filename: &str,
-    infer: &mut Infer,
-) -> Result<crate::syntax::File> {
+fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Result<File> {
     let mut parser = Parser::new(source, FileId(0));
     let file = parser.parse_file().map_err(|e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))

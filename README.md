@@ -31,6 +31,7 @@ cargo install soppo
 - **String interpolation:** `"value: {var}"` syntax
 - **Detailed error messages:** Rust-inspired compiler diagnostics
 - **Go interop:** Use any Go library directly
+- **Batteries included:** LSP, test runner with doctests
 
 ## Quick Look
 

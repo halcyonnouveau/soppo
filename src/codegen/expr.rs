@@ -29,6 +29,7 @@ impl Codegen {
 
             ExprKind::StringInterpolation(parts) => {
                 // Generate fmt.Sprintf("format", args...)
+                self.needed_imports.insert("fmt".to_string());
                 self.emit("fmt.Sprintf(\"");
 
                 // Build the format string and collect expressions

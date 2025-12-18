@@ -5,9 +5,9 @@ expression: output
 //soppo:generated
 package main
 
-// Tests rune/character literal support
 import "fmt"
 
+// Tests rune/character literal support
 func delimTest(delim rune) {
     fmt.Printf("delimiter: %c\n", delim)
 }

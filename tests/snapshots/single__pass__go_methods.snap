@@ -5,11 +5,11 @@ expression: output
 //soppo:generated
 package main
 
-// Tests method calls on Go types from stdlib
 import "bufio"
 import "os"
 import "strings"
 
+// Tests method calls on Go types from stdlib
 func main() {
     // Method call on bufio.Reader (returned from bufio.NewReader)
     reader := bufio.NewReader(os.Stdin)

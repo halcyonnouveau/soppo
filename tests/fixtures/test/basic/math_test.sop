@@ -1,0 +1,17 @@
+package basic
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	result := Add(1, 2)
+	if result != 3 {
+		t.Errorf("expected 3, got %d", result)
+	}
+}
+
+func TestMultiply(t *testing.T) {
+	result := Multiply(3, 4)
+	if result != 12 {
+		t.Errorf("expected 12, got %d", result)
+	}
+}

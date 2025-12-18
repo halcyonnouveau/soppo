@@ -11,6 +11,10 @@ repository = "https://github.com/halcyonnouveau/soppo"
 rev = "d6877987945ce5cc98fded126126179f4459a6aa"
 path = "editors/tree-sitter"
 
+[grammars.toml]
+repository = "https://github.com/tree-sitter/tree-sitter-toml"
+rev = "342d9be207c2dba869b9967124c679b5e6fd0ebe"
+
 [language_servers.soppo-lsp]
 name = "Soppo LSP"
 languages = ["Soppo"]
