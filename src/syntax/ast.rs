@@ -554,4 +554,5 @@ pub enum Literal {
     Integer(i64),
     String(String),
     Bool(bool),
+    Nil,
 }

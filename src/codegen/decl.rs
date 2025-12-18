@@ -507,6 +507,7 @@ impl Codegen {
                 Literal::Integer(n) => self.emit(n.to_string()),
                 Literal::String(s) => self.emit(format!("\"{}\"", s)),
                 Literal::Bool(b) => self.emit(b.to_string()),
+                Literal::Nil => self.emit("nil"),
             },
             PatternKind::Destructor { name, .. } => {
                 // Convert qualified name to Go type name

@@ -673,6 +673,7 @@ impl Codegen {
                                 Literal::Integer(n) => self.emit(format!("{}", n)),
                                 Literal::String(s) => self.emit(format!("\"{}\"", s)),
                                 Literal::Bool(b) => self.emit(format!("{}", b)),
+                                Literal::Nil => self.emit("nil"),
                             }
                         }
                     }

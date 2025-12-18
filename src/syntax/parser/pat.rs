@@ -170,6 +170,11 @@ impl Parser {
                 span,
             }),
 
+            Token::Nil => Ok(Pattern {
+                kind: PatternKind::Literal(super::super::ast::Literal::Nil),
+                span,
+            }),
+
             Token::Ident(mut name) => {
                 let mut current_span = span;
 
@@ -408,6 +413,34 @@ mod tests {
                         assert_eq!(binding, "msg");
                     }
                     _ => panic!("Expected destructor pattern"),
+                }
+            }
+            _ => panic!("Expected match statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_match_nil_pattern() {
+        let source = r#"match ptr {
+            case nil:
+                result = "nil"
+            default:
+                result = "not nil"
+        }"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let stmt = parser.parse_stmt().unwrap();
+
+        match stmt.kind {
+            StmtKind::Match { scrutinee, arms } => {
+                let scrutinee = scrutinee.unwrap();
+                assert!(matches!(scrutinee.kind, ExprKind::Ident(s) if s == "ptr"));
+                assert_eq!(arms.len(), 2);
+
+                // First arm: nil
+                assert_eq!(arms[0].patterns.len(), 1);
+                match &arms[0].patterns[0].kind {
+                    PatternKind::Literal(crate::syntax::ast::Literal::Nil) => {}
+                    _ => panic!("Expected nil pattern"),
                 }
             }
             _ => panic!("Expected match statement"),

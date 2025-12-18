@@ -905,6 +905,7 @@ impl Formatter {
             Literal::Integer(n) => n.to_string(),
             Literal::String(s) => format!("\"{}\"", s),
             Literal::Bool(b) => b.to_string(),
+            Literal::Nil => "nil".to_string(),
         }
     }
 
