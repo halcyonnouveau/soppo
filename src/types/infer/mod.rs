@@ -68,6 +68,36 @@ pub(crate) fn is_numeric_primitive(ty: &str) -> bool {
     )
 }
 
+/// Resolve a stdlib package name to its import path.
+/// This handles cases where a type references a package that isn't explicitly imported,
+/// e.g., `os.FileMode` is an alias to `fs.FileMode`, and we need to resolve `fs` to `io/fs`.
+fn resolve_stdlib_package(pkg_name: &str) -> Option<String> {
+    // Map common stdlib package names to their full import paths
+    match pkg_name {
+        "fs" => Some("io/fs".to_string()),
+        "atomic" => Some("sync/atomic".to_string()),
+        "rand" => Some("math/rand".to_string()),
+        "big" => Some("math/big".to_string()),
+        "bits" => Some("math/bits".to_string()),
+        "cmplx" => Some("math/cmplx".to_string()),
+        "utf8" => Some("unicode/utf8".to_string()),
+        "utf16" => Some("unicode/utf16".to_string()),
+        "scanner" => Some("text/scanner".to_string()),
+        "template" => Some("text/template".to_string()),
+        "parse" => Some("text/template/parse".to_string()),
+        "tabwriter" => Some("text/tabwriter".to_string()),
+        "heap" => Some("container/heap".to_string()),
+        "list" => Some("container/list".to_string()),
+        "ring" => Some("container/ring".to_string()),
+        // Single-segment stdlib packages resolve to themselves
+        _ => {
+            // Try the package name as-is for single-segment stdlib packages
+            // like "fmt", "os", "io", etc.
+            Some(pkg_name.to_string())
+        }
+    }
+}
+
 /// Type inference engine
 pub struct Infer {
     /// Global state tracking all modules
@@ -894,8 +924,15 @@ impl Infer {
 
             let type_def = pkg.types.get(type_name)?;
 
-            // If it's not an alias, it has no underlying type in the relevant sense
+            // If it's not an alias, check if it has an underlying primitive type
+            // Go type definitions like `type FileMode uint32` have the underlying type stored
             if type_def.kind != "alias" {
+                // For non-alias types, check if underlying is a primitive
+                if let Some(underlying) = &type_def.underlying
+                    && is_primitive_type(underlying)
+                {
+                    return Some(underlying.clone());
+                }
                 return None;
             }
 
@@ -914,8 +951,14 @@ impl Infer {
             let pkg_name = underlying[..dot_idx].to_string();
             let inner_type_name = underlying[dot_idx + 1..].to_string();
 
-            // Look up the package's import path
-            if let Some(inner_import_path) = self.imported_packages.get(&pkg_name).cloned() {
+            // Look up the package's import path (first from imports, then try stdlib)
+            let inner_import_path = self
+                .imported_packages
+                .get(&pkg_name)
+                .cloned()
+                .or_else(|| resolve_stdlib_package(&pkg_name));
+
+            if let Some(inner_import_path) = inner_import_path {
                 return self.resolve_underlying_type_recursive(
                     &inner_import_path,
                     &inner_type_name,

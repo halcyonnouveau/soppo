@@ -109,6 +109,58 @@ impl Infer {
                 Ok(())
             }
 
+            // Go package type aliases: allow primitive literals to be assigned to type aliases
+            // with compatible underlying types (e.g., int literal to fs.FileMode which is uint32,
+            // string literal to a string type alias, etc.)
+            (
+                Type::Con {
+                    sym: n1,
+                    args: a1,
+                    nullable: nullable1,
+                },
+                Type::Con {
+                    sym: n2,
+                    args: a2,
+                    nullable: nullable2,
+                },
+            ) if a1.is_empty()
+                && a2.is_empty()
+                && is_primitive_literal_type(&n2.name)
+                && !n1.module.0.is_empty() =>
+            {
+                // Type has a module set (e.g., from a Go package like "os" or "io/fs")
+                // Get the package alias from import_path (last component)
+                let pkg_alias = n1.module.0.rsplit('/').next().unwrap_or(&n1.module.0);
+
+                // Try to resolve the underlying type
+                if let Some(underlying) = self.get_underlying_type(pkg_alias, &n1.name) {
+                    // Check if the underlying type is compatible with the actual type
+                    let compatible = if is_numeric_type(&n2.name) {
+                        are_compatible_numeric(&underlying, &n2.name)
+                    } else {
+                        // For string/bool: exact match
+                        underlying == n2.name
+                    };
+
+                    if compatible {
+                        if !nullable1 && *nullable2 {
+                            return Err(SoppoError::NilableToNonNilable {
+                                expected: n1.name.clone(),
+                                found: format!("?{}", n2.name),
+                                span: *span,
+                            });
+                        }
+                        return Ok(());
+                    }
+                }
+                // Fall through to mismatch
+                Err(SoppoError::TypeMismatch {
+                    expected: Box::new(t1.clone()),
+                    found: Box::new(t2.clone()),
+                    span: *span,
+                })
+            }
+
             // Pointer types: unify underlying types even if names differ (e.g., *T vs *?0)
             (
                 Type::Con {
@@ -375,15 +427,26 @@ impl Infer {
     }
 }
 
+/// All numeric types in Go
+const INT_TYPES: &[&str] = &[
+    "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
+    "uintptr", "byte", "rune",
+];
+const FLOAT_TYPES: &[&str] = &["float32", "float64"];
+
+/// Check if a single type name is numeric (integer or float)
+fn is_numeric_type(t: &str) -> bool {
+    INT_TYPES.contains(&t) || FLOAT_TYPES.contains(&t)
+}
+
+/// Check if a type is a primitive literal type (can be an untyped constant in Go)
+fn is_primitive_literal_type(t: &str) -> bool {
+    INT_TYPES.contains(&t) || FLOAT_TYPES.contains(&t) || t == "string" || t == "bool"
+}
+
 /// Check if two type names are compatible numeric types.
 /// In Go, numeric literals are untyped and can be assigned to any compatible numeric type.
 pub(super) fn are_compatible_numeric(t1: &str, t2: &str) -> bool {
-    const INT_TYPES: &[&str] = &[
-        "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
-        "uintptr", "byte", "rune",
-    ];
-    const FLOAT_TYPES: &[&str] = &["float32", "float64"];
-
     // Both are integer types
     if INT_TYPES.contains(&t1) && INT_TYPES.contains(&t2) {
         return true;

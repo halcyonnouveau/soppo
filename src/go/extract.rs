@@ -518,8 +518,14 @@ fn extract_params(node: tree_sitter::Node, source: &str, params: &mut Vec<Param>
 fn extract_type_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "type_spec"
-            && let Some(type_def) = extract_type_spec(child, source)
+        // Handle both type_spec (type X Y) and type_alias (type X = Y)
+        let type_def = match child.kind() {
+            "type_spec" => extract_type_spec(child, source),
+            "type_alias" => extract_type_alias(child, source),
+            _ => None,
+        };
+
+        if let Some(type_def) = type_def
             && is_exported(&type_def.name)
         {
             pkg.types.insert(type_def.name.clone(), type_def);
@@ -563,6 +569,23 @@ fn extract_type_spec(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
     }
 
     Some(type_def)
+}
+
+/// Extract a type alias (type X = Y)
+fn extract_type_alias(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
+    let name_node = node.child_by_field_name("name")?;
+    let name = node_text(name_node, source).to_string();
+
+    let type_node = node.child_by_field_name("type")?;
+    let underlying = extract_type_string(type_node, source);
+
+    Some(TypeDef {
+        name,
+        generics: Vec::new(),
+        kind: "alias".to_string(),
+        fields: Vec::new(),
+        underlying: Some(underlying),
+    })
 }
 
 fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec<Field>) {
@@ -1177,6 +1200,40 @@ type Handler func(string) error
 
         let handler = &pkg.types["Handler"];
         assert_eq!(handler.kind, "alias");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_extract_type_alias_with_equals() {
+        // Test Go type alias syntax: type X = Y
+        let dir = std::env::temp_dir().join("soppo-treesitter-alias-eq-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let file_path = dir.join("alias.go");
+        let mut file = File::create(&file_path).unwrap();
+        writeln!(
+            file,
+            r#"
+package test
+
+type FileMode = uint32
+type AnotherAlias = string
+"#
+        )
+        .unwrap();
+
+        let pkg = extract(&file_path).unwrap();
+
+        // Type aliases with = should be extracted
+        let file_mode = &pkg.types["FileMode"];
+        assert_eq!(file_mode.kind, "alias");
+        assert_eq!(file_mode.underlying.as_deref(), Some("uint32"));
+
+        let another = &pkg.types["AnotherAlias"];
+        assert_eq!(another.kind, "alias");
+        assert_eq!(another.underlying.as_deref(), Some("string"));
 
         fs::remove_dir_all(&dir).unwrap();
     }
