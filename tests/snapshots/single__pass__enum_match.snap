@@ -131,24 +131,23 @@ func ShapeTriangle(value TriangleProps) Shape {
 }
 
 func area(s Shape) float64 {
-    var result float64
     switch __v := s.(type) {
     case Shape_Circle:
         r := __v.radius
         _ = r
-        result = ((3.14 * r) * r)
+        return ((3.14 * r) * r)
     case Shape_Rectangle:
         w := __v.width
         _ = w
         h := __v.height
         _ = h
-        result = (w * h)
+        return (w * h)
     case Shape_Triangle:
         p := __v.Value
         _ = p
-        result = 0.0
+        return 0.0
     }
-    return result
+    panic("unreachable")
 }
 
 func testNestedMatch() string {
@@ -254,6 +253,44 @@ func isSmall(x int) bool {
         result = false
     }
     return result
+}
+
+// === Match divergence ===
+// Exhaustive enum match where all arms return - function doesn't need return after match
+func colourToInt(c Colour) int {
+    switch c.(type) {
+    case Colour_Red:
+        return 0
+    case Colour_Yellow:
+        return 1
+    case Colour_Green:
+        return 2
+    }
+    panic("unreachable")
+}
+
+// Match with default where all arms return - function doesn't need return after match
+func valueToString(x int) string {
+    switch x {
+    case 1:
+        return "one"
+    case 2:
+        return "two"
+    default:
+        return "other"
+    }
+}
+
+// Expression-less match with default where all arms return
+func signToString(x int) string {
+    switch {
+    case (x > 0):
+        return "positive"
+    case (x < 0):
+        return "negative"
+    default:
+        return "zero"
+    }
 }
 
 func main() {

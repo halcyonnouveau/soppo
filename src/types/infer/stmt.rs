@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use super::Infer;
 use crate::error::{Result, SoppoError};
 use crate::syntax::{
-    BinOp, EnumVariant, Expr, ExprKind, PatternKind, SelectCaseKind, Stmt, StmtKind,
+    BinOp, EnumVariant, Expr, ExprKind, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
 };
 use crate::types::ctx::TypeDefKind;
 use crate::types::ty::Nullability;
@@ -722,16 +722,88 @@ impl Infer {
 
             StmtKind::Match { scrutinee, arms } => {
                 // Expression-less match has no scrutinee
-                let scrutinee_ty = if let Some(scrutinee) = scrutinee {
+                let (scrutinee_ty, scrutinee_key) = if let Some(scrutinee) = scrutinee {
                     let ty = self.infer_expr(scrutinee)?;
-                    Some(self.substitute(ty))
+                    let key = expr_to_key(scrutinee);
+                    (Some(self.substitute(ty)), key)
                 } else {
-                    None
+                    (None, None)
+                };
+
+                // Check if scrutinee is nilable (for nil narrowing in non-nil arms)
+                let scrutinee_is_nilable = scrutinee_ty
+                    .as_ref()
+                    .map(|ty| ty.is_nullable())
+                    .unwrap_or(false);
+
+                // Track whether all arms diverge (for determining if match diverges)
+                let mut all_arms_diverge = true;
+                let mut has_default = false;
+
+                // Check enum exhaustiveness upfront
+                let is_exhaustive_enum = if let Some(ref scr_ty) = scrutinee_ty
+                    && let Type::Con { sym: name, .. } = scr_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&name.name)
+                    && let TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    let covered: HashSet<String> = arms
+                        .iter()
+                        .flat_map(|arm| arm.patterns.iter())
+                        .filter_map(|pattern| match &pattern.kind {
+                            PatternKind::Variant(v) => {
+                                Some(v.rsplit('.').next().unwrap_or(v).to_string())
+                            }
+                            PatternKind::Destructor { name, .. } => {
+                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
+                            }
+                            PatternKind::StructDestructor { name, .. } => {
+                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect();
+
+                    variants.iter().all(|v| {
+                        let vname = match v {
+                            EnumVariant::Unit { ident, .. } => &ident.name,
+                            EnumVariant::Single { ident, .. } => &ident.name,
+                            EnumVariant::Struct { ident, .. } => &ident.name,
+                        };
+                        covered.contains(vname)
+                    })
+                } else {
+                    false
                 };
 
                 for arm in arms {
+                    // Check if this arm has a default pattern
+                    if arm
+                        .patterns
+                        .iter()
+                        .any(|p| matches!(&p.kind, PatternKind::Default))
+                    {
+                        has_default = true;
+                    }
                     // Create a new scope for pattern bindings
                     self.push_scope();
+
+                    // Check if this arm matches nil
+                    let arm_matches_nil = arm
+                        .patterns
+                        .iter()
+                        .any(|p| matches!(&p.kind, PatternKind::Literal(Literal::Nil)));
+
+                    // If scrutinee is nilable and this arm doesn't match nil,
+                    // the scrutinee is known to be non-nil in this arm
+                    let needs_nil_narrowing =
+                        scrutinee_is_nilable && !arm_matches_nil && scrutinee_key.is_some();
+
+                    if needs_nil_narrowing {
+                        self.push_nil_scope();
+                        if let Some(ref key) = scrutinee_key {
+                            self.set_nil_state(key.clone(), Nullability::NonNull);
+                        }
+                    }
 
                     if let Some(ref scr_ty) = scrutinee_ty {
                         // Normal match with scrutinee
@@ -793,7 +865,17 @@ impl Infer {
                     }
 
                     // Type check the arm body
-                    self.infer_block(&arm.body)?;
+                    let arm_ty = self.infer_block(&arm.body)?;
+
+                    // Track if this arm diverges
+                    if !matches!(arm_ty, Type::Never) {
+                        all_arms_diverge = false;
+                    }
+
+                    // Pop nil scope if we pushed one
+                    if needs_nil_narrowing {
+                        self.pop_nil_scope();
+                    }
 
                     // Pop the scope after processing the arm
                     self.pop_scope();
@@ -858,7 +940,12 @@ impl Infer {
                     }
                 }
 
-                Ok(Type::unit())
+                // If all arms diverge and the match is exhaustive, the whole match diverges
+                if all_arms_diverge && (has_default || is_exhaustive_enum) {
+                    Ok(Type::Never)
+                } else {
+                    Ok(Type::unit())
+                }
             }
 
             StmtKind::Send { channel, value } => {
@@ -967,8 +1054,8 @@ impl Infer {
             }
 
             StmtKind::Break | StmtKind::Continue => {
-                // break/continue don't have types, just return unit
-                Ok(Type::unit())
+                // break/continue diverge from normal control flow
+                Ok(Type::Never)
             }
 
             StmtKind::Expr(expr) => self.infer_expr(expr),

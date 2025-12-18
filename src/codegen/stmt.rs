@@ -1,6 +1,6 @@
 use super::Codegen;
 use crate::syntax::{
-    Arm, Expr, FieldPattern, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
+    Arm, Expr, ExprKind, FieldPattern, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
 };
 
 impl Codegen {
@@ -828,8 +828,49 @@ impl Codegen {
             self.dedent();
         }
 
+        // Check if there's a default case
+        let has_default = arms.iter().any(|arm| {
+            arm.patterns
+                .iter()
+                .any(|p| matches!(&p.kind, PatternKind::Default))
+        });
+
+        // Check if all arms diverge (end with return/break/continue/panic)
+        let all_arms_diverge = arms.iter().all(|arm| {
+            arm.body
+                .stmts
+                .last()
+                .map(Self::stmt_diverges)
+                .unwrap_or(false)
+        });
+
         self.emit_indent();
         self.emit("}\n");
+
+        // For type switches without default where all arms return,
+        // add panic("unreachable") for Go compiler (Go doesn't know the switch is exhaustive)
+        if is_type_switch && !has_default && all_arms_diverge {
+            self.emit_indent();
+            self.emit("panic(\"unreachable\")\n");
+        }
+    }
+
+    /// Check if a statement diverges (never falls through)
+    fn stmt_diverges(stmt: &Stmt) -> bool {
+        match &stmt.kind {
+            StmtKind::Return { .. } => true,
+            StmtKind::Break | StmtKind::Continue => true,
+            StmtKind::Expr(expr) => {
+                // Check for panic() call
+                if let ExprKind::Call { func, .. } = &expr.kind
+                    && let ExprKind::Ident(name) = &func.kind
+                {
+                    return name == "panic";
+                }
+                false
+            }
+            _ => false,
+        }
     }
 }
 

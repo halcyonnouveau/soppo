@@ -1,6 +1,6 @@
 ---
 source: tests/multi.rs
-expression: format_results(& results)
+expression: format_results(&results)
 ---
 === cmd/main.go ===
 //soppo:generated

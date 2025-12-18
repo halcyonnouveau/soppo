@@ -116,37 +116,6 @@ default:
 
 All variants must be handled (exhaustiveness checking for enums).
 
-> [!WARNING]
-> Using match as the final statement in a returning function is semantically valid in Soppo, but the generated Go code won't compile. Go doesn't recognise exhaustive switch statements, it requires a return after the switch even when all cases return. Assign to a variable instead:
->
-> ```go
-> // Semantically correct, but generated Go won't compile
-> func describe(c Colour) string {
->     match c {
->     case Colour.Red:
->         return "red"
->     case Colour.Green:
->         return "green"
->     case Colour.Blue:
->         return "blue"
->     }
-> }
->
-> // Use assignment instead
-> func describe(c Colour) string {
->     var result string
->     match c {
->     case Colour.Red:
->         result = "red"
->     case Colour.Green:
->         result = "green"
->     case Colour.Blue:
->         result = "blue"
->     }
->     return result
-> }
-> ```
-
 When you only care about one variant, full `match` is verbose. Combining `if` with a type assertion provides a concise way to check and destructure a single variant:
 
 ```go

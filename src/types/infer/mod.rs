@@ -664,6 +664,7 @@ impl Infer {
 
     /// Look up a field in a Go struct type
     /// Returns the field type with nullable set based on //soppo:nilable marker
+    /// Also handles embedded struct fields (e.g., ReadCloser embeds Reader)
     pub(super) fn lookup_go_struct_field(
         &mut self,
         package_name: &str,
@@ -685,28 +686,45 @@ impl Infer {
             return None;
         }
 
-        // Find the field
-        let field = type_def.fields.iter().find(|f| f.name == field_name)?;
+        // First, try to find the field directly
+        if let Some(field) = type_def.fields.iter().find(|f| f.name == field_name) {
+            // Parse the Go type with module info so nested types can resolve methods
+            let mut field_ty = Self::parse_go_type_with_module(&field.ty, package_name);
 
-        // Parse the Go type
-        let mut field_ty = parse_go_type(&field.ty);
-
-        // If this is a soppo-generated package, apply nullable info
-        // In soppo-generated code:
-        // - Fields WITH //soppo:nilable are nullable
-        // - Fields WITHOUT the marker are NOT nullable (even if pointer type)
-        // In regular Go code:
-        // - All pointer types are considered nullable
-        if pkg.soppo_generated {
-            // Only mark as nullable if the field has the marker
-            if let Type::Con { nullable, .. } = &mut field_ty {
+            // If this is a soppo-generated package, apply nullable info
+            if pkg.soppo_generated
+                && let Type::Con { nullable, .. } = &mut field_ty
+            {
                 *nullable = field.nullable;
             }
-        }
-        // For non-soppo-generated Go code, parse_go_type already handles
-        // pointer types as nullable
 
-        Some(field_ty)
+            return Some(field_ty);
+        }
+
+        // Field not found directly - collect embedded struct type names for recursive lookup
+        // An embedded field has a name that matches its type (e.g., `Reader Reader`)
+        let embedded_types: Vec<String> = type_def
+            .fields
+            .iter()
+            .filter_map(|field| {
+                let field_type_name = field.ty.trim_start_matches('*');
+                if field.name == field_type_name {
+                    Some(field_type_name.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Now recursively look up in embedded types (after releasing the borrow)
+        for embedded_type in embedded_types {
+            if let Some(ty) = self.lookup_go_struct_field(package_name, &embedded_type, field_name)
+            {
+                return Some(ty);
+            }
+        }
+
+        None
     }
 
     /// Look up a method on a Go type
@@ -731,12 +749,16 @@ impl Infer {
         // Find the method
         let method = methods.iter().find(|m| m.name == method_name)?;
 
-        // Build the function type
-        let param_tys: Vec<Type> = method.params.iter().map(|p| parse_go_type(&p.ty)).collect();
+        // Build the function type with module info preserved
+        let param_tys: Vec<Type> = method
+            .params
+            .iter()
+            .map(|p| Self::parse_go_type_with_module(&p.ty, package_name))
+            .collect();
         let return_ty = if method.return_type.is_empty() {
             Type::unit()
         } else {
-            parse_go_type(&method.return_type)
+            Self::parse_go_type_with_module(&method.return_type, package_name)
         };
 
         Some(Type::fun(param_tys, return_ty))

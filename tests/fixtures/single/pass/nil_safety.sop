@@ -100,4 +100,37 @@ func main() {
             fmt.Println(user7.name) // user7 is non-nil in this block
         }
     }
+
+    // === Nil narrowing with continue ===
+
+    for i := 0; i < 3; i++ {
+        u := getUser(i)
+        if u == nil {
+            continue
+        }
+        // After nil check with continue, u is known non-nil
+        fmt.Println(u.name)
+    }
+
+    // === Nil narrowing in match statements ===
+
+    // When match has `case nil:`, other branches know it's non-nil
+    user8 := getUser(8)
+    match user8 {
+    case nil:
+        fmt.Println("not found")
+    default:
+        // In default branch, user8 is known to be non-nil
+        fmt.Println(user8.name)
+    }
+
+    // Pointer type nil narrowing
+    var tool ?*string
+    match tool {
+    case nil:
+        fmt.Println("no tool")
+    default:
+        // tool is non-nil here, can dereference
+        fmt.Println(*tool)
+    }
 }

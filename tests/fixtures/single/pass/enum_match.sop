@@ -34,16 +34,14 @@ type Shape enum {
 }
 
 func area(s Shape) float64 {
-    var result float64
     match s {
     case Shape.Circle{radius: r, ...}:
-        result = 3.14 * r * r
+        return 3.14 * r * r
     case Shape.Rectangle{width: w, height: h}:
-        result = w * h
+        return w * h
     case Shape.Triangle(p):
-        result = 0.0
+        return 0.0
     }
-    return result
 }
 
 func testNestedMatch() string {
@@ -133,6 +131,44 @@ func isSmall(x int) bool {
         result = false
     }
     return result
+}
+
+// === Match divergence ===
+
+// Exhaustive enum match where all arms return - function doesn't need return after match
+func colourToInt(c Colour) int {
+    match c {
+    case Colour.Red:
+        return 0
+    case Colour.Yellow:
+        return 1
+    case Colour.Green:
+        return 2
+    }
+}
+
+// Match with default where all arms return - function doesn't need return after match
+func valueToString(x int) string {
+    match x {
+    case 1:
+        return "one"
+    case 2:
+        return "two"
+    default:
+        return "other"
+    }
+}
+
+// Expression-less match with default where all arms return
+func signToString(x int) string {
+    match {
+    case x > 0:
+        return "positive"
+    case x < 0:
+        return "negative"
+    default:
+        return "zero"
+    }
 }
 
 func main() {

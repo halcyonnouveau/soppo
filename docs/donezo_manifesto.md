@@ -56,8 +56,6 @@ But that's also because of the different architectures between the two. At the t
 
 This is not the correct approach. I don't understand why you'd add a new type (`enum`), but not type check it properly. Yes, Dingo does attempt exhaustiveness checking - but it's done by pattern matching on variant names like "Ok" and "Err", not actual type information. It only works for built-in types (`Result`, `Option`) and falls back to "cannot determine type, skip exhaustiveness check" for anything it doesn't recognise.
 
-And even after checking, they still add a `panic` to "unreachable" parts of the generated code because Go's compiler doesn't know the match is complete. "Unreachable" or not (I seriously doubt every case this gets added in is actually unreachable), I don't think you should ever be adding panics to your generated code.
-
 > Ever wonder what a dingo actually is?
 >
 > Thousands of years ago, they were domesticated dogs. Well-behaved. Following commands. Controlled.
