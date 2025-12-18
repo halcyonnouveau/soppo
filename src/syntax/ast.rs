@@ -363,6 +363,8 @@ pub enum ExprKind {
     Integer(i64),
     Float(f64),
     String(String),
+    /// Raw string literal (backtick string): `hello\nworld` - no escape processing
+    RawString(String),
     /// Rune literal: 'a', '\n', etc. - stores the raw character content
     Rune(String),
     /// Interpolated string: "Hello, {name}!"

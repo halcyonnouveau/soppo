@@ -23,6 +23,10 @@ impl Codegen {
                 self.emit(format!("\"{}\"", s));
             }
 
+            ExprKind::RawString(s) => {
+                self.emit(format!("`{}`", s));
+            }
+
             ExprKind::Rune(r) => {
                 self.emit(format!("'{}'", r));
             }

@@ -699,6 +699,12 @@ impl Parser {
                 }
             }
 
+            // Raw string literals (backtick strings) - no interpolation support
+            Token::RawString(s) => Ok(Expr {
+                kind: ExprKind::RawString(s),
+                span,
+            }),
+
             Token::True => Ok(Expr {
                 kind: ExprKind::Bool(true),
                 span,

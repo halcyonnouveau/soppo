@@ -1,0 +1,36 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+// Test raw string literals (backtick strings)
+func main() {
+    // Basic raw string
+    s1 := `hello world`
+    fmt.Println(s1)
+
+    // Raw string with special characters (no escape processing)
+    s2 := `path\to\file`
+    fmt.Println(s2)
+
+    // Raw string with newlines preserved
+    s3 := `line1
+line2
+line3`
+    fmt.Println(s3)
+
+    // Raw string with regex pattern
+    pattern := `\d+\.\d+`
+    fmt.Println(pattern)
+
+    // Raw string in function call
+    fmt.Printf(`Value: %d\n`, 42)
+
+    // Raw string with quotes inside
+    s4 := `He said "hello"`
+    fmt.Println(s4)
+}

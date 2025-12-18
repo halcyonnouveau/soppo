@@ -963,6 +963,7 @@ impl Formatter {
                 }
             }
             ExprKind::String(s) => format!("\"{}\"", s),
+            ExprKind::RawString(s) => format!("`{}`", s),
             ExprKind::Rune(r) => format!("'{}'", r),
             ExprKind::StringInterpolation(parts) => {
                 let mut result = String::from("\"");

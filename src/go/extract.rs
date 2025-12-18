@@ -800,6 +800,12 @@ fn infer_var_type_from_expr(node: tree_sitter::Node, source: &str, pkg: &GoPacka
                 // Get the function being called
                 if let Some(func_node) = child.child_by_field_name("function") {
                     let func_name = node_text(func_node, source);
+
+                    // Handle cross-package calls (pkg.Func) with known return types
+                    if let Some(return_type) = stdlib_function_return_type(func_name) {
+                        return return_type.to_string();
+                    }
+
                     // Look up the function's return type in the package
                     if let Some(func_def) = pkg.functions.get(func_name)
                         && !func_def.return_type.is_empty()
@@ -832,6 +838,49 @@ fn infer_var_type_from_expr(node: tree_sitter::Node, source: &str, pkg: &GoPacka
         }
     }
     String::new()
+}
+
+/// Return types for common stdlib functions used in variable initialisation.
+/// This handles cross-package calls like `errors.New(...)` where we can't
+/// look up the function definition in the current package.
+fn stdlib_function_return_type(func_name: &str) -> Option<&'static str> {
+    match func_name {
+        // errors package
+        "errors.New" => Some("error"),
+
+        // fmt package
+        "fmt.Errorf" => Some("error"),
+
+        // context package
+        "context.Background" => Some("context.Context"),
+        "context.TODO" => Some("context.Context"),
+        "context.WithCancel" => Some("context.Context"),
+        "context.WithTimeout" => Some("context.Context"),
+        "context.WithDeadline" => Some("context.Context"),
+        "context.WithValue" => Some("context.Context"),
+
+        // time package
+        "time.Now" => Some("time.Time"),
+        "time.Date" => Some("time.Time"),
+        "time.Parse" => Some("time.Time"),
+        "time.Unix" => Some("time.Time"),
+
+        // sync package
+        "sync.NewCond" => Some("*sync.Cond"),
+
+        // bytes package
+        "bytes.NewBuffer" => Some("*bytes.Buffer"),
+        "bytes.NewBufferString" => Some("*bytes.Buffer"),
+
+        // strings package
+        "strings.NewReader" => Some("*strings.Reader"),
+
+        // regexp package
+        "regexp.MustCompile" => Some("*regexp.Regexp"),
+        "regexp.Compile" => Some("*regexp.Regexp"),
+
+        _ => None,
+    }
 }
 
 fn extract_type_string(node: tree_sitter::Node, source: &str) -> String {

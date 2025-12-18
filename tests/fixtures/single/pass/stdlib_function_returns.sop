@@ -1,0 +1,69 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Test that stdlib function return types are correctly inferred
+// This allows using methods on the returned values
+
+func main() {
+	// errors.New returns error
+	err := errors.New("test error")
+	if err != nil {
+		_ = err.Error()
+	}
+
+	// fmt.Errorf returns error
+	err2 := fmt.Errorf("formatted: %s", "test")
+	if err2 != nil {
+		_ = err2.Error()
+	}
+
+	// context.Background returns context.Context (interface, needs nil check)
+	ctx := context.Background()
+	if ctx != nil {
+		_ = ctx.Done()
+	}
+
+	// context.TODO returns context.Context
+	ctx2 := context.TODO()
+	if ctx2 != nil {
+		_ = ctx2.Done()
+	}
+
+	// time.Now returns time.Time (value type, no nil check needed)
+	t := time.Now()
+	_ = t.Unix()
+	_ = t.Year()
+
+	// bytes.NewBuffer returns *bytes.Buffer (use .(!nil) assertion)
+	buf := bytes.NewBuffer([]byte{}).(!nil)
+	_ = buf.Len()
+	buf.WriteString("test")
+
+	// bytes.NewBufferString returns *bytes.Buffer
+	buf2 := bytes.NewBufferString("hello").(!nil)
+	_ = buf2.String()
+
+	// strings.NewReader returns *strings.Reader
+	reader := strings.NewReader("test").(!nil)
+	_ = reader.Len()
+
+	// regexp.MustCompile returns *regexp.Regexp
+	re := regexp.MustCompile(`\d+`).(!nil)
+	_ = re.MatchString("123")
+
+	// sync.WaitGroup methods (value type)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	wg.Done()
+	wg.Wait()
+}

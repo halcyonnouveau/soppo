@@ -445,6 +445,12 @@ impl Infer {
                         && args.len() == targets.len()
                     {
                         for (target, expected_ty) in targets.iter().zip(args.iter()) {
+                            // Special case: blank identifier accepts any type
+                            if let ExprKind::Ident(name) = &target.kind
+                                && name == "_"
+                            {
+                                continue;
+                            }
                             let target_ty = self.infer_expr(target)?;
                             self.unify(&target_ty, expected_ty, &target.span)?;
                         }
@@ -463,6 +469,13 @@ impl Infer {
                 } else {
                     // a, b = expr1, expr2 (one value per target)
                     for (target, value) in targets.iter().zip(values.iter()) {
+                        // Special case: blank identifier accepts any type
+                        if let ExprKind::Ident(name) = &target.kind
+                            && name == "_"
+                        {
+                            self.infer_expr(value)?;
+                            continue;
+                        }
                         let target_ty = self.infer_expr(target)?;
                         let value_ty = self.infer_expr(value)?;
                         self.unify(&target_ty, &value_ty, &target.span)?;

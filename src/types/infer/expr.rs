@@ -18,6 +18,8 @@ impl Infer {
 
             ExprKind::String(_) => Ok(Type::simple("string")),
 
+            ExprKind::RawString(_) => Ok(Type::simple("string")),
+
             ExprKind::Rune(_) => Ok(Type::simple("rune")),
 
             ExprKind::StringInterpolation(parts) => {
