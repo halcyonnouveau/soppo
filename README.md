@@ -12,7 +12,7 @@ Soppo is not production ready.
 
 ## Installation
 
-The recommended way to install Sop is through [SOPMOD](https://github.com/halcyonnouveau/sopmod), an installer and version manager for Sop and Go.
+The recommended way to install Soppo is through [SOPMOD](https://github.com/halcyonnouveau/sopmod), an installer and version manager for Soppo.
 
 ```sh
 curl -fsSL https://soppolang.dev/install.sh | sh
