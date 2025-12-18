@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/halcyonnouveau/soppo/compare/v0.4.1...v0.5.0) - 2025-12-18
+
+### Added
+
+- add unused import/variable detection and improve Go semantics
+- bye bye import shadowing
+- support method calls on types from imported Soppo modules
+- nil narrowing in match and match divergence analysis
+- add raw string literal support and stdlib return type tests
+- infer types for Go package variables from composite literals
+- support `return f()` for multi-value returns
+- narrow error companions after early return check
+- support Go type aliases with numeric underlying types
+- allow `?` in non-error-returning functions
+- add spread operator
+- better integer support
+- support grouped named return parameters
+- add sop.mod version checking
+- add formatter
+- add test runner and doctests
+- add sop.mod config file and glob pattern support
+- add benchmarks
+- add fuzzing and proptest infrastructure
+
+### Fixed
+
+- correctly distinguish soppo enums from Go constants in match
+- variadic spread
+- field indexing and nested composite literal support
+- attach module info to Go package variable types
+- external modules
+- allow `?` with handler in non-error-returning functions
+- nil in match
+- ansi escape codes
+- off-by-one error in block comment parsing
+- top level comment gen
+
 ## [0.4.1](https://github.com/halcyonnouveau/soppo/compare/v0.4.0...v0.4.1) - 2025-12-09
 
 ### Fixed
