@@ -34,13 +34,7 @@ impl Parser {
 
         Ok(Stmt {
             kind: StmtKind::Match { scrutinee, arms },
-            span: Span::with_bytes(
-                start_span.start,
-                end_span.end,
-                self.file,
-                start_span.byte_start,
-                end_span.byte_end,
-            ),
+            span: self.merge_spans(start_span, end_span),
         })
     }
 
@@ -92,14 +86,8 @@ impl Parser {
             span: body_end,
         };
 
-        let first_span = &patterns[0].span;
-        let span = Span::with_bytes(
-            first_span.start,
-            body.span.end,
-            self.file,
-            first_span.byte_start,
-            body.span.byte_end,
-        );
+        let first_span = patterns[0].span;
+        let span = self.merge_spans(first_span, body.span);
 
         Ok(Arm {
             patterns,
@@ -182,54 +170,15 @@ impl Parser {
 
                 // Check for field access: Type.Variant
                 while self.consume(&Token::Dot) {
-                    let field_name = match self.advance() {
-                        Some((Token::Ident(field), field_span)) => {
-                            current_span = Span::with_bytes(
-                                current_span.start,
-                                field_span.end,
-                                self.file,
-                                current_span.byte_start,
-                                field_span.byte_end,
-                            );
-                            field
-                        }
-                        Some((tok, span)) => {
-                            return Err(SoppoError::Parse {
-                                message: format!("Expected field name after '.', found {:?}", tok),
-                                span,
-                            });
-                        }
-                        None => {
-                            return Err(SoppoError::Parse {
-                                message: "Expected field name after '.'".to_string(),
-                                span: Span::dummy(),
-                            });
-                        }
-                    };
+                    let (field_name, field_span) = self.parse_identifier("field")?;
+                    current_span = self.merge_spans(current_span, field_span);
                     name = format!("{}.{}", name, field_name);
                 }
 
                 // Check if it's a destructor pattern: Result.Ok(value)
                 if self.consume(&Token::LParen) {
                     // Parse the single binding variable
-                    let (binding_name, binding_span) = match self.advance() {
-                        Some((Token::Ident(binding), span)) => (binding, span),
-                        Some((tok, span)) => {
-                            return Err(SoppoError::Parse {
-                                message: format!(
-                                    "Expected binding variable in pattern, found {:?}",
-                                    tok
-                                ),
-                                span,
-                            });
-                        }
-                        None => {
-                            return Err(SoppoError::Parse {
-                                message: "Expected binding variable in pattern".to_string(),
-                                span: Span::dummy(),
-                            });
-                        }
-                    };
+                    let (binding_name, binding_span) = self.parse_identifier("binding")?;
 
                     let end_span = self.expect(Token::RParen)?;
 
@@ -238,13 +187,7 @@ impl Parser {
                             name,
                             binding: Ident::new(binding_name, binding_span),
                         },
-                        span: Span::with_bytes(
-                            current_span.start,
-                            end_span.end,
-                            self.file,
-                            current_span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(current_span, end_span),
                     })
                 }
                 // Check if it's a struct destructor pattern: Shape.Circle{radius: r, ...}
@@ -262,25 +205,7 @@ impl Parser {
                             }
 
                             // Parse field_name: pattern or just field_name (shorthand)
-                            let (field_name, field_span) = match self.advance() {
-                                Some((Token::Ident(name), span)) => (name, span),
-                                Some((tok, span)) => {
-                                    return Err(SoppoError::Parse {
-                                        message: format!(
-                                            "Expected field name in struct pattern, found {:?}",
-                                            tok
-                                        ),
-                                        span,
-                                    });
-                                }
-                                None => {
-                                    return Err(SoppoError::Parse {
-                                        message: "Expected field name in struct pattern"
-                                            .to_string(),
-                                        span: Span::dummy(),
-                                    });
-                                }
-                            };
+                            let (field_name, field_span) = self.parse_identifier("field")?;
 
                             // Check for colon - if not present, use shorthand (field binds to same name)
                             let field_pattern = if self.consume(&Token::Colon) {
@@ -348,13 +273,7 @@ impl Parser {
 
                     Ok(Pattern {
                         kind: PatternKind::StructDestructor { name, fields, rest },
-                        span: Span::with_bytes(
-                            current_span.start,
-                            end_span.end,
-                            self.file,
-                            current_span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(current_span, end_span),
                     })
                 }
                 // Just a variant name

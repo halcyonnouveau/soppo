@@ -2,7 +2,6 @@ use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::TypeAnnotation;
 use crate::syntax::lexer::Token;
-use crate::syntax::source::Span;
 
 impl Parser {
     /// Parse a type annotation
@@ -189,47 +188,13 @@ impl Parser {
         }
 
         // Now we need an identifier
-        let (mut name, mut span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected type name, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected type name".to_string(),
-                    span: Span::dummy(),
-                });
-            }
-        };
+        let (mut name, mut span) = self.parse_identifier("type")?;
 
         // Handle qualified types like Option.Some (for enum variants in type assertions)
         while self.consume(&Token::Dot) {
-            let (field_name, field_span) = match self.advance() {
-                Some((Token::Ident(field), field_span)) => (field, field_span),
-                Some((tok, span)) => {
-                    return Err(SoppoError::Parse {
-                        message: format!("Expected identifier after '.', found {:?}", tok),
-                        span,
-                    });
-                }
-                None => {
-                    return Err(SoppoError::Parse {
-                        message: "Expected identifier after '.'".to_string(),
-                        span: Span::dummy(),
-                    });
-                }
-            };
+            let (field_name, field_span) = self.parse_identifier("type")?;
             name = format!("{}.{}", name, field_name);
-            span = Span::with_bytes(
-                span.start,
-                field_span.end,
-                self.file,
-                span.byte_start,
-                field_span.byte_end,
-            );
+            span = self.merge_spans(span, field_span);
         }
 
         // Map type: map[K]V - can be nullable

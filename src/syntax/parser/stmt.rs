@@ -67,13 +67,7 @@ impl Parser {
                     try_span,
                     discard_count: Cell::new(0),
                 },
-                span: Span::with_bytes(
-                    stmt_span.start,
-                    end_span.end,
-                    self.file,
-                    stmt_span.byte_start,
-                    end_span.byte_end,
-                ),
+                span: self.merge_spans(stmt_span, end_span),
             });
         }
 
@@ -137,13 +131,7 @@ impl Parser {
                         }
                         let end_span = values.last().unwrap().span;
                         return Ok(Stmt {
-                            span: Span::with_bytes(
-                                first_target.span.start,
-                                end_span.end,
-                                self.file,
-                                first_target.span.byte_start,
-                                end_span.byte_end,
-                            ),
+                            span: self.merge_spans(first_target.span, end_span),
                             kind: StmtKind::MultiDecl {
                                 ident: names,
                                 values,
@@ -168,13 +156,7 @@ impl Parser {
                         }
                         let end_span = values.last().unwrap().span;
                         return Ok(Stmt {
-                            span: Span::with_bytes(
-                                first_target.span.start,
-                                end_span.end,
-                                self.file,
-                                first_target.span.byte_start,
-                                end_span.byte_end,
-                            ),
+                            span: self.merge_spans(first_target.span, end_span),
                             kind: StmtKind::MultiAssign { targets, values },
                         });
                     } else {
@@ -194,13 +176,7 @@ impl Parser {
                         let name_span = first_target.span;
                         let value = self.parse_expr()?;
                         Ok(Stmt {
-                            span: Span::with_bytes(
-                                name_span.start,
-                                value.span.end,
-                                self.file,
-                                name_span.byte_start,
-                                value.span.byte_end,
-                            ),
+                            span: self.merge_spans(name_span, value.span),
                             kind: StmtKind::Decl {
                                 ident: Ident::new(name, name_span),
                                 value,
@@ -216,13 +192,7 @@ impl Parser {
                     // Assignment: x = value or x.y = value
                     let value = self.parse_expr()?;
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            first_target.span.start,
-                            value.span.end,
-                            self.file,
-                            first_target.span.byte_start,
-                            value.span.byte_end,
-                        ),
+                        span: self.merge_spans(first_target.span, value.span),
                         kind: StmtKind::Assign {
                             target: first_target,
                             value,
@@ -233,13 +203,7 @@ impl Parser {
                     self.advance(); // consume the compound assignment operator
                     let value = self.parse_expr()?;
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            first_target.span.start,
-                            value.span.end,
-                            self.file,
-                            first_target.span.byte_start,
-                            value.span.byte_end,
-                        ),
+                        span: self.merge_spans(first_target.span, value.span),
                         kind: StmtKind::CompoundAssign {
                             target: first_target,
                             op,
@@ -268,13 +232,7 @@ impl Parser {
                     // Channel send: ch <- value
                     let value = self.parse_expr()?;
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            first_target.span.start,
-                            value.span.end,
-                            self.file,
-                            first_target.span.byte_start,
-                            value.span.byte_end,
-                        ),
+                        span: self.merge_spans(first_target.span, value.span),
                         kind: StmtKind::Send {
                             channel: first_target,
                             value,
@@ -295,22 +253,7 @@ impl Parser {
                 self.advance(); // consume 'var'
 
                 // Parse the first variable name
-                let (first_name, first_name_span) = match self.advance() {
-                    Some((Token::Ident(name), span)) => (name, span),
-                    Some((tok, span)) => {
-                        return Err(SoppoError::Parse {
-                            message: format!("Expected variable name, found {:?}", tok),
-                            span,
-                        });
-                    }
-                    None => {
-                        return Err(SoppoError::Parse {
-                            message: "Expected variable name".to_string(),
-                            span: Span::dummy(),
-                        });
-                    }
-                };
-
+                let (first_name, first_name_span) = self.parse_identifier("variable")?;
                 self.validate_identifier(&first_name, &first_name_span)?;
 
                 // Check for multi-var declaration (comma after first name)
@@ -320,21 +263,7 @@ impl Parser {
 
                     // Parse remaining names
                     loop {
-                        let (name, name_span) = match self.advance() {
-                            Some((Token::Ident(name), span)) => (name, span),
-                            Some((tok, span)) => {
-                                return Err(SoppoError::Parse {
-                                    message: format!("Expected variable name, found {:?}", tok),
-                                    span,
-                                });
-                            }
-                            None => {
-                                return Err(SoppoError::Parse {
-                                    message: "Expected variable name".to_string(),
-                                    span: Span::dummy(),
-                                });
-                            }
-                        };
+                        let (name, name_span) = self.parse_identifier("variable")?;
                         self.validate_identifier(&name, &name_span)?;
                         names.push(Ident::new(name, name_span));
 
@@ -406,13 +335,7 @@ impl Parser {
                     };
 
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            start_span.start,
-                            end_span.end,
-                            self.file,
-                            start_span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(start_span, end_span),
                         kind: StmtKind::MultiVarDecl {
                             ident: names,
                             ty,
@@ -457,13 +380,7 @@ impl Parser {
                     };
 
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            start_span.start,
-                            end_span.end,
-                            self.file,
-                            start_span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(start_span, end_span),
                         kind: StmtKind::VarDecl {
                             ident: Ident::new(first_name, first_name_span),
                             ty,
@@ -479,22 +396,7 @@ impl Parser {
                 self.advance(); // consume 'const'
 
                 // Parse the first constant name
-                let (first_name, first_name_span) = match self.advance() {
-                    Some((Token::Ident(name), span)) => (name, span),
-                    Some((tok, span)) => {
-                        return Err(SoppoError::Parse {
-                            message: format!("Expected constant name, found {:?}", tok),
-                            span,
-                        });
-                    }
-                    None => {
-                        return Err(SoppoError::Parse {
-                            message: "Expected constant name".to_string(),
-                            span: Span::dummy(),
-                        });
-                    }
-                };
-
+                let (first_name, first_name_span) = self.parse_identifier("constant")?;
                 self.validate_identifier(&first_name, &first_name_span)?;
 
                 // Check for multi-const declaration (comma after first name)
@@ -504,21 +406,7 @@ impl Parser {
 
                     // Parse remaining names
                     loop {
-                        let (name, name_span) = match self.advance() {
-                            Some((Token::Ident(name), span)) => (name, span),
-                            Some((tok, span)) => {
-                                return Err(SoppoError::Parse {
-                                    message: format!("Expected constant name, found {:?}", tok),
-                                    span,
-                                });
-                            }
-                            None => {
-                                return Err(SoppoError::Parse {
-                                    message: "Expected constant name".to_string(),
-                                    span: Span::dummy(),
-                                });
-                            }
-                        };
+                        let (name, name_span) = self.parse_identifier("constant")?;
                         self.validate_identifier(&name, &name_span)?;
                         names.push(Ident::new(name, name_span));
 
@@ -586,13 +474,7 @@ impl Parser {
                     };
 
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            start_span.start,
-                            end_span.end,
-                            self.file,
-                            start_span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(start_span, end_span),
                         kind: StmtKind::MultiConstDecl {
                             idents: names,
                             ty,
@@ -632,13 +514,7 @@ impl Parser {
                     let end_span = value.span;
 
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            start_span.start,
-                            end_span.end,
-                            self.file,
-                            start_span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(start_span, end_span),
                         kind: StmtKind::ConstDecl {
                             ident: Ident::new(first_name, first_name_span),
                             ty,
@@ -654,13 +530,7 @@ impl Parser {
                 let type_decl = self.parse_type_decl()?;
                 let end_span = type_decl.span;
                 Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        end_span.end,
-                        self.file,
-                        start_span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(start_span, end_span),
                     kind: StmtKind::LocalTypeDecl(type_decl),
                 })
             }
@@ -736,13 +606,7 @@ impl Parser {
                         let body = self.parse_block()?;
 
                         return Ok(Stmt {
-                            span: Span::with_bytes(
-                                start_span.start,
-                                body.span.end,
-                                self.file,
-                                start_span.byte_start,
-                                body.span.byte_end,
-                            ),
+                            span: self.merge_spans(start_span, body.span),
                             kind: StmtKind::ForRange {
                                 key: first_name,
                                 value: second_name,
@@ -760,13 +624,7 @@ impl Parser {
                 if matches!(self.peek(), Some(Token::LBrace)) {
                     let body = self.parse_block()?;
                     return Ok(Stmt {
-                        span: Span::with_bytes(
-                            start_span.start,
-                            body.span.end,
-                            self.file,
-                            start_span.byte_start,
-                            body.span.byte_end,
-                        ),
+                        span: self.merge_spans(start_span, body.span),
                         kind: StmtKind::ForCStyle {
                             init: None,
                             condition: None,
@@ -804,13 +662,7 @@ impl Parser {
                     let body = self.parse_block()?;
 
                     return Ok(Stmt {
-                        span: Span::with_bytes(
-                            start_span.start,
-                            body.span.end,
-                            self.file,
-                            start_span.byte_start,
-                            body.span.byte_end,
-                        ),
+                        span: self.merge_spans(start_span, body.span),
                         kind: StmtKind::ForCStyle {
                             init,
                             condition,
@@ -826,13 +678,7 @@ impl Parser {
                 let body = self.parse_block()?;
 
                 Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        body.span.end,
-                        self.file,
-                        start_span.byte_start,
-                        body.span.byte_end,
-                    ),
+                    span: self.merge_spans(start_span, body.span),
                     kind: StmtKind::For { condition, body },
                 })
             }
@@ -929,13 +775,7 @@ impl Parser {
                         };
 
                         let init_stmt = Stmt {
-                            span: Span::with_bytes(
-                                start_span.start,
-                                init_end_span.end,
-                                self.file,
-                                start_span.byte_start,
-                                init_end_span.byte_end,
-                            ),
+                            span: self.merge_spans(start_span, init_end_span),
                             kind: if names.len() == 1 && values.len() == 1 {
                                 StmtKind::Decl {
                                     ident: names.into_iter().next().unwrap(),
@@ -972,13 +812,7 @@ impl Parser {
                             .unwrap_or(then_block.span);
 
                         return Ok(Stmt {
-                            span: Span::with_bytes(
-                                start_span.start,
-                                end_span.end,
-                                self.file,
-                                start_span.byte_start,
-                                end_span.byte_end,
-                            ),
+                            span: self.merge_spans(start_span, end_span),
                             kind: StmtKind::If {
                                 init: Some(Box::new(init_stmt)),
                                 condition,
@@ -1026,13 +860,7 @@ impl Parser {
                     .unwrap_or(then_block.span);
 
                 Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        end_span.end,
-                        self.file,
-                        start_span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(start_span, end_span),
                     kind: StmtKind::If {
                         init: None,
                         condition,
@@ -1062,13 +890,7 @@ impl Parser {
                 let end_span = values.last().map(|v| v.span).unwrap_or(start_span);
 
                 Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        end_span.end,
-                        self.file,
-                        start_span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(start_span, end_span),
                     kind: StmtKind::Return { values },
                 })
             }
@@ -1088,13 +910,7 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 let end_span = expr.span;
                 Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        end_span.end,
-                        self.file,
-                        start_span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(start_span, end_span),
                     kind: StmtKind::Go(expr),
                 })
             }
@@ -1104,13 +920,7 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 let end_span = expr.span;
                 Ok(Stmt {
-                    span: Span::with_bytes(
-                        start_span.start,
-                        end_span.end,
-                        self.file,
-                        start_span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(start_span, end_span),
                     kind: StmtKind::DeferStmt(expr),
                 })
             }
@@ -1139,13 +949,7 @@ impl Parser {
                     // Assignment to a dereference or other expression: *p = value
                     let value = self.parse_expr()?;
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            expr.span.start,
-                            value.span.end,
-                            self.file,
-                            expr.span.byte_start,
-                            value.span.byte_end,
-                        ),
+                        span: self.merge_spans(expr.span, value.span),
                         kind: StmtKind::Assign {
                             target: expr,
                             value,
@@ -1156,13 +960,7 @@ impl Parser {
                     self.advance();
                     let value = self.parse_expr()?;
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            expr.span.start,
-                            value.span.end,
-                            self.file,
-                            expr.span.byte_start,
-                            value.span.byte_end,
-                        ),
+                        span: self.merge_spans(expr.span, value.span),
                         kind: StmtKind::CompoundAssign {
                             target: expr,
                             op,
@@ -1191,13 +989,7 @@ impl Parser {
                     // Channel send: ch <- value
                     let value = self.parse_expr()?;
                     Ok(Stmt {
-                        span: Span::with_bytes(
-                            expr.span.start,
-                            value.span.end,
-                            self.file,
-                            expr.span.byte_start,
-                            value.span.byte_end,
-                        ),
+                        span: self.merge_spans(expr.span, value.span),
                         kind: StmtKind::Send {
                             channel: expr,
                             value,
@@ -1232,13 +1024,7 @@ impl Parser {
 
         Ok(Block {
             stmts,
-            span: Span::with_bytes(
-                start_span.start,
-                end_span.end,
-                self.file,
-                start_span.byte_start,
-                end_span.byte_end,
-            ),
+            span: self.merge_spans(start_span, end_span),
         })
     }
 
@@ -1259,13 +1045,7 @@ impl Parser {
 
         Ok(Stmt {
             kind: StmtKind::Select { cases },
-            span: Span::with_bytes(
-                start_span.start,
-                end_span.end,
-                self.file,
-                start_span.byte_start,
-                end_span.byte_end,
-            ),
+            span: self.merge_spans(start_span, end_span),
         })
     }
 
@@ -1283,19 +1063,12 @@ impl Parser {
 
             // Parse body
             let body = self.parse_select_case_body()?;
-            let body_span_end = body.span.end;
-            let body_byte_end = body.span.byte_end;
+            let body_span = body.span;
 
             return Ok(SelectCase {
                 kind: SelectCaseKind::Default,
                 body,
-                span: Span::with_bytes(
-                    case_start.start,
-                    body_span_end,
-                    self.file,
-                    case_start.byte_start,
-                    body_byte_end,
-                ),
+                span: self.merge_spans(case_start, body_span),
             });
         }
 
@@ -1314,19 +1087,12 @@ impl Parser {
             self.skip_terminators();
 
             let body = self.parse_select_case_body()?;
-            let body_span_end = body.span.end;
-            let body_byte_end = body.span.byte_end;
+            let body_span = body.span;
 
             return Ok(SelectCase {
                 kind: SelectCaseKind::Recv { channel },
                 body,
-                span: Span::with_bytes(
-                    case_start.start,
-                    body_span_end,
-                    self.file,
-                    case_start.byte_start,
-                    body_byte_end,
-                ),
+                span: self.merge_spans(case_start, body_span),
             });
         }
 
@@ -1340,8 +1106,7 @@ impl Parser {
             self.skip_terminators();
 
             let body = self.parse_select_case_body()?;
-            let body_span_end = body.span.end;
-            let body_byte_end = body.span.byte_end;
+            let body_span = body.span;
 
             return Ok(SelectCase {
                 kind: SelectCaseKind::Send {
@@ -1349,13 +1114,7 @@ impl Parser {
                     value,
                 },
                 body,
-                span: Span::with_bytes(
-                    case_start.start,
-                    body_span_end,
-                    self.file,
-                    case_start.byte_start,
-                    body_byte_end,
-                ),
+                span: self.merge_spans(case_start, body_span),
             });
         }
 
@@ -1401,8 +1160,7 @@ impl Parser {
         self.skip_terminators();
 
         let body = self.parse_select_case_body()?;
-        let body_span_end = body.span.end;
-        let body_byte_end = body.span.byte_end;
+        let body_span = body.span;
 
         let kind = if let Some(ok_name) = second_name {
             SelectCaseKind::RecvDeclOk {
@@ -1420,13 +1178,7 @@ impl Parser {
         Ok(SelectCase {
             kind,
             body,
-            span: Span::with_bytes(
-                case_start.start,
-                body_span_end,
-                self.file,
-                case_start.byte_start,
-                body_byte_end,
-            ),
+            span: self.merge_spans(case_start, body_span),
         })
     }
 

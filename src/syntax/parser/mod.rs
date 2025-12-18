@@ -4,9 +4,13 @@ mod pat;
 mod stmt;
 mod ty;
 
+use super::ast::Expr;
 use super::lexer::{Comment, Lexer, Token};
 use super::source::{FileId, Span};
 use crate::error::{Result, SoppoError};
+
+/// A parsed function argument: (optional name with span, value expression, is_spread)
+type ParsedArg = (Option<(String, Span)>, Expr, bool);
 
 // Reserved keywords that cannot be used as identifiers
 const RESERVED_KEYWORDS: &[&str] = &[
@@ -189,6 +193,63 @@ impl Parser {
         } else {
             Ok(())
         }
+    }
+
+    /// Parse an identifier token with a contextual error message
+    fn parse_identifier(&mut self, context: &str) -> Result<(String, Span)> {
+        match self.advance() {
+            Some((Token::Ident(name), span)) => Ok((name, span)),
+            Some((tok, span)) => Err(SoppoError::Parse {
+                message: format!("Expected {} name, found {:?}", context, tok),
+                span,
+            }),
+            None => Err(SoppoError::Parse {
+                message: format!("Expected {} name", context),
+                span: Span::dummy(),
+            }),
+        }
+    }
+
+    /// Merge two spans into one spanning from start to end
+    fn merge_spans(&self, start: Span, end: Span) -> Span {
+        Span::with_bytes(
+            start.start,
+            end.end,
+            self.file,
+            start.byte_start,
+            end.byte_end,
+        )
+    }
+
+    /// Parse a comma-separated argument list (for function calls)
+    fn parse_argument_list(&mut self) -> Result<Vec<ParsedArg>> {
+        let mut args = Vec::new();
+
+        if !matches!(self.peek(), Some(Token::RParen)) {
+            loop {
+                // Check for named argument: Ident followed by Colon
+                let (name, value) = if let Some(Token::Ident(name)) = self.peek()
+                    && matches!(self.peek_at(1), Some(Token::Colon))
+                {
+                    let name = name.clone();
+                    let (_, name_span) = self.advance().unwrap();
+                    self.advance(); // consume colon
+                    let value = self.parse_expr()?;
+                    (Some((name, name_span)), value)
+                } else {
+                    (None, self.parse_expr()?)
+                };
+                // Check for spread: expr...
+                let spread = self.consume(&Token::DotDotDot);
+                args.push((name, value, spread));
+
+                if !self.consume(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+
+        Ok(args)
     }
 
     /// Find doc comments that immediately precede the given span.

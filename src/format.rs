@@ -256,7 +256,7 @@ impl Formatter {
         self.emit(&format!("const {}", c.ident.name));
         if let Some(ty) = &c.ty {
             self.emit(" ");
-            self.emit(&self.format_type_annotation(ty));
+            self.emit(&Self::format_type_annotation(ty));
         }
         self.emit(" = ");
         self.emit(&self.format_expr(&c.value));
@@ -278,7 +278,7 @@ impl Formatter {
             self.emit(&c.ident.name);
             if let Some(ty) = &c.ty {
                 self.emit(" ");
-                self.emit(&self.format_type_annotation(ty));
+                self.emit(&Self::format_type_annotation(ty));
             }
             self.emit(" = ");
             self.emit(&self.format_expr(&c.value));
@@ -294,7 +294,7 @@ impl Formatter {
         self.emit(&format!("var {}", v.ident.name));
         if let Some(ty) = &v.ty {
             self.emit(" ");
-            self.emit(&self.format_type_annotation(ty));
+            self.emit(&Self::format_type_annotation(ty));
         }
         if let Some(value) = &v.value {
             self.emit(" = ");
@@ -323,12 +323,12 @@ impl Formatter {
         match &t.kind {
             TypeKind::Alias { target } => {
                 self.emit(" = ");
-                self.emit(&self.format_type_annotation(target));
+                self.emit(&Self::format_type_annotation(target));
                 self.output.push('\n');
             }
             TypeKind::Definition { target } => {
                 self.emit(" ");
-                self.emit(&self.format_type_annotation(target));
+                self.emit(&Self::format_type_annotation(target));
                 self.output.push('\n');
             }
             TypeKind::Enum { variants } => {
@@ -380,7 +380,7 @@ impl Formatter {
                 self.emit_indent();
                 self.emit(&ident.name);
                 self.emit(" ");
-                self.emit(&self.format_type_annotation(ty));
+                self.emit(&Self::format_type_annotation(ty));
                 self.output.push('\n');
             }
             EnumVariant::Struct { ident, fields } => {
@@ -403,7 +403,7 @@ impl Formatter {
         let mut max_type_len = 0;
         for field in fields {
             max_name_len = max_name_len.max(field.ident.name.len());
-            let type_str = self.format_type_annotation(&field.ty);
+            let type_str = Self::format_type_annotation(&field.ty);
             max_type_len = max_type_len.max(type_str.len());
         }
         (max_name_len, max_type_len)
@@ -416,7 +416,7 @@ impl Formatter {
         self.emit_indent();
 
         let name = &field.ident.name;
-        let type_str = self.format_type_annotation(&field.ty);
+        let type_str = Self::format_type_annotation(&field.ty);
 
         // Pad name to align types
         self.emit(name);
@@ -461,13 +461,13 @@ impl Formatter {
         if !method.returns.is_empty() {
             self.emit(" ");
             if method.returns.len() == 1 {
-                self.emit(&self.format_type_annotation(&method.returns[0]));
+                self.emit(&Self::format_type_annotation(&method.returns[0]));
             } else {
                 self.emit("(");
                 let returns: Vec<_> = method
                     .returns
                     .iter()
-                    .map(|t| self.format_type_annotation(t))
+                    .map(Self::format_type_annotation)
                     .collect();
                 self.emit(&returns.join(", "));
                 self.emit(")");
@@ -491,7 +491,7 @@ impl Formatter {
             self.emit(&format!(
                 "({} {}) ",
                 recv.ident.name,
-                self.format_type_annotation(&recv.ty)
+                Self::format_type_annotation(&recv.ty)
             ));
         }
 
@@ -514,7 +514,7 @@ impl Formatter {
             self.emit(" ");
             let is_named = !f.returns[0].ident.name.is_empty();
             if f.returns.len() == 1 && !is_named {
-                self.emit(&self.format_type_annotation(&f.returns[0].ty));
+                self.emit(&Self::format_type_annotation(&f.returns[0].ty));
             } else {
                 self.emit("(");
                 self.emit(&self.format_params_grouped(&f.returns, true));
@@ -545,7 +545,7 @@ impl Formatter {
         let mut groups: Vec<(Vec<&str>, String)> = Vec::new();
 
         for param in params {
-            let ty_str = self.format_type_annotation(&param.ty);
+            let ty_str = Self::format_type_annotation(&param.ty);
             let name = &param.ident.name;
 
             // Unnamed parameter (just type)
@@ -577,7 +577,7 @@ impl Formatter {
             .join(", ")
     }
 
-    fn format_type_annotation(&self, ty: &TypeAnnotation) -> String {
+    fn format_type_annotation(ty: &TypeAnnotation) -> String {
         let mut result = String::new();
 
         if ty.nullable {
@@ -600,11 +600,7 @@ impl Formatter {
 
         if !ty.args.is_empty() && !is_builtin_compound {
             result.push('[');
-            let args: Vec<_> = ty
-                .args
-                .iter()
-                .map(|a| self.format_type_annotation(a))
-                .collect();
+            let args: Vec<_> = ty.args.iter().map(Self::format_type_annotation).collect();
             result.push_str(&args.join(", "));
             result.push(']');
         }
@@ -680,7 +676,7 @@ impl Formatter {
                 self.emit(&format!("var {}", ident.name));
                 if let Some(t) = ty {
                     self.emit(" ");
-                    self.emit(&self.format_type_annotation(t));
+                    self.emit(&Self::format_type_annotation(t));
                 }
                 if let Some(v) = value {
                     self.emit(" = ");
@@ -696,7 +692,7 @@ impl Formatter {
                 self.emit(&names.join(", "));
                 if let Some(t) = ty {
                     self.emit(" ");
-                    self.emit(&self.format_type_annotation(t));
+                    self.emit(&Self::format_type_annotation(t));
                 }
                 if !values.is_empty() {
                     self.emit(" = ");
@@ -711,7 +707,7 @@ impl Formatter {
                 self.emit(&format!("const {}", ident.name));
                 if let Some(t) = ty {
                     self.emit(" ");
-                    self.emit(&self.format_type_annotation(t));
+                    self.emit(&Self::format_type_annotation(t));
                 }
                 self.emit(" = ");
                 self.emit(&self.format_expr(value));
@@ -725,7 +721,7 @@ impl Formatter {
                 self.emit(&names.join(", "));
                 if let Some(t) = ty {
                     self.emit(" ");
-                    self.emit(&self.format_type_annotation(t));
+                    self.emit(&Self::format_type_annotation(t));
                 }
                 self.emit(" = ");
                 let vals: Vec<_> = values.iter().map(|v| self.format_expr(v)).collect();
@@ -1196,10 +1192,8 @@ impl Formatter {
                 let mut result = self.format_expr(func);
                 if !type_args.is_empty() {
                     result.push('[');
-                    let targs: Vec<_> = type_args
-                        .iter()
-                        .map(|t| self.format_type_annotation(t))
-                        .collect();
+                    let targs: Vec<_> =
+                        type_args.iter().map(Self::format_type_annotation).collect();
                     result.push_str(&targs.join(", "));
                     result.push(']');
                 }
@@ -1253,7 +1247,7 @@ impl Formatter {
                 format!(
                     "{}.({})",
                     self.format_expr(expr),
-                    self.format_type_annotation(ty)
+                    Self::format_type_annotation(ty)
                 )
             }
             ExprKind::NilAssert { expr } => {
@@ -1262,7 +1256,7 @@ impl Formatter {
             ExprKind::ArrayLit { ty, elements } => {
                 let mut result = String::new();
                 if let Some(t) = ty {
-                    result.push_str(&self.format_type_annotation(t));
+                    result.push_str(&Self::format_type_annotation(t));
                 }
                 result.push('{');
                 let elems: Vec<_> = elements.iter().map(|e| self.format_expr(e)).collect();
@@ -1272,7 +1266,7 @@ impl Formatter {
             }
             ExprKind::StructLit { ty, fields } => {
                 let mut result = match ty {
-                    Some(t) => self.format_type_annotation(t),
+                    Some(t) => Self::format_type_annotation(t),
                     None => String::new(),
                 };
                 result.push('{');
@@ -1290,7 +1284,7 @@ impl Formatter {
                     result.push_str(&format!(
                         " {} {};",
                         fd.ident.name,
-                        self.format_type_annotation(&fd.ty)
+                        Self::format_type_annotation(&fd.ty)
                     ));
                 }
                 result.push_str(" }{");
@@ -1303,7 +1297,7 @@ impl Formatter {
                 result
             }
             ExprKind::MapLit { ty, entries } => {
-                let mut result = self.format_type_annotation(ty);
+                let mut result = Self::format_type_annotation(ty);
                 result.push('{');
                 let entry_strs: Vec<_> = entries
                     .iter()
@@ -1335,19 +1329,19 @@ impl Formatter {
                     result.push(' ');
                     let is_named = !returns[0].ident.name.is_empty();
                     if returns.len() == 1 && !is_named {
-                        result.push_str(&self.format_type_annotation(&returns[0].ty));
+                        result.push_str(&Self::format_type_annotation(&returns[0].ty));
                     } else {
                         result.push('(');
                         let rets: Vec<_> = returns
                             .iter()
                             .map(|p| {
                                 if p.ident.name.is_empty() {
-                                    self.format_type_annotation(&p.ty)
+                                    Self::format_type_annotation(&p.ty)
                                 } else {
                                     format!(
                                         "{} {}",
                                         p.ident.name,
-                                        self.format_type_annotation(&p.ty)
+                                        Self::format_type_annotation(&p.ty)
                                     )
                                 }
                             })

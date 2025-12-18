@@ -11,22 +11,7 @@ impl Parser {
     /// Parse function parameter
     fn parse_param(&mut self) -> Result<Param> {
         // Go syntax: name Type (no colon)
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected parameter name, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected parameter name".to_string(),
-                    span: Span::dummy(),
-                });
-            }
-        };
-
+        let (name, name_span) = self.parse_identifier("parameter")?;
         self.validate_identifier(&name, &name_span)?;
 
         let ty = self.parse_type()?;
@@ -49,22 +34,7 @@ impl Parser {
 
         loop {
             // Parse name
-            let (name, name_span) = match self.advance() {
-                Some((Token::Ident(name), span)) => (name, span),
-                Some((tok, span)) => {
-                    return Err(SoppoError::Parse {
-                        message: format!("Expected parameter name, found {:?}", tok),
-                        span,
-                    });
-                }
-                None => {
-                    return Err(SoppoError::Parse {
-                        message: "Expected parameter name".to_string(),
-                        span: Span::dummy(),
-                    });
-                }
-            };
-
+            let (name, name_span) = self.parse_identifier("parameter")?;
             self.validate_identifier(&name, &name_span)?;
             pending_names.push(Ident::new(name, name_span));
 
@@ -285,21 +255,7 @@ impl Parser {
 
         if !matches!(self.peek(), Some(Token::RBracket)) {
             loop {
-                let (name, span) = match self.advance() {
-                    Some((Token::Ident(name), span)) => (name, span),
-                    Some((tok, span)) => {
-                        return Err(SoppoError::Parse {
-                            message: format!("Expected generic parameter name, found {:?}", tok),
-                            span,
-                        });
-                    }
-                    None => {
-                        return Err(SoppoError::Parse {
-                            message: "Expected generic parameter name".to_string(),
-                            span: Span::dummy(),
-                        });
-                    }
-                };
+                let (name, span) = self.parse_identifier("generic parameter")?;
 
                 // Parse constraint (required in Go): T any, E comparable, etc.
                 let constraint = match self.advance() {
@@ -350,22 +306,7 @@ impl Parser {
             None
         };
 
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected function name, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected function name".to_string(),
-                    span: Span::dummy(),
-                });
-            }
-        };
-
+        let (name, name_span) = self.parse_identifier("function")?;
         self.validate_identifier(&name, &name_span)?;
 
         // Parse optional generics [T any, U any]
@@ -389,13 +330,7 @@ impl Parser {
             params,
             returns,
             body: body.clone(),
-            span: Span::with_bytes(
-                start_span.start,
-                body.span.end,
-                self.file,
-                start_span.byte_start,
-                body.span.byte_end,
-            ),
+            span: self.merge_spans(start_span, body.span),
             doc_comment,
         })
     }
@@ -405,22 +340,7 @@ impl Parser {
         let start_span = self.expect(Token::Type)?;
         let doc_comment = self.get_doc_comment(start_span.start.line);
 
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected type name, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected type name".to_string(),
-                    span: Span::dummy(),
-                });
-            }
-        };
-
+        let (name, name_span) = self.parse_identifier("type")?;
         self.validate_identifier(&name, &name_span)?;
 
         // Parse optional generics [T any, U any]
@@ -497,34 +417,14 @@ impl Parser {
             ident: Ident::new(name, name_span),
             generics,
             kind,
-            span: Span::with_bytes(
-                start_span.start,
-                end_span.end,
-                self.file,
-                start_span.byte_start,
-                end_span.byte_end,
-            ),
+            span: self.merge_spans(start_span, end_span),
             doc_comment,
         })
     }
 
     /// Parse enum variant
     fn parse_enum_variant(&mut self) -> Result<EnumVariant> {
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected variant name, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected variant name".to_string(),
-                    span: Span::dummy(),
-                });
-            }
-        };
+        let (name, name_span) = self.parse_identifier("variant")?;
 
         // Check for data: Single Type or Struct { fields }
         // Optional `struct` keyword before `{`
@@ -585,40 +485,12 @@ impl Parser {
         let mut names: Vec<Ident> = Vec::new();
 
         // Parse first name
-        let (first_name, first_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected field name, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected field name".to_string(),
-                    span: Span::dummy(),
-                });
-            }
-        };
+        let (first_name, first_span) = self.parse_identifier("field")?;
         names.push(Ident::new(first_name, first_span));
 
         // Parse additional comma-separated names
         while self.consume(&Token::Comma) {
-            let (name, span) = match self.advance() {
-                Some((Token::Ident(name), span)) => (name, span),
-                Some((tok, span)) => {
-                    return Err(SoppoError::Parse {
-                        message: format!("Expected field name after comma, found {:?}", tok),
-                        span,
-                    });
-                }
-                None => {
-                    return Err(SoppoError::Parse {
-                        message: "Expected field name after comma".to_string(),
-                        span: Span::dummy(),
-                    });
-                }
-            };
+            let (name, span) = self.parse_identifier("field")?;
             names.push(Ident::new(name, span));
         }
 
@@ -653,21 +525,7 @@ impl Parser {
 
     /// Parse interface method signature: MethodName(params) returns
     fn parse_interface_method(&mut self) -> Result<InterfaceMethod> {
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected method name, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected method name".to_string(),
-                    span: Span::dummy(),
-                });
-            }
-        };
+        let (name, name_span) = self.parse_identifier("method")?;
 
         // Parse parameters (supports grouped params: a, b int)
         self.expect(Token::LParen)?;
@@ -730,22 +588,7 @@ impl Parser {
     fn parse_var_decl(&mut self) -> Result<VarDecl> {
         let start = self.expect(Token::Var)?;
 
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected identifier, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected identifier".to_string(),
-                    span: self.peek_span(),
-                });
-            }
-        };
-
+        let (name, name_span) = self.parse_identifier("variable")?;
         self.validate_identifier(&name, &name_span)?;
 
         // Check if next token is = (type inference) or a type name
@@ -783,13 +626,7 @@ impl Parser {
             ident: Ident::new(name, name_span),
             ty,
             value,
-            span: Span::with_bytes(
-                start.start,
-                end_span.end,
-                self.file,
-                start.byte_start,
-                end_span.byte_end,
-            ),
+            span: self.merge_spans(start, end_span),
         })
     }
 
@@ -798,22 +635,7 @@ impl Parser {
         let start = self.expect(Token::Const)?;
         let doc_comment = self.get_doc_comment(start.start.line);
 
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected identifier, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected identifier".to_string(),
-                    span: self.peek_span(),
-                });
-            }
-        };
-
+        let (name, name_span) = self.parse_identifier("constant")?;
         self.validate_identifier(&name, &name_span)?;
 
         // Check if next token is = (type inference) or a type name
@@ -840,13 +662,7 @@ impl Parser {
         Ok(ConstDecl {
             ident: Ident::new(name, name_span),
             ty,
-            span: Span::with_bytes(
-                start.start,
-                value.span.end,
-                self.file,
-                start.byte_start,
-                value.span.byte_end,
-            ),
+            span: self.merge_spans(start, value.span),
             value,
             doc_comment,
         })
@@ -858,22 +674,7 @@ impl Parser {
         let start = self.peek_span();
         let doc_comment = self.get_doc_comment(doc_comment_line);
 
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected identifier, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected identifier".to_string(),
-                    span: self.peek_span(),
-                });
-            }
-        };
-
+        let (name, name_span) = self.parse_identifier("constant")?;
         self.validate_identifier(&name, &name_span)?;
 
         // Check if next token is = (type inference) or a type name
@@ -898,13 +699,7 @@ impl Parser {
         Ok(ConstDecl {
             ident: Ident::new(name, name_span),
             ty,
-            span: Span::with_bytes(
-                start.start,
-                value.span.end,
-                self.file,
-                start.byte_start,
-                value.span.byte_end,
-            ),
+            span: self.merge_spans(start, value.span),
             value,
             doc_comment,
         })
@@ -915,22 +710,7 @@ impl Parser {
     fn parse_const_in_group(&mut self) -> Result<ConstDecl> {
         let start = self.peek_span();
 
-        let (name, name_span) = match self.advance() {
-            Some((Token::Ident(name), span)) => (name, span),
-            Some((tok, span)) => {
-                return Err(SoppoError::Parse {
-                    message: format!("Expected identifier, found {:?}", tok),
-                    span,
-                });
-            }
-            None => {
-                return Err(SoppoError::Parse {
-                    message: "Expected identifier".to_string(),
-                    span: self.peek_span(),
-                });
-            }
-        };
-
+        let (name, name_span) = self.parse_identifier("constant")?;
         self.validate_identifier(&name, &name_span)?;
 
         // In grouped const, we might have:
@@ -980,13 +760,7 @@ impl Parser {
         Ok(ConstDecl {
             ident: Ident::new(name, name_span),
             ty,
-            span: Span::with_bytes(
-                start.start,
-                value.span.end,
-                self.file,
-                start.byte_start,
-                value.span.byte_end,
-            ),
+            span: self.merge_spans(start, value.span),
             value,
             doc_comment: None, // Grouped consts don't have individual doc comments
         })
@@ -1061,21 +835,7 @@ impl Parser {
         // Parse package declaration
         let package = if self.check(&Token::Package) {
             self.advance(); // consume 'package'
-            let (name, span) = match self.advance() {
-                Some((Token::Ident(name), span)) => (name, span),
-                Some((tok, span)) => {
-                    return Err(SoppoError::Parse {
-                        message: format!("Expected package name, found {:?}", tok),
-                        span,
-                    });
-                }
-                None => {
-                    return Err(SoppoError::Parse {
-                        message: "Expected package name".to_string(),
-                        span: Span::dummy(),
-                    });
-                }
-            };
+            let (name, span) = self.parse_identifier("package")?;
             // Skip terminators after package declaration
             self.skip_terminators();
             Ident { name, span }

@@ -55,13 +55,7 @@ impl Parser {
                 op,
                 operand: Box::new(operand),
             },
-            span: Span::with_bytes(
-                start_span.start,
-                end_span.end,
-                self.file,
-                start_span.byte_start,
-                end_span.byte_end,
-            ),
+            span: self.merge_spans(start_span, end_span),
         })
     }
 
@@ -80,14 +74,9 @@ impl Parser {
 
             let right = self.parse_binary(prec + 1)?;
 
+            let merged_span = self.merge_spans(left.span, right.span);
             left = Expr {
-                span: Span::with_bytes(
-                    left.span.start,
-                    right.span.end,
-                    self.file,
-                    left.span.byte_start,
-                    right.span.byte_end,
-                ),
+                span: merged_span,
                 kind: ExprKind::Binary {
                     op,
                     left: Box::new(left),
@@ -192,47 +181,11 @@ impl Parser {
                         if matches!(self.peek(), Some(Token::LParen)) {
                             // This is type args + call: expr[T](args)
                             self.advance(); // consume (
-                            let mut args = Vec::new();
-
-                            if !matches!(self.peek(), Some(Token::RParen)) {
-                                loop {
-                                    // Check for named argument: Ident followed by Colon
-                                    let (name, value) = if let Some(Token::Ident(name)) =
-                                        self.peek()
-                                        && matches!(self.peek_at(1), Some(Token::Colon))
-                                    {
-                                        let name = name.clone();
-                                        let (_, name_span) = self.advance().unwrap(); // consume identifier
-                                        self.advance(); // consume colon
-                                        let value = self.parse_expr()?;
-                                        (Some((name, name_span)), value)
-                                    } else {
-                                        // Positional argument
-                                        // Note: We allow positional after named because variadic params
-                                        // are always positional at the end. The type checker validates
-                                        // that non-variadic positional args don't follow named args.
-                                        (None, self.parse_expr()?)
-                                    };
-                                    // Check for spread: expr...
-                                    let spread = self.consume(&Token::DotDotDot);
-                                    args.push((name, value, spread));
-
-                                    if !self.consume(&Token::Comma) {
-                                        break;
-                                    }
-                                }
-                            }
-
+                            let args = self.parse_argument_list()?;
                             let end_span = self.expect(Token::RParen)?;
 
                             expr = Expr {
-                                span: Span::with_bytes(
-                                    expr.span.start,
-                                    end_span.end,
-                                    self.file,
-                                    expr.span.byte_start,
-                                    end_span.byte_end,
-                                ),
+                                span: self.merge_spans(expr.span, end_span),
                                 kind: ExprKind::Call {
                                     func: Box::new(expr),
                                     type_args,
@@ -289,13 +242,7 @@ impl Parser {
                         {
                             // This is a type instantiation: expr[types] -> treat as call with no args
                             expr = Expr {
-                                span: Span::with_bytes(
-                                    expr.span.start,
-                                    bracket_end_span.end,
-                                    self.file,
-                                    expr.span.byte_start,
-                                    bracket_end_span.byte_end,
-                                ),
+                                span: self.merge_spans(expr.span, bracket_end_span),
                                 kind: ExprKind::Call {
                                     func: Box::new(expr),
                                     type_args,
@@ -339,13 +286,7 @@ impl Parser {
                         let end_span = self.expect(Token::RBracket)?;
 
                         expr = Expr {
-                            span: Span::with_bytes(
-                                expr.span.start,
-                                end_span.end,
-                                self.file,
-                                expr.span.byte_start,
-                                end_span.byte_end,
-                            ),
+                            span: self.merge_spans(expr.span, end_span),
                             kind: ExprKind::Slice {
                                 expr: Box::new(expr),
                                 low,
@@ -358,13 +299,7 @@ impl Parser {
                         let end_span = self.expect(Token::RBracket)?;
 
                         expr = Expr {
-                            span: Span::with_bytes(
-                                expr.span.start,
-                                end_span.end,
-                                self.file,
-                                expr.span.byte_start,
-                                end_span.byte_end,
-                            ),
+                            span: self.merge_spans(expr.span, end_span),
                             kind: ExprKind::Index {
                                 expr: Box::new(expr),
                                 index: low.expect("index expression must have a value"),
@@ -376,46 +311,11 @@ impl Parser {
                 // Function call without type args: expr(args)
                 Some(Token::LParen) => {
                     self.advance();
-                    let mut args = Vec::new();
-
-                    if !matches!(self.peek(), Some(Token::RParen)) {
-                        loop {
-                            // Check for named argument: Ident followed by Colon
-                            let (name, value) = if let Some(Token::Ident(name)) = self.peek()
-                                && matches!(self.peek_at(1), Some(Token::Colon))
-                            {
-                                let name = name.clone();
-                                let (_, name_span) = self.advance().unwrap(); // consume identifier
-                                self.advance(); // consume colon
-                                let value = self.parse_expr()?;
-                                (Some((name, name_span)), value)
-                            } else {
-                                // Positional argument
-                                // Note: We allow positional after named because variadic params
-                                // are always positional at the end. The type checker validates
-                                // that non-variadic positional args don't follow named args.
-                                (None, self.parse_expr()?)
-                            };
-                            // Check for spread: expr...
-                            let spread = self.consume(&Token::DotDotDot);
-                            args.push((name, value, spread));
-
-                            if !self.consume(&Token::Comma) {
-                                break;
-                            }
-                        }
-                    }
-
+                    let args = self.parse_argument_list()?;
                     let end_span = self.expect(Token::RParen)?;
 
                     expr = Expr {
-                        span: Span::with_bytes(
-                            expr.span.start,
-                            end_span.end,
-                            self.file,
-                            expr.span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(expr.span, end_span),
                         kind: ExprKind::Call {
                             func: Box::new(expr),
                             type_args: vec![],
@@ -454,13 +354,7 @@ impl Parser {
                             let end_span = self.expect(Token::RParen)?;
 
                             expr = Expr {
-                                span: Span::with_bytes(
-                                    expr.span.start,
-                                    end_span.end,
-                                    self.file,
-                                    expr.span.byte_start,
-                                    end_span.byte_end,
-                                ),
+                                span: self.merge_spans(expr.span, end_span),
                                 kind: ExprKind::NilAssert {
                                     expr: Box::new(expr),
                                 },
@@ -473,13 +367,7 @@ impl Parser {
                         let end_span = self.expect(Token::RParen)?;
 
                         expr = Expr {
-                            span: Span::with_bytes(
-                                expr.span.start,
-                                end_span.end,
-                                self.file,
-                                expr.span.byte_start,
-                                end_span.byte_end,
-                            ),
+                            span: self.merge_spans(expr.span, end_span),
                             kind: ExprKind::TypeAssert {
                                 expr: Box::new(expr),
                                 ty,
@@ -488,30 +376,10 @@ impl Parser {
                         continue;
                     }
 
-                    let (field, field_span) = match self.advance() {
-                        Some((Token::Ident(name), span)) => (name, span),
-                        Some((tok, span)) => {
-                            return Err(SoppoError::Parse {
-                                message: format!("Expected field name, found {:?}", tok),
-                                span,
-                            });
-                        }
-                        None => {
-                            return Err(SoppoError::Parse {
-                                message: "Expected field name".to_string(),
-                                span: Span::dummy(),
-                            });
-                        }
-                    };
+                    let (field, field_span) = self.parse_identifier("field")?;
 
                     expr = Expr {
-                        span: Span::with_bytes(
-                            expr.span.start,
-                            field_span.end,
-                            self.file,
-                            expr.span.byte_start,
-                            field_span.byte_end,
-                        ),
+                        span: self.merge_spans(expr.span, field_span),
                         kind: ExprKind::Field {
                             expr: Box::new(expr),
                             field,
@@ -615,13 +483,7 @@ impl Parser {
                         let end_span = self.expect(Token::RBrace)?;
 
                         expr = Expr {
-                            span: Span::with_bytes(
-                                expr.span.start,
-                                end_span.end,
-                                self.file,
-                                expr.span.byte_start,
-                                end_span.byte_end,
-                            ),
+                            span: self.merge_spans(expr.span, end_span),
                             kind: ExprKind::StructLit {
                                 ty: Some(TypeAnnotation {
                                     name: type_name,
@@ -761,13 +623,7 @@ impl Parser {
                         ty: map_ty,
                         entries,
                     },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(span, end_span),
                 })
             }
 
@@ -797,13 +653,7 @@ impl Parser {
                         type_args: vec![ty],
                         args,
                     },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(span, end_span),
                 })
             }
 
@@ -822,13 +672,7 @@ impl Parser {
                         type_args: vec![ty],
                         args: vec![], // new has no runtime args
                     },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(span, end_span),
                 })
             }
 
@@ -847,13 +691,7 @@ impl Parser {
                 let end_span = self.expect(Token::RParen)?;
                 Ok(Expr {
                     kind: ExprKind::Paren(Box::new(inner)),
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(span, end_span),
                 })
             }
 
@@ -894,13 +732,7 @@ impl Parser {
                             ty: Some(slice_ty),
                             elements,
                         },
-                        span: Span::with_bytes(
-                            span.start,
-                            end_span.end,
-                            self.file,
-                            span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(span, end_span),
                     })
                 } else {
                     // [size]type{elements} - array literal
@@ -933,13 +765,7 @@ impl Parser {
                             ty: Some(ty),
                             elements,
                         },
-                        span: Span::with_bytes(
-                            span.start,
-                            end_span.end,
-                            self.file,
-                            span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(span, end_span),
                     })
                 }
             }
@@ -1011,13 +837,7 @@ impl Parser {
 
                 Ok(Expr {
                     kind: ExprKind::AnonStructLit { field_defs, fields },
-                    span: Span::with_bytes(
-                        span.start,
-                        end_span.end,
-                        self.file,
-                        span.byte_start,
-                        end_span.byte_end,
-                    ),
+                    span: self.merge_spans(span, end_span),
                 })
             }
 
@@ -1029,21 +849,7 @@ impl Parser {
                 let mut params = Vec::new();
                 if !matches!(self.peek(), Some(Token::RParen)) {
                     loop {
-                        let (param_name, param_span) = match self.advance() {
-                            Some((Token::Ident(name), span)) => (name, span),
-                            Some((tok, span)) => {
-                                return Err(SoppoError::Parse {
-                                    message: format!("Expected parameter name, found {:?}", tok),
-                                    span,
-                                });
-                            }
-                            None => {
-                                return Err(SoppoError::Parse {
-                                    message: "Unexpected end of input".to_string(),
-                                    span: Span::dummy(),
-                                });
-                            }
-                        };
+                        let (param_name, param_span) = self.parse_identifier("parameter")?;
 
                         let param_ty = self.parse_type()?;
                         params.push(Param {
@@ -1070,13 +876,7 @@ impl Parser {
                         returns,
                         body: body.clone(),
                     },
-                    span: Span::with_bytes(
-                        span.start,
-                        body.span.end,
-                        self.file,
-                        span.byte_start,
-                        body.span.byte_end,
-                    ),
+                    span: self.merge_spans(span, body.span),
                 })
             }
 
@@ -1143,13 +943,7 @@ impl Parser {
                             ty: None, // Type inferred from context
                             fields,
                         },
-                        span: Span::with_bytes(
-                            span.start,
-                            end_span.end,
-                            self.file,
-                            span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(span, end_span),
                     })
                 } else {
                     // Parse as implicit array literal: {expr, expr, ...}
@@ -1174,13 +968,7 @@ impl Parser {
                             ty: None, // Type inferred from context
                             elements,
                         },
-                        span: Span::with_bytes(
-                            span.start,
-                            end_span.end,
-                            self.file,
-                            span.byte_start,
-                            end_span.byte_end,
-                        ),
+                        span: self.merge_spans(span, end_span),
                     })
                 }
             }
