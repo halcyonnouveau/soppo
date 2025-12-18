@@ -1411,7 +1411,7 @@ dependencies = [
 
 [[package]]
 name = "soppo"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "clap",
  "criterion",
@@ -1433,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "soppo-lsp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "futures",
  "miette",
