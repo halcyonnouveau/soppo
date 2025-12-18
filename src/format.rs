@@ -1,9 +1,9 @@
 use crate::error::SoppoError;
 use crate::syntax::{
     Arm, AssignOp, BinOp, Block, Comment, ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field,
-    FieldPattern, File, FileId, FuncDecl, Generic, Import, InterfaceMethod, Literal, Param, Parser,
-    Pattern, PatternKind, SelectCase, SelectCaseKind, Stmt, StmtKind, StringPart, TypeAnnotation,
-    TypeDecl, TypeKind, UnaryOp,
+    FieldPattern, File, FileId, FuncDecl, Generic, Import, IntFormat, InterfaceMethod, Literal,
+    Param, Parser, Pattern, PatternKind, SelectCase, SelectCaseKind, Stmt, StmtKind, StringPart,
+    TypeAnnotation, TypeDecl, TypeKind, UnaryOp,
 };
 
 /// Formatter for emitting formatted Soppo code
@@ -181,7 +181,14 @@ impl Formatter {
             } else {
                 self.emit_line("import (");
                 self.indent();
+                let mut prev_line: Option<usize> = None;
                 for import in &file.imports {
+                    // Preserve blank lines between import groups
+                    if let Some(prev) = prev_line
+                        && import.span.start.line > prev + 1
+                    {
+                        self.output.push('\n');
+                    }
                     self.emit_comments_before(import.span.start.line);
                     self.emit_indent();
                     if let Some(alias) = &import.alias {
@@ -191,6 +198,7 @@ impl Formatter {
                     }
                     self.emit_trailing_comment(import.span.start.line);
                     self.output.push('\n');
+                    prev_line = Some(import.span.start.line);
                 }
                 self.dedent();
                 self.emit_line(")");
@@ -335,8 +343,10 @@ impl Formatter {
             TypeKind::Struct { fields } => {
                 self.emit(" struct {\n");
                 self.indent();
+                // Calculate alignment widths
+                let (max_name_len, max_type_len) = self.calc_field_alignment(fields);
                 for field in fields {
-                    self.format_field(field);
+                    self.format_field_aligned(field, max_name_len, max_type_len);
                 }
                 self.dedent();
                 self.emit_line("}");
@@ -377,8 +387,9 @@ impl Formatter {
                 self.emit_indent();
                 self.emit(&format!("{} struct {{\n", ident.name));
                 self.indent();
+                let (max_name_len, max_type_len) = self.calc_field_alignment(fields);
                 for field in fields {
-                    self.format_field(field);
+                    self.format_field_aligned(field, max_name_len, max_type_len);
                 }
                 self.dedent();
                 self.emit_line("}");
@@ -386,14 +397,58 @@ impl Formatter {
         }
     }
 
-    fn format_field(&mut self, field: &Field) {
+    /// Calculate alignment widths for a slice of fields
+    fn calc_field_alignment(&self, fields: &[Field]) -> (usize, usize) {
+        let mut max_name_len = 0;
+        let mut max_type_len = 0;
+        for field in fields {
+            max_name_len = max_name_len.max(field.ident.name.len());
+            let type_str = self.format_type_annotation(&field.ty);
+            max_type_len = max_type_len.max(type_str.len());
+        }
+        (max_name_len, max_type_len)
+    }
+
+    /// Format a field with alignment (used for struct fields)
+    fn format_field_aligned(&mut self, field: &Field, max_name_len: usize, max_type_len: usize) {
+        let line = field.ident.span.start.line;
+        self.emit_comments_before(line);
         self.emit_indent();
-        self.emit(&field.ident.name);
-        self.emit(" ");
-        self.emit(&self.format_type_annotation(&field.ty));
+
+        let name = &field.ident.name;
+        let type_str = self.format_type_annotation(&field.ty);
+
+        // Pad name to align types
+        self.emit(name);
+        if max_name_len > 0 {
+            let name_padding = max_name_len - name.len() + 1;
+            self.emit(&" ".repeat(name_padding));
+        } else {
+            self.emit(" ");
+        }
+
+        // Emit type
+        self.emit(&type_str);
+
+        // Check if this field has a trailing comment
+        let has_trailing_comment = self.comment_idx < self.comments.len()
+            && self.comments[self.comment_idx].span.start.line == line
+            && !self.comments[self.comment_idx].text.starts_with('\n');
+
+        // Pad type to align tags/comments (if needed)
+        if (field.tag.is_some() || has_trailing_comment)
+            && max_type_len > 0
+            && type_str.len() < max_type_len
+        {
+            let type_padding = max_type_len - type_str.len();
+            self.emit(&" ".repeat(type_padding));
+        }
+
         if let Some(tag) = &field.tag {
             self.emit(&format!(" `{}`", tag));
         }
+
+        self.emit_trailing_comment(line);
         self.output.push('\n');
     }
 
@@ -462,18 +517,7 @@ impl Formatter {
                 self.emit(&self.format_type_annotation(&f.returns[0].ty));
             } else {
                 self.emit("(");
-                let returns: Vec<_> = f
-                    .returns
-                    .iter()
-                    .map(|p| {
-                        if p.ident.name.is_empty() {
-                            self.format_type_annotation(&p.ty)
-                        } else {
-                            format!("{} {}", p.ident.name, self.format_type_annotation(&p.ty))
-                        }
-                    })
-                    .collect();
-                self.emit(&returns.join(", "));
+                self.emit(&self.format_params_grouped(&f.returns, true));
                 self.emit(")");
             }
         }
@@ -487,9 +531,48 @@ impl Formatter {
     }
 
     fn format_params(&self, params: &[Param]) -> String {
-        params
-            .iter()
-            .map(|p| format!("{} {}", p.ident.name, self.format_type_annotation(&p.ty)))
+        self.format_params_grouped(params, false)
+    }
+
+    /// Format parameters with type grouping (a, b int instead of a int, b int)
+    /// If `allow_unnamed` is true, params without names just emit the type
+    fn format_params_grouped(&self, params: &[Param], allow_unnamed: bool) -> String {
+        if params.is_empty() {
+            return String::new();
+        }
+
+        // Group consecutive parameters with the same type
+        let mut groups: Vec<(Vec<&str>, String)> = Vec::new();
+
+        for param in params {
+            let ty_str = self.format_type_annotation(&param.ty);
+            let name = &param.ident.name;
+
+            // Unnamed parameter (just type)
+            if name.is_empty() && allow_unnamed {
+                groups.push((vec![], ty_str));
+                continue;
+            }
+
+            if let Some((names, last_ty)) = groups.last_mut()
+                && *last_ty == ty_str
+                && !names.is_empty()
+            {
+                names.push(name);
+                continue;
+            }
+            groups.push((vec![name.as_str()], ty_str));
+        }
+
+        groups
+            .into_iter()
+            .map(|(names, ty)| {
+                if names.is_empty() {
+                    ty
+                } else {
+                    format!("{} {}", names.join(", "), ty)
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -532,11 +615,41 @@ impl Formatter {
     fn format_block_contents(&mut self, block: &Block) {
         let mut prev_end_line = 0;
         for stmt in &block.stmts {
-            // Preserve blank lines between statements
-            if prev_end_line > 0 && stmt.span.start.line > prev_end_line + 1 {
+            // Find the first comment line before this statement (if any)
+            let first_comment_line = if self.comment_idx < self.comments.len()
+                && self.comments[self.comment_idx].span.start.line < stmt.span.start.line
+            {
+                Some(self.comments[self.comment_idx].span.start.line)
+            } else {
+                None
+            };
+
+            // Find the last comment's end line before this statement
+            let mut last_comment_end_line: Option<usize> = None;
+            for i in self.comment_idx..self.comments.len() {
+                let comment = &self.comments[i];
+                if comment.span.start.line >= stmt.span.start.line {
+                    break;
+                }
+                last_comment_end_line = Some(comment.span.end.line);
+            }
+
+            // Check for blank line before first comment (or before statement if no comments)
+            let first_line = first_comment_line.unwrap_or(stmt.span.start.line);
+            if prev_end_line > 0 && first_line > prev_end_line + 1 {
                 self.output.push('\n');
             }
+
+            // Emit comments
             self.emit_comments_before(stmt.span.start.line);
+
+            // Check for blank line after last comment (before statement)
+            if let Some(last_end) = last_comment_end_line
+                && stmt.span.start.line > last_end + 1
+            {
+                self.output.push('\n');
+            }
+
             self.format_stmt(stmt);
             prev_end_line = stmt.span.end.line;
         }
@@ -719,23 +832,7 @@ impl Formatter {
                 else_block,
             } => {
                 self.emit_indent();
-                self.emit("if ");
-                if let Some(i) = init {
-                    self.emit(&self.format_stmt_inline(i));
-                    self.emit("; ");
-                }
-                self.emit(&self.format_expr(condition));
-                self.emit(" {\n");
-                self.indent();
-                self.format_block_contents(then_block);
-                self.dedent();
-                if let Some(else_b) = else_block {
-                    self.emit_line("} else {");
-                    self.indent();
-                    self.format_block_contents(else_b);
-                    self.dedent();
-                }
-                self.emit_line("}");
+                self.format_if_chain(init.as_deref(), condition, then_block, else_block.as_ref());
             }
             StmtKind::Return { values } => {
                 self.emit_indent();
@@ -834,14 +931,90 @@ impl Formatter {
         }
     }
 
+    /// Format an if statement with proper else-if chain handling
+    fn format_if_chain(
+        &mut self,
+        init: Option<&Stmt>,
+        condition: &Expr,
+        then_block: &Block,
+        else_block: Option<&Block>,
+    ) {
+        self.emit("if ");
+        if let Some(i) = init {
+            self.emit(&self.format_stmt_inline(i));
+            self.emit("; ");
+        }
+        self.emit(&self.format_expr(condition));
+        self.emit(" {\n");
+        self.indent();
+        self.format_block_contents(then_block);
+        self.dedent();
+
+        if let Some(else_b) = else_block {
+            // Check if else block contains a single if statement (else-if chain)
+            if else_b.stmts.len() == 1
+                && let StmtKind::If {
+                    init: else_init,
+                    condition: else_cond,
+                    then_block: else_then,
+                    else_block: else_else,
+                } = &else_b.stmts[0].kind
+            {
+                // Format as else if (} else if on same line)
+                self.emit_indent();
+                self.emit("} else ");
+                self.format_if_chain(
+                    else_init.as_deref(),
+                    else_cond,
+                    else_then,
+                    else_else.as_ref(),
+                );
+                return;
+            }
+
+            // Regular else block
+            self.emit_line("} else {");
+            self.indent();
+            self.format_block_contents(else_b);
+            self.dedent();
+        }
+        self.emit_line("}");
+    }
+
     /// Format a statement without indentation or newline (for inline use)
     fn format_stmt_inline(&self, stmt: &Stmt) -> String {
         match &stmt.kind {
             StmtKind::Decl { ident, value } => {
                 format!("{} := {}", ident.name, self.format_expr(value))
             }
+            StmtKind::MultiDecl { ident, values } => {
+                let names = ident
+                    .iter()
+                    .map(|i| i.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let vals = values
+                    .iter()
+                    .map(|v| self.format_expr(v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} := {}", names, vals)
+            }
             StmtKind::Assign { target, value } => {
                 format!("{} = {}", self.format_expr(target), self.format_expr(value))
+            }
+            StmtKind::MultiAssign { targets, values } => {
+                let tgts = targets
+                    .iter()
+                    .map(|t| self.format_expr(t))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let vals = values
+                    .iter()
+                    .map(|v| self.format_expr(v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} = {}", tgts, vals)
             }
             StmtKind::IncDec { target, is_inc } => {
                 format!(
@@ -919,7 +1092,12 @@ impl Formatter {
 
     fn format_literal(&self, lit: &Literal) -> String {
         match lit {
-            Literal::Integer(n) => n.to_string(),
+            Literal::Integer(n, fmt) => match fmt {
+                IntFormat::Decimal => n.to_string(),
+                IntFormat::Octal => format!("0o{:o}", n),
+                IntFormat::Hex => format!("0x{:x}", n),
+                IntFormat::Binary => format!("0b{:b}", n),
+            },
             Literal::String(s) => format!("\"{}\"", s),
             Literal::Bool(b) => b.to_string(),
             Literal::Nil => "nil".to_string(),
@@ -970,7 +1148,12 @@ impl Formatter {
 
     fn format_expr(&self, expr: &Expr) -> String {
         match &expr.kind {
-            ExprKind::Integer(n) => n.to_string(),
+            ExprKind::Integer(n, fmt) => match fmt {
+                IntFormat::Decimal => n.to_string(),
+                IntFormat::Octal => format!("0o{:o}", n),
+                IntFormat::Hex => format!("0x{:x}", n),
+                IntFormat::Binary => format!("0b{:b}", n),
+            },
             ExprKind::Float(f) => {
                 let s = f.to_string();
                 if s.contains('.') {
@@ -1182,6 +1365,9 @@ impl Formatter {
             ExprKind::Block(_) => {
                 // Block expressions are rare and complex to format inline
                 "{ ... }".to_string()
+            }
+            ExprKind::Paren(inner) => {
+                format!("({})", self.format_expr(inner))
             }
         }
     }

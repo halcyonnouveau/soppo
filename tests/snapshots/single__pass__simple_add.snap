@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -8,13 +8,13 @@ package main
 import "fmt"
 
 func add(x int, y int) int {
-    return (x + y)
+    return x + y
 }
 
 func counter() int {
     x := 0
     x = 10
-    x = (x + 5)
+    x = x + 5
     return x
 }
 

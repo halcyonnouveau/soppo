@@ -1,7 +1,7 @@
 use super::Codegen;
 use crate::syntax::{
-    Block, ConstDecl, EnumVariant, FuncDecl, Literal, Pattern, PatternKind, TypeDecl, TypeKind,
-    VarDecl,
+    Block, ConstDecl, EnumVariant, FuncDecl, IntFormat, Literal, Pattern, PatternKind, TypeDecl,
+    TypeKind, VarDecl,
 };
 
 impl Codegen {
@@ -538,7 +538,12 @@ impl Codegen {
                 }
             }
             PatternKind::Literal(lit) => match lit {
-                Literal::Integer(n) => self.emit(n.to_string()),
+                Literal::Integer(n, fmt) => match fmt {
+                    IntFormat::Decimal => self.emit(n.to_string()),
+                    IntFormat::Octal => self.emit(format!("0o{:o}", n)),
+                    IntFormat::Hex => self.emit(format!("0x{:x}", n)),
+                    IntFormat::Binary => self.emit(format!("0b{:b}", n)),
+                },
                 Literal::String(s) => self.emit(format!("\"{}\"", s)),
                 Literal::Bool(b) => self.emit(b.to_string()),
                 Literal::Nil => self.emit("nil"),
@@ -612,7 +617,7 @@ mod tests {
 
         let output = codegen.output();
         assert!(output.contains("func add(x int, y int) int"));
-        assert!(output.contains("return (x + y)"));
+        assert!(output.contains("return x + y"));
     }
 
     #[test]

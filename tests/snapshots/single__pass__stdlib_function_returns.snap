@@ -19,25 +19,25 @@ import "time"
 func main() {
     // errors.New returns error
     err := errors.New("test error")
-    if (err != nil) {
+    if err != nil {
         _ = err.Error()
     }
 
     // fmt.Errorf returns error
     err2 := fmt.Errorf("formatted: %s", "test")
-    if (err2 != nil) {
+    if err2 != nil {
         _ = err2.Error()
     }
 
     // context.Background returns context.Context (interface, needs nil check)
     ctx := context.Background()
-    if (ctx != nil) {
+    if ctx != nil {
         _ = ctx.Done()
     }
 
     // context.TODO returns context.Context
     ctx2 := context.TODO()
-    if (ctx2 != nil) {
+    if ctx2 != nil {
         _ = ctx2.Done()
     }
 

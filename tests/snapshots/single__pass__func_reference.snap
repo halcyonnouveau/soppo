@@ -11,12 +11,12 @@ import "sort"
 
 // A simple callback function
 func double(x int) int {
-    return (x * 2)
+    return x * 2
 }
 
 // Another callback
 func triple(x int) int {
-    return (x * 3)
+    return x * 3
 }
 
 // Higher-order function that takes a function reference
@@ -30,7 +30,7 @@ func applyToAll(nums []int, f func(int) int) []int {
 
 // Comparator for sort.Slice
 func compareDesc(a int, b int) bool {
-    return (a > b)
+    return a > b
 }
 
 func main() {
@@ -46,7 +46,7 @@ func main() {
     // Pass function reference to Go stdlib (sort.Slice uses func(i, j int) bool)
     data := []int{3, 1, 4, 1, 5, 9, 2, 6}
     sort.Slice(data, func(i int, j int) bool {
-        return (data[i] < data[j])
+        return data[i] < data[j]
     })
     fmt.Println(data)
 }

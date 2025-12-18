@@ -1,5 +1,6 @@
 use logos::Logos;
 
+use super::ast::{IntFormat, IntLit};
 use super::source::{FileId, LineColumn, Span};
 
 #[derive(Logos, Debug, Clone, PartialEq)]
@@ -76,7 +77,7 @@ pub enum Token {
 
     // Integer literals: decimal, hex (0x), binary (0b), octal (0o or leading 0)
     #[regex(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|0[0-7]+|[0-9]+", priority = 3, callback = parse_integer)]
-    Integer(i64),
+    Integer(IntLit),
 
     // String literals with escape sequences: \n, \t, \033 (octal), \x1b (hex), \uXXXX, \UXXXXXXXX
     #[regex(r#""([^"\\]|\\["\\bnfrt]|\\[0-7]{1,3}|\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\U[0-9a-fA-F]{8})*""#, |lex| {
@@ -321,19 +322,35 @@ impl<'a> Lexer<'a> {
 }
 
 /// Parse integer literals with various bases (decimal, hex, binary, octal)
-fn parse_integer(lex: &logos::Lexer<Token>) -> Option<i64> {
+fn parse_integer(lex: &logos::Lexer<Token>) -> Option<IntLit> {
     let s = lex.slice();
     if s.starts_with("0x") || s.starts_with("0X") {
-        i64::from_str_radix(&s[2..], 16).ok()
+        Some(IntLit {
+            value: i64::from_str_radix(&s[2..], 16).ok()?,
+            format: IntFormat::Hex,
+        })
     } else if s.starts_with("0b") || s.starts_with("0B") {
-        i64::from_str_radix(&s[2..], 2).ok()
+        Some(IntLit {
+            value: i64::from_str_radix(&s[2..], 2).ok()?,
+            format: IntFormat::Binary,
+        })
     } else if s.starts_with("0o") || s.starts_with("0O") {
-        i64::from_str_radix(&s[2..], 8).ok()
+        Some(IntLit {
+            value: i64::from_str_radix(&s[2..], 8).ok()?,
+            format: IntFormat::Octal,
+        })
     } else if s.starts_with('0') && s.len() > 1 && s.chars().all(|c| c.is_ascii_digit()) {
         // Legacy octal: 0755 (but not 0 itself or 09 which would be invalid)
-        i64::from_str_radix(&s[1..], 8).ok()
+        // Note: We still output as 0o format for consistency
+        Some(IntLit {
+            value: i64::from_str_radix(&s[1..], 8).ok()?,
+            format: IntFormat::Octal,
+        })
     } else {
-        s.parse::<i64>().ok()
+        Some(IntLit {
+            value: s.parse::<i64>().ok()?,
+            format: IntFormat::Decimal,
+        })
     }
 }
 
@@ -363,6 +380,8 @@ mod tests {
 
     #[test]
     fn test_identifiers_and_literals() {
+        use crate::syntax::ast::IntFormat;
+
         let source = r#"foo 42 "hello""#;
         let mut lexer = Lexer::new(source, FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
@@ -371,7 +390,10 @@ mod tests {
             tokens,
             vec![
                 Token::Ident("foo".to_string()),
-                Token::Integer(42),
+                Token::Integer(IntLit {
+                    value: 42,
+                    format: IntFormat::Decimal
+                }),
                 Token::String("hello".to_string())
             ]
         );
@@ -425,6 +447,8 @@ mod tests {
 
     #[test]
     fn test_semicolon() {
+        use crate::syntax::ast::IntFormat;
+
         let source = "x = 1; y = 2";
         let mut lexer = Lexer::new(source, FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
@@ -434,49 +458,118 @@ mod tests {
             vec![
                 Token::Ident("x".to_string()),
                 Token::Assign,
-                Token::Integer(1),
+                Token::Integer(IntLit {
+                    value: 1,
+                    format: IntFormat::Decimal
+                }),
                 Token::Semicolon,
                 Token::Ident("y".to_string()),
                 Token::Assign,
-                Token::Integer(2)
+                Token::Integer(IntLit {
+                    value: 2,
+                    format: IntFormat::Decimal
+                })
             ]
         );
     }
 
     #[test]
     fn test_integer_literals() {
+        use crate::syntax::ast::IntFormat;
+
         // Decimal
         let mut lexer = Lexer::new("42", FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
-        assert_eq!(tokens, vec![Token::Integer(42)]);
+        assert_eq!(
+            tokens,
+            vec![Token::Integer(IntLit {
+                value: 42,
+                format: IntFormat::Decimal
+            })]
+        );
 
         // Hex
         let mut lexer = Lexer::new("0xFF 0x1a 0X10", FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
         assert_eq!(
             tokens,
-            vec![Token::Integer(255), Token::Integer(26), Token::Integer(16)]
+            vec![
+                Token::Integer(IntLit {
+                    value: 255,
+                    format: IntFormat::Hex
+                }),
+                Token::Integer(IntLit {
+                    value: 26,
+                    format: IntFormat::Hex
+                }),
+                Token::Integer(IntLit {
+                    value: 16,
+                    format: IntFormat::Hex
+                })
+            ]
         );
 
         // Binary
         let mut lexer = Lexer::new("0b1010 0B11", FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
-        assert_eq!(tokens, vec![Token::Integer(10), Token::Integer(3)]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Integer(IntLit {
+                    value: 10,
+                    format: IntFormat::Binary
+                }),
+                Token::Integer(IntLit {
+                    value: 3,
+                    format: IntFormat::Binary
+                })
+            ]
+        );
 
         // Octal (new style 0o)
         let mut lexer = Lexer::new("0o755 0O644", FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
-        assert_eq!(tokens, vec![Token::Integer(493), Token::Integer(420)]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Integer(IntLit {
+                    value: 493,
+                    format: IntFormat::Octal
+                }),
+                Token::Integer(IntLit {
+                    value: 420,
+                    format: IntFormat::Octal
+                })
+            ]
+        );
 
         // Octal (legacy style leading 0)
         let mut lexer = Lexer::new("0755 0644", FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
-        assert_eq!(tokens, vec![Token::Integer(493), Token::Integer(420)]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Integer(IntLit {
+                    value: 493,
+                    format: IntFormat::Octal
+                }),
+                Token::Integer(IntLit {
+                    value: 420,
+                    format: IntFormat::Octal
+                })
+            ]
+        );
 
         // Zero itself should still work
         let mut lexer = Lexer::new("0", FileId(0));
         let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
-        assert_eq!(tokens, vec![Token::Integer(0)]);
+        assert_eq!(
+            tokens,
+            vec![Token::Integer(IntLit {
+                value: 0,
+                format: IntFormat::Decimal
+            })]
+        );
     }
 
     #[test]

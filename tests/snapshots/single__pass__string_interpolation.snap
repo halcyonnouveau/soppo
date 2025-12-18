@@ -15,7 +15,7 @@ func main() {
     // Multiple interpolations
     x := 10
     y := 20
-    fmt.Println(fmt.Sprintf("x=%v, y=%v, sum=%v", x, y, (x + y)))
+    fmt.Println(fmt.Sprintf("x=%v, y=%v, sum=%v", x, y, x + y))
 
     // Interpolation with method calls
     nums := []int{1, 2, 3}
@@ -24,7 +24,7 @@ func main() {
     // Nested expressions
     a := 5
     b := 3
-    fmt.Println(fmt.Sprintf("Result: %v", ((a * b) + 2)))
+    fmt.Println(fmt.Sprintf("Result: %v", a * b + 2))
 
     // Escaped braces (double braces)
     fmt.Println("Use {name} for interpolation")

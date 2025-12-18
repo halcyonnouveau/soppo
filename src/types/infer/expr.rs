@@ -12,7 +12,7 @@ impl Infer {
     /// Infer the type of an expression
     pub fn infer_expr(&mut self, expr: &Expr) -> Result<Type> {
         match &expr.kind {
-            ExprKind::Integer(_) => Ok(Type::simple("int")),
+            ExprKind::Integer(_, _) => Ok(Type::simple("int")),
 
             ExprKind::Float(_) => Ok(Type::simple("float64")),
 
@@ -594,6 +594,11 @@ impl Infer {
                 // Return the non-nullable version of the type
                 // x.(!nil) converts ?*T -> *T, ?[]T -> []T, etc.
                 Ok(ty.as_non_nullable())
+            }
+
+            ExprKind::Paren(inner) => {
+                // Parenthesised expression has the type of its inner expression
+                self.infer_expr(inner)
             }
         }
     }

@@ -135,13 +135,13 @@ func area(s Shape) float64 {
     case Shape_Circle:
         r := __v.radius
         _ = r
-        return ((3.14 * r) * r)
+        return 3.14 * r * r
     case Shape_Rectangle:
         w := __v.width
         _ = w
         h := __v.height
         _ = h
-        return (w * h)
+        return w * h
     case Shape_Triangle:
         p := __v.Value
         _ = p
@@ -233,9 +233,9 @@ func isPrimary(c Colour) bool {
 func classify(x int) string {
     var result string
     switch {
-    case (x > 0):
+    case x > 0:
         result = "positive"
-    case (x < 0):
+    case x < 0:
         result = "negative"
     default:
         result = "zero"
@@ -284,9 +284,9 @@ func valueToString(x int) string {
 // Expression-less match with default where all arms return
 func signToString(x int) string {
     switch {
-    case (x > 0):
+    case x > 0:
         return "positive"
-    case (x < 0):
+    case x < 0:
         return "negative"
     default:
         return "zero"

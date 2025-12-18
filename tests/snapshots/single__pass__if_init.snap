@@ -134,7 +134,7 @@ func getPointer() *int {
 // === Tests for if-init with type assertions (enum variants) ===
 // Test type assertion with single-value variant
 func unwrapOr(opt Option, defaultVal int) int {
-    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); (x != nil) {
+    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); x != nil {
         return x.Value
     }
     return defaultVal
@@ -142,7 +142,7 @@ func unwrapOr(opt Option, defaultVal int) int {
 
 // Test type assertion with else block
 func unwrapOrElse(opt Option, defaultVal int) int {
-    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); (x != nil) {
+    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); x != nil {
         return x.Value
     } else {
         return defaultVal
@@ -151,7 +151,7 @@ func unwrapOrElse(opt Option, defaultVal int) int {
 
 // Test type assertion with struct variant
 func getRadius(s Shape) float64 {
-    if c := func() *Shape_Circle { if _v, _ok := s.(Shape_Circle); _ok { return &_v }; return nil }(); (c != nil) {
+    if c := func() *Shape_Circle { if _v, _ok := s.(Shape_Circle); _ok { return &_v }; return nil }(); c != nil {
         return c.radius
     }
     return 0.0
@@ -159,7 +159,7 @@ func getRadius(s Shape) float64 {
 
 // Test type assertion with unit variant
 func isRed(c Colour) bool {
-    if x := func() *Colour_Red { if _v, _ok := c.(Colour_Red); _ok { return &_v }; return nil }(); (x != nil) {
+    if x := func() *Colour_Red { if _v, _ok := c.(Colour_Red); _ok { return &_v }; return nil }(); x != nil {
         return true
     }
     return false
@@ -167,10 +167,10 @@ func isRed(c Colour) bool {
 
 // Test nested type assertions
 func processResult(r Result) string {
-    if ok := func() *Result_Ok { if _v, _ok := r.(Result_Ok); _ok { return &_v }; return nil }(); (ok != nil) {
+    if ok := func() *Result_Ok { if _v, _ok := r.(Result_Ok); _ok { return &_v }; return nil }(); ok != nil {
         return fmt.Sprintf("success: %s", ok.Value)
     } else {
-        if err := func() *Result_Err { if _v, _ok := r.(Result_Err); _ok { return &_v }; return nil }(); (err != nil) {
+        if err := func() *Result_Err { if _v, _ok := r.(Result_Err); _ok { return &_v }; return nil }(); err != nil {
             return fmt.Sprintf("error: %s", err.Value)
         }
     }
@@ -180,7 +180,7 @@ func processResult(r Result) string {
 // === Tests for if-init with regular expressions ===
 func testBasicIfInit() {
     // Basic if-init with simple expression
-    if x := 5; (x > 0) {
+    if x := 5; x > 0 {
         fmt.Println("x is positive:", x)
     }
 
@@ -190,27 +190,27 @@ func testBasicIfInit() {
     }
 
     // If-init with error check
-    if result, err := maybeError(); (err == nil) {
+    if result, err := maybeError(); err == nil {
         fmt.Println("Result:", result)
     }
 
     // If-init with nil check on pointer
-    if p := getPointer(); (p != nil) {
+    if p := getPointer(); p != nil {
         fmt.Println("Pointer value:", (*p))
     }
 
     // If-init with else
-    if n := 0; (n > 0) {
+    if n := 0; n > 0 {
         fmt.Println("positive")
     } else {
         fmt.Println("not positive")
     }
 
     // If-init with else-if chain
-    if x := 10; (x < 0) {
+    if x := 10; x < 0 {
         fmt.Println("negative")
     } else {
-        if (x == 0) {
+        if x == 0 {
             fmt.Println("zero")
         } else {
             fmt.Println("positive")
@@ -220,13 +220,13 @@ func testBasicIfInit() {
     // If-init with inline function call
     if result := func() int {
         return 100
-    }(); (result > 50) {
+    }(); result > 50 {
         fmt.Println("Large result:", result)
     }
 
     // Map lookup (single value form)
     m := map[string]int{"a": 1, "b": 2}
-    if v := m["a"]; (v != 0) {
+    if v := m["a"]; v != 0 {
         fmt.Println("Found:", v)
     }
 }
@@ -234,7 +234,7 @@ func testBasicIfInit() {
 // Test recover with if-init
 func safeRecover() {
     defer func() {
-        if r := recover(); (r != nil) {
+        if r := recover(); r != nil {
             fmt.Println("Recovered:", r)
         }
     }()

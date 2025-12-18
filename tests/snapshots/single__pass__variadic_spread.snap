@@ -11,19 +11,19 @@ import "fmt"
 func sum(nums ...int) int {
     total := 0
     for _, n := range nums {
-        total = (total + n)
+        total = total + n
     }
     return total
 }
 
 // Helper that accepts variadic strings
 func join(sep string, parts ...string) string {
-    if (len(parts) == 0) {
+    if len(parts) == 0 {
         return ""
     }
     result := parts[0]
     for _, p := range parts[1:] {
-        result = ((result + sep) + p)
+        result = result + sep + p
     }
     return result
 }

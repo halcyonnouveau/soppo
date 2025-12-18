@@ -1,6 +1,6 @@
 ---
 source: tests/multi.rs
-expression: format_results(& results)
+expression: format_results(&results)
 ---
 === cmd/main.go ===
 //soppo:generated
@@ -14,7 +14,7 @@ func main() {
     cfg2 := types.Config{Name: "app", Logger: (&types.Logger{Prefix: "[INFO]"})}
 
     fmt.Println(cfg1.Name)
-    if (cfg2.Logger != nil) {
+    if cfg2.Logger != nil {
         fmt.Println(cfg2.Logger.Prefix)
     }
 }

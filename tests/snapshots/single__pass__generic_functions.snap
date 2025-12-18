@@ -26,7 +26,7 @@ func wrapNilable[T any](val T) *T {
 // Generic function with slice parameter
 //soppo:nilable : 0
 func first[T any](items []T) *T {
-    if (len(items) == 0) {
+    if len(items) == 0 {
         return nil
     }
     return (&items[0])
@@ -35,7 +35,7 @@ func first[T any](items []T) *T {
 // Generic function with comparable constraint
 func contains[T comparable](items []T, target T) bool {
     for _, item := range items {
-        if (item == target) {
+        if item == target {
             return true
         }
     }
@@ -63,14 +63,14 @@ func main() {
 
     // Nilable pointer return
     n1 := wrapNilable[int](50)
-    if (n1 != nil) {
+    if n1 != nil {
         fmt.Println((*n1))
     }
 
     // Slice parameter with inference
     nums := []int{1, 2, 3, 4, 5}
     f := first(nums)
-    if (f != nil) {
+    if f != nil {
         fmt.Println((*f))
     }
 
@@ -86,7 +86,7 @@ func main() {
 
     // Note: wrap returns *T (non-nilable) but nil checker requires explicit check
     // for return values from generic functions
-    if ((p1 != nil) && (p2 != nil)) {
+    if p1 != nil && p2 != nil {
         fmt.Println((*p1), (*p2))
     }
     fmt.Println(found, notFound)

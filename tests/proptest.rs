@@ -1,8 +1,8 @@
 use proptest::prelude::*;
 use soppo::syntax::{
     BinOp, Block, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Ident,
-    Literal, Param, Pattern, PatternKind, Span, Stmt, StmtKind, TypeAnnotation, TypeDecl, TypeKind,
-    UnaryOp,
+    IntFormat, Literal, Param, Pattern, PatternKind, Span, Stmt, StmtKind, TypeAnnotation,
+    TypeDecl, TypeKind, UnaryOp,
 };
 
 /// Generate a valid identifier name (starts with letter, contains alphanumeric)
@@ -54,7 +54,7 @@ fn arb_unaryop() -> impl Strategy<Value = UnaryOp> {
 
 fn arb_literal() -> impl Strategy<Value = Literal> {
     prop_oneof![
-        any::<i64>().prop_map(Literal::Integer),
+        any::<i64>().prop_map(|n| Literal::Integer(n, IntFormat::Decimal)),
         "[a-zA-Z0-9 ]{0,20}".prop_map(|s| Literal::String(s.to_string())),
         any::<bool>().prop_map(Literal::Bool),
     ]
@@ -83,7 +83,7 @@ fn arb_type_annotation() -> impl Strategy<Value = TypeAnnotation> {
 fn arb_simple_expr() -> impl Strategy<Value = Expr> {
     prop_oneof![
         any::<i64>().prop_map(|n| Expr {
-            kind: ExprKind::Integer(n),
+            kind: ExprKind::Integer(n, IntFormat::Decimal),
             span: Span::dummy()
         }),
         any::<f64>()
@@ -377,7 +377,7 @@ mod compiler_properties {
     #[test]
     fn type_inference_is_deterministic() {
         let expr = Expr {
-            kind: ExprKind::Integer(42),
+            kind: ExprKind::Integer(42, IntFormat::Decimal),
             span: Span::dummy(),
         };
 

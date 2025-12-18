@@ -10,14 +10,14 @@ import "errors"
 
 // === Helper functions that return errors ===
 func parsePort(s string) (int, error) {
-    if (s == "") {
+    if s == "" {
         return 0, errors.New("empty string")
     }
     return 8080, nil
 }
 
 func deleteFile(path string) error {
-    if (path == "") {
+    if path == "" {
         return errors.New("empty path")
     }
     return nil
@@ -34,7 +34,7 @@ type User struct {
 
 //soppo:nilable : 0
 func getUser(id int) (*User, error) {
-    if (id <= 0) {
+    if id <= 0 {
         return nil, errors.New("invalid id")
     }
     u := User{}
@@ -281,7 +281,7 @@ func tryWithPanic() string {
     user, _err0 := getUser(0)
     if _err0 != nil {
         err := _err0
-        panic(("failed to get user: " + err.Error()))
+        panic("failed to get user: " + err.Error())
     }
     return user.name
 }

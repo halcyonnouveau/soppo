@@ -369,9 +369,25 @@ pub enum StringPart {
     Expr(Box<Expr>),
 }
 
+/// Format of an integer literal for preserving source representation
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IntFormat {
+    Decimal,
+    Octal,  // 0o755
+    Hex,    // 0xFF
+    Binary, // 0b1010
+}
+
+/// Integer literal with its original format
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IntLit {
+    pub value: i64,
+    pub format: IntFormat,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
-    Integer(i64),
+    Integer(i64, IntFormat),
     Float(f64),
     String(String),
     /// Raw string literal (backtick string): `hello\nworld` - no escape processing
@@ -402,19 +418,19 @@ pub enum ExprKind {
         expr: Box<Expr>,
         index: Box<Expr>,
     },
-    // Slice expression: arr[low:high] or arr[low:high:cap]
+    /// Slice expression: arr[low:high] or arr[low:high:cap]
     Slice {
         expr: Box<Expr>,
         low: Option<Box<Expr>>,
         high: Option<Box<Expr>>,
         cap: Option<Box<Expr>>, // For 3-index slice arr[low:high:cap]
     },
-    // Type assertion: x.(Type)
+    /// Type assertion: x.(Type)
     TypeAssert {
         expr: Box<Expr>,
         ty: TypeAnnotation,
     },
-    // Nil assertion: x.(!nil) - asserts pointer is non-nil
+    /// Nil assertion: x.(!nil) - asserts pointer is non-nil
     NilAssert {
         expr: Box<Expr>,
     },
@@ -426,7 +442,7 @@ pub enum ExprKind {
         ty: Option<TypeAnnotation>, // The struct type name (None for implicit like `{Name: "x"}`)
         fields: Vec<(String, Expr)>, // field_name: value pairs
     },
-    // Anonymous struct literal: struct { X int; Y int }{X: 1, Y: 2}
+    /// Anonymous struct literal: struct { X int; Y int }{X: 1, Y: 2}
     AnonStructLit {
         field_defs: Vec<Field>,      // The inline field definitions
         fields: Vec<(String, Expr)>, // field_name: value pairs
@@ -439,13 +455,15 @@ pub enum ExprKind {
         op: UnaryOp,
         operand: Box<Expr>,
     },
-    // Anonymous function: func(params) returns { body }
+    /// Anonymous function: func(params) returns { body }
     FuncLit {
         params: Vec<Param>,
         returns: Vec<Param>,
         body: Block,
     },
     Block(Block),
+    /// Parenthesised expression - preserves explicit grouping from source
+    Paren(Box<Expr>),
 }
 
 /// Unary operator
@@ -606,7 +624,7 @@ pub enum FieldPattern {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
-    Integer(i64),
+    Integer(i64, IntFormat),
     String(String),
     Bool(bool),
     Nil,

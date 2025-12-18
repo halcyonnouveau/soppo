@@ -1,12 +1,18 @@
 use super::Codegen;
-use crate::syntax::{Expr, ExprKind, UnaryOp};
+use crate::syntax::{Expr, ExprKind, IntFormat, UnaryOp};
 
 impl Codegen {
     /// Generate an expression
     pub(crate) fn gen_expr(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Integer(n) => {
-                self.emit(n.to_string());
+            ExprKind::Integer(n, fmt) => {
+                // Preserve the original format in generated Go code
+                match fmt {
+                    IntFormat::Decimal => self.emit(n.to_string()),
+                    IntFormat::Octal => self.emit(format!("0o{:o}", n)),
+                    IntFormat::Hex => self.emit(format!("0x{:x}", n)),
+                    IntFormat::Binary => self.emit(format!("0b{:b}", n)),
+                }
             }
 
             ExprKind::Float(f) => {
@@ -73,11 +79,9 @@ impl Codegen {
             }
 
             ExprKind::Binary { op, left, right } => {
-                self.emit("(");
                 self.gen_expr(left);
                 self.emit(format!(" {} ", self.go_binop(op)));
                 self.gen_expr(right);
-                self.emit(")");
             }
 
             ExprKind::Call {
@@ -399,6 +403,12 @@ impl Codegen {
             ExprKind::Block(block) => {
                 self.gen_block(block);
             }
+
+            ExprKind::Paren(inner) => {
+                self.emit("(");
+                self.gen_expr(inner);
+                self.emit(")");
+            }
         }
     }
 
@@ -581,7 +591,8 @@ mod tests {
         codegen.gen_func_decl(&func);
 
         let output = codegen.output();
-        assert!(output.contains("(1 + (2 * 3))"));
+        // No extra parentheses - Go has proper operator precedence
+        assert!(output.contains("1 + 2 * 3"));
     }
 
     #[test]

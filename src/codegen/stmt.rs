@@ -1,6 +1,7 @@
 use super::Codegen;
 use crate::syntax::{
-    Arm, Expr, ExprKind, FieldPattern, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
+    Arm, Expr, ExprKind, FieldPattern, IntFormat, Literal, PatternKind, SelectCaseKind, Stmt,
+    StmtKind,
 };
 
 impl Codegen {
@@ -700,7 +701,12 @@ impl Codegen {
                             self.gen_expr(scrutinee_expr);
                             self.emit(format!(".{} == ", field_name));
                             match lit {
-                                Literal::Integer(n) => self.emit(format!("{}", n)),
+                                Literal::Integer(n, fmt) => match fmt {
+                                    IntFormat::Decimal => self.emit(format!("{}", n)),
+                                    IntFormat::Octal => self.emit(format!("0o{:o}", n)),
+                                    IntFormat::Hex => self.emit(format!("0x{:x}", n)),
+                                    IntFormat::Binary => self.emit(format!("0b{:b}", n)),
+                                },
                                 Literal::String(s) => self.emit(format!("\"{}\"", s)),
                                 Literal::Bool(b) => self.emit(format!("{}", b)),
                                 Literal::Nil => self.emit("nil"),

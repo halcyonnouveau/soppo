@@ -15,7 +15,7 @@ type User struct {
 // Function with nullable parameter and return
 //soppo:nilable : 0
 func findUser(id int) *User {
-    if (id == 0) {
+    if id == 0 {
         return nil
     }
     return (&User{name: "Alice", age: 30})
@@ -42,7 +42,7 @@ func main() {
     maybeUser = (&User{name: "Bob", age: 25})
 
     // === Use maybeUser after nil check ===
-    if (maybeUser != nil) {
+    if maybeUser != nil {
         fmt.Println(maybeUser.name)
     }
 
@@ -50,7 +50,7 @@ func main() {
     result := findUser(0) // result is ?*User
 
     // === Nil check narrows type ===
-    if (result != nil) {
+    if result != nil {
         // Here result is known non-nil, can access fields
         fmt.Println(result.name)
 
@@ -77,7 +77,7 @@ func main() {
     container := Container{required: (&User{name: "Required", age: 1}), optional: nil}
     printUser(container.required)
 
-    if (container.optional != nil) {
+    if container.optional != nil {
         printUser(container.optional)
     }
 }

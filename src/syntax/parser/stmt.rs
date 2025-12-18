@@ -1470,7 +1470,7 @@ mod tests {
         match stmt.kind {
             StmtKind::Decl { ident: name, value } => {
                 assert_eq!(name, "x");
-                assert!(matches!(value.kind, ExprKind::Integer(42)));
+                assert!(matches!(value.kind, ExprKind::Integer(42, _)));
             }
             _ => panic!("Expected let statement"),
         }
@@ -1484,7 +1484,7 @@ mod tests {
 
         match stmt.kind {
             StmtKind::Return { values } if values.len() == 1 => {
-                assert!(matches!(values[0].kind, ExprKind::Integer(42)));
+                assert!(matches!(values[0].kind, ExprKind::Integer(42, _)));
             }
             _ => panic!("Expected return statement with one value"),
         }

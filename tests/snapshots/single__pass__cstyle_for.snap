@@ -9,18 +9,18 @@ import "fmt"
 
 func main() {
     // Basic C-style for loop
-    for i := 0; (i < 5); i++ {
+    for i := 0; i < 5; i++ {
         fmt.Println(i)
     }
 
     // With compound assignment
-    for x := 10; (x > 0); x -= 2 {
+    for x := 10; x > 0; x -= 2 {
         fmt.Println(x)
     }
 
     // Nested loops
-    for i := 0; (i < 3); i++ {
-        for j := 0; (j < 3); j++ {
+    for i := 0; i < 3; i++ {
+        for j := 0; j < 3; j++ {
             fmt.Println(i, j)
         }
     }

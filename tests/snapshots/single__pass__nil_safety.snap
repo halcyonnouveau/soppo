@@ -33,20 +33,20 @@ func main() {
     user := getUser(1)
 
     // After nil check, user is known to be non-nil
-    if (user != nil) {
+    if user != nil {
         fmt.Println(user.name)
     }
 
     // Early return pattern
     user2 := getUser(2)
-    if (user2 == nil) {
+    if user2 == nil {
         return
     }
     fmt.Println(user2.name)
 
     // Else branch knows opposite
     user3 := getUser(3)
-    if (user3 == nil) {
+    if user3 == nil {
         fmt.Println("not found")
     } else {
         fmt.Println(user3.name)
@@ -65,15 +65,15 @@ func main() {
 
     // === Nested struct access ===
     user4 := getUser(4)
-    if (user4 != nil) {
+    if user4 != nil {
         fmt.Println(user4.name)
 
         // Direct field nil check works too
-        if (user4.profile != nil) {
+        if user4.profile != nil {
             fmt.Println(user4.profile.bio)
 
             // And deeper nesting
-            if (user4.profile.address != nil) {
+            if user4.profile.address != nil {
                 fmt.Println(user4.profile.address.city)
             }
         }
@@ -87,25 +87,25 @@ func main() {
     // === Nil narrowing preserved in loops ===
     // Early return before loop
     user6 := getUser(6)
-    if (user6 == nil) {
+    if user6 == nil {
         return
     }
-    for i := 0; (i < 3); i++ {
+    for i := 0; i < 3; i++ {
         fmt.Println(user6.name) // user6 is non-nil here
     }
 
     // Nil check with nested loop
     user7 := getUser(7)
-    if (user7 != nil) {
-        for i := 0; (i < 3); i++ {
+    if user7 != nil {
+        for i := 0; i < 3; i++ {
             fmt.Println(user7.name) // user7 is non-nil in this block
         }
     }
 
     // === Nil narrowing with continue ===
-    for i := 0; (i < 3); i++ {
+    for i := 0; i < 3; i++ {
         u := getUser(i)
-        if (u == nil) {
+        if u == nil {
             continue
         }
 

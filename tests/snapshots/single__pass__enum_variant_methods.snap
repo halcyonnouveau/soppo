@@ -93,12 +93,12 @@ func (v Shape_Rectangle) MarshalJSON() ([]byte, error) {
 
 // Custom method on variant
 func (v Result_Ok) Double() int {
-    return (v.Value * 2)
+    return v.Value * 2
 }
 
 // Pointer receiver - v is non-null because it's *T not ?*T
 func (v *Shape_Circle) Scale(factor float64) {
-    v.radius = (v.radius * factor)
+    v.radius = v.radius * factor
 }
 
 func main() {

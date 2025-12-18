@@ -150,8 +150,10 @@ impl Parser {
             }),
 
             // Literal patterns
-            Token::Integer(n) => Ok(Pattern {
-                kind: PatternKind::Literal(super::super::ast::Literal::Integer(n)),
+            Token::Integer(lit) => Ok(Pattern {
+                kind: PatternKind::Literal(super::super::ast::Literal::Integer(
+                    lit.value, lit.format,
+                )),
                 span,
             }),
 
@@ -284,10 +286,12 @@ impl Parser {
                             let field_pattern = if self.consume(&Token::Colon) {
                                 // After colon: either a literal or a binding name
                                 match self.peek() {
-                                    Some(Token::Integer(n)) => {
-                                        let n = *n;
+                                    Some(Token::Integer(lit)) => {
+                                        let lit = *lit;
                                         self.advance();
-                                        FieldPattern::Literal(Literal::Integer(n))
+                                        FieldPattern::Literal(Literal::Integer(
+                                            lit.value, lit.format,
+                                        ))
                                     }
                                     Some(Token::String(s)) => {
                                         let s = s.clone();

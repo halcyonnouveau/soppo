@@ -48,7 +48,7 @@ func (c Counter) getValue() int {
 }
 
 func (c Counter) increment() Counter {
-    c.value = (c.value + 1)
+    c.value = c.value + 1
     return c
 }
 
@@ -56,9 +56,9 @@ func (c Counter) increment() Counter {
 func sum(numbers int) int {
     total := 0
     i := 0
-    for (i < 10) {
-        total = (total + numbers)
-        i = (i + 1)
+    for i < 10 {
+        total = total + numbers
+        i = i + 1
     }
     return total
 }
@@ -82,7 +82,7 @@ func cleanup() {
 
 // String manipulation
 func processString(s string) string {
-    if (s == "") {
+    if s == "" {
         return "empty"
     }
 
@@ -96,9 +96,9 @@ func arrayOps() int {
     sum := 0
 
     i := 0
-    for (i < 5) {
-        sum = (sum + arr[i])
-        i = (i + 1)
+    for i < 5 {
+        sum = sum + arr[i]
+        i = i + 1
     }
 
     return sum
@@ -112,10 +112,10 @@ func createUser(name string, age int) User {
 
 // Conditionals and comparisons
 func checkAge(age int) string {
-    if (age < 18) {
+    if age < 18 {
         return "minor"
     } else {
-        if (age < 65) {
+        if age < 65 {
             return "adult"
         } else {
             return "senior"
@@ -125,24 +125,24 @@ func checkAge(age int) string {
 
 // Boolean logic
 func validateInput(value int, enabled bool) bool {
-    return ((enabled && (value > 0)) && (value < MAX_SIZE))
+    return enabled && value > 0 && value < MAX_SIZE
 }
 
 // Mathematical operations
 func calculate(x int, y int) int {
-    a := (x + y)
-    b := (x - y)
-    c := (x * y)
-    d := (x / y)
-    e := (x % y)
+    a := x + y
+    b := x - y
+    c := x * y
+    d := x / y
+    e := x % y
 
-    result := ((((a + b) + c) + d) + e)
+    result := a + b + c + d + e
     return result
 }
 
 // Multi-value return: two values
 func divide(a int, b int) (int, int) {
-    return (a / b), (a % b)
+    return a / b, a % b
 }
 
 // Multi-value return: three values
@@ -151,23 +151,23 @@ func minMax(a int, b int, c int) (int, int, int) {
     max := a
     mid := a
 
-    if (b < min) {
+    if b < min {
         min = b
     }
-    if (c < min) {
+    if c < min {
         min = c
     }
-    if (b > max) {
+    if b > max {
         max = b
     }
-    if (c > max) {
+    if c > max {
         max = c
     }
 
-    if ((a != min) && (a != max)) {
+    if a != min && a != max {
         mid = a
     } else {
-        if ((b != min) && (b != max)) {
+        if b != min && b != max {
             mid = b
         } else {
             mid = c
@@ -195,12 +195,12 @@ func main() {
 
     // Integer operations
     x := 42
-    y := (((((((((((((((10 + a) + b) + c) + d) + e) + f) + g) + h) + i) + j) + k) + l) + m) + n) + o)
-    sum := (x + y)
+    y := 10 + a + b + c + d + e + f + g + h + i + j + k + l + m + n + o
+    sum := x + y
 
     // Float operations
     radius := 5.0
-    area := ((PI * radius) * radius)
+    area := PI * radius * radius
 
     // String operations
     message := "Hello, World"
@@ -223,7 +223,7 @@ func main() {
 
     // Conditional
     status := ""
-    if (y > 0) {
+    if y > 0 {
         status = "success"
     } else {
         status = "failure"
@@ -325,16 +325,16 @@ func main() {
 
     // === Break/Continue ===
     loopIdx := 0
-    for (loopIdx < 10) {
-        if (loopIdx == 3) {
-            loopIdx = (loopIdx + 1)
+    for loopIdx < 10 {
+        if loopIdx == 3 {
+            loopIdx = loopIdx + 1
             continue
         }
-        if (loopIdx == 7) {
+        if loopIdx == 7 {
             break
         }
         fmt.Println(loopIdx)
-        loopIdx = (loopIdx + 1)
+        loopIdx = loopIdx + 1
     }
 
     // === Range loops ===
@@ -350,12 +350,12 @@ func main() {
 
     // === Anonymous functions ===
     add := func(a int, b int) int {
-        return (a + b)
+        return a + b
     }
     fmt.Println(add(1, 2))
 
     multiply := func(a int, b int) int {
-        return (a * b)
+        return a * b
     }
     fmt.Println(multiply(3, 4))
 
@@ -368,11 +368,11 @@ func main() {
     // === Bitwise operators ===
     bitwiseA := 10 // 0b1010
     bitwiseB := 12 // 0b1100
-    andResult := (bitwiseA & bitwiseB) // 8 (0b1000)
-    orResult := (bitwiseA | bitwiseB) // 14 (0b1110)
-    xorResult := (bitwiseA ^ bitwiseB) // 6 (0b0110)
-    shlResult := (bitwiseA << 2) // 40 (10 << 2)
-    shrResult := (bitwiseB >> 1) // 6 (12 >> 1)
+    andResult := bitwiseA & bitwiseB // 8 (0b1000)
+    orResult := bitwiseA | bitwiseB // 14 (0b1110)
+    xorResult := bitwiseA ^ bitwiseB // 6 (0b0110)
+    shlResult := bitwiseA << 2 // 40 (10 << 2)
+    shrResult := bitwiseB >> 1 // 6 (12 >> 1)
     fmt.Printf("Bitwise: AND=%d OR=%d XOR=%d SHL=%d SHR=%d\n", andResult, orResult, xorResult, shlResult, shrResult)
 
     // === Compound assignments ===
@@ -424,11 +424,11 @@ func main() {
     // === Duration arithmetic (tests const type inheritance + underlying type compatibility) ===
     // time.Millisecond is a const with inherited type Duration (underlying int64)
     // These test that Duration * int works via underlying type resolution
-    dur1 := (time.Millisecond * 100) // Duration * int
-    dur2 := (100 * time.Millisecond) // int * Duration
-    dur3 := (time.Second + time.Millisecond) // Duration + Duration
-    dur4 := (dur1 + dur2) // Duration + Duration (variables)
-    dur5 := (time.Duration(500) * 2) // Explicit conversion
+    dur1 := time.Millisecond * 100 // Duration * int
+    dur2 := 100 * time.Millisecond // int * Duration
+    dur3 := time.Second + time.Millisecond // Duration + Duration
+    dur4 := dur1 + dur2 // Duration + Duration (variables)
+    dur5 := time.Duration(500) * 2 // Explicit conversion
     fmt.Println(dur1, dur2, dur3, dur4, dur5)
 
     fmt.Println("done")

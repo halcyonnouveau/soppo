@@ -40,13 +40,13 @@ func worker(id int, jobs chan int, results chan Result) {
         fmt.Println(fmt.Sprintf("worker %v processing job %v", id, j))
 
         // Simulate some work
-        time.Sleep((time.Millisecond * 100))
+        time.Sleep(time.Millisecond * 100)
 
         switch {
-        case ((j % 3) == 0):
+        case j % 3 == 0:
             results <- ResultErr(fmt.Sprintf("job %v failed", j))
         default:
-            results <- ResultOk((j * 2))
+            results <- ResultOk(j * 2)
         }
     }
 }
@@ -62,18 +62,18 @@ func main() {
     config := struct { Workers int; Jobs int }{Workers: numWorkers, Jobs: numJobs}
     fmt.Println(fmt.Sprintf("Starting %v workers for %v jobs", config.Workers, config.Jobs))
 
-    for w := 1; (w <= config.Workers); w++ {
+    for w := 1; w <= config.Workers; w++ {
         go worker(w, jobs, results)
     }
 
     // Send jobs
-    for j := 1; (j <= config.Jobs); j++ {
+    for j := 1; j <= config.Jobs; j++ {
         jobs <- j
     }
     close(jobs)
 
     // Collect and match on results
-    for i := 1; (i <= config.Jobs); i++ {
+    for i := 1; i <= config.Jobs; i++ {
         result := (<-results)
         switch __v := result.(type) {
         case Result_Ok:

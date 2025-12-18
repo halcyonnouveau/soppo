@@ -11,7 +11,7 @@ import "net/http"
 // After `resp, err := f(); if err != nil { return }`, resp is narrowed to non-nil.
 func fetchData() error {
     resp, err := http.Get("https://example.com")
-    if (err != nil) {
+    if err != nil {
         return err
     }
 

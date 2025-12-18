@@ -659,8 +659,8 @@ impl Parser {
             Token::Not => self.parse_unary(UnaryOp::Not, span, true),
             Token::Arrow => self.parse_unary(UnaryOp::Recv, span, false),
 
-            Token::Integer(n) => Ok(Expr {
-                kind: ExprKind::Integer(n),
+            Token::Integer(lit) => Ok(Expr {
+                kind: ExprKind::Integer(lit.value, lit.format),
                 span,
             }),
 
@@ -843,9 +843,18 @@ impl Parser {
             }),
 
             Token::LParen => {
-                let expr = self.parse_expr()?;
-                self.expect(Token::RParen)?;
-                Ok(expr)
+                let inner = self.parse_expr()?;
+                let end_span = self.expect(Token::RParen)?;
+                Ok(Expr {
+                    kind: ExprKind::Paren(Box::new(inner)),
+                    span: Span::with_bytes(
+                        span.start,
+                        end_span.end,
+                        self.file,
+                        span.byte_start,
+                        end_span.byte_end,
+                    ),
+                })
             }
 
             Token::LBracket => {
@@ -1285,7 +1294,7 @@ mod tests {
     #[test]
     fn test_parse_integer() {
         let expr = parse_expr_helper("42").unwrap();
-        assert!(matches!(expr.kind, ExprKind::Integer(42)));
+        assert!(matches!(expr.kind, ExprKind::Integer(42, _)));
     }
 
     #[test]
@@ -1315,8 +1324,8 @@ mod tests {
         match expr.kind {
             ExprKind::Binary { op, left, right } => {
                 assert_eq!(op, BinOp::Add);
-                assert!(matches!(left.kind, ExprKind::Integer(1)));
-                assert!(matches!(right.kind, ExprKind::Integer(2)));
+                assert!(matches!(left.kind, ExprKind::Integer(1, _)));
+                assert!(matches!(right.kind, ExprKind::Integer(2, _)));
             }
             _ => panic!("Expected binary expression"),
         }
@@ -1332,12 +1341,12 @@ mod tests {
                 right: mul_expr,
             } => {
                 assert_eq!(op, BinOp::Add);
-                assert!(matches!(left.kind, ExprKind::Integer(1)));
+                assert!(matches!(left.kind, ExprKind::Integer(1, _)));
                 match mul_expr.kind {
                     ExprKind::Binary { op, left, right } => {
                         assert_eq!(op, BinOp::Mul);
-                        assert!(matches!(left.kind, ExprKind::Integer(2)));
-                        assert!(matches!(right.kind, ExprKind::Integer(3)));
+                        assert!(matches!(left.kind, ExprKind::Integer(2, _)));
+                        assert!(matches!(right.kind, ExprKind::Integer(3, _)));
                     }
                     _ => panic!("Expected multiplication"),
                 }
@@ -1359,9 +1368,9 @@ mod tests {
                 assert_eq!(args.len(), 2);
                 // Args are (Option<String>, Expr) tuples - positional args have None name
                 assert!(args[0].0.is_none());
-                assert!(matches!(args[0].1.kind, ExprKind::Integer(1)));
+                assert!(matches!(args[0].1.kind, ExprKind::Integer(1, _)));
                 assert!(args[1].0.is_none());
-                assert!(matches!(args[1].1.kind, ExprKind::Integer(2)));
+                assert!(matches!(args[1].1.kind, ExprKind::Integer(2, _)));
                 assert!(type_args.is_empty());
             }
             _ => panic!("Expected call expression"),
@@ -1377,9 +1386,9 @@ mod tests {
                 assert_eq!(args.len(), 2);
                 // Named args have Some((name, span))
                 assert!(matches!(&args[0].0, Some((n, _)) if n == "a"));
-                assert!(matches!(args[0].1.kind, ExprKind::Integer(1)));
+                assert!(matches!(args[0].1.kind, ExprKind::Integer(1, _)));
                 assert!(matches!(&args[1].0, Some((n, _)) if n == "b"));
-                assert!(matches!(args[1].1.kind, ExprKind::Integer(2)));
+                assert!(matches!(args[1].1.kind, ExprKind::Integer(2, _)));
             }
             _ => panic!("Expected call expression"),
         }
@@ -1394,9 +1403,9 @@ mod tests {
                 assert_eq!(args.len(), 2);
                 // First is positional (None), second is named (Some((name, span)))
                 assert!(args[0].0.is_none());
-                assert!(matches!(args[0].1.kind, ExprKind::Integer(1)));
+                assert!(matches!(args[0].1.kind, ExprKind::Integer(1, _)));
                 assert!(matches!(&args[1].0, Some((n, _)) if n == "b"));
-                assert!(matches!(args[1].1.kind, ExprKind::Integer(2)));
+                assert!(matches!(args[1].1.kind, ExprKind::Integer(2, _)));
             }
             _ => panic!("Expected call expression"),
         }

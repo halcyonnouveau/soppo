@@ -61,5 +61,5 @@ func (u *User) SetAge(age int) {
 
 // Greet returns a greeting string
 func (u User) Greet() string {
-    return ("Hello, " + u.name)
+    return "Hello, " + u.name
 }

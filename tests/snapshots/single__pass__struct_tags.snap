@@ -41,7 +41,7 @@ func main() {
 
     // Test json.Marshal with struct tags
     data, err := json.Marshal(user)
-    if (err != nil) {
+    if err != nil {
         fmt.Println("error:", err)
         return
     }
