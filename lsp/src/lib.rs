@@ -588,6 +588,10 @@ impl LanguageServer for Backend {
                 }),
                 references_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
                 ..Default::default()
             },
             ..Default::default()
@@ -1348,6 +1352,204 @@ impl LanguageServer for Backend {
             },
             new_text: formatted,
         }]))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+
+        // Get the symbol at cursor position
+        let (text, symbols) = if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(fid) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&fid)
+            {
+                let open_docs = self.open_documents.read().await;
+                (open_docs.get(&path).cloned(), Some(symbols.clone()))
+            } else {
+                drop(ws_guard);
+                let docs = self.documents.read().await;
+                let doc = docs.get(&uri);
+                (
+                    doc.map(|d| d.text.clone()),
+                    doc.and_then(|d| d.symbols.clone()),
+                )
+            }
+        } else {
+            let docs = self.documents.read().await;
+            let doc = docs.get(&uri);
+            (
+                doc.map(|d| d.text.clone()),
+                doc.and_then(|d| d.symbols.clone()),
+            )
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+        let Some(symbols) = symbols else {
+            return Ok(None);
+        };
+
+        let offset = Self::position_to_byte_offset(&text, position);
+
+        // Find the symbol at cursor
+        let Some(symbol) = symbols.find_at(offset) else {
+            return Ok(None);
+        };
+
+        // Can't rename builtins or Go package symbols
+        if symbol.definition_span.is_none() || symbol.go_location.is_some() {
+            return Ok(None);
+        }
+
+        // Can't rename package imports (for now)
+        if symbol.kind == SoppoSymbolKind::Package {
+            return Ok(None);
+        }
+
+        // Find the range of the symbol name at cursor position
+        // Search through all symbols to find the one at the cursor offset
+        for ((start, end), info) in symbols.all_symbols() {
+            if *start <= offset && offset < *end && info.name == symbol.name {
+                let range = byte_offset_to_range(&text, *start, *end);
+                return Ok(Some(PrepareRenameResponse::Range(range)));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        // Get the symbol at cursor position
+        let (text, symbols) = if let Some(path) = Self::uri_to_path(&uri) {
+            let ws_guard = self.workspace.read().await;
+            if let Some(ws) = ws_guard.as_ref()
+                && let Some(fid) = ws.file_registry.get_id(&path)
+                && let Some(symbols) = ws.symbol_tables.get(&fid)
+            {
+                let open_docs = self.open_documents.read().await;
+                (open_docs.get(&path).cloned(), Some(symbols.clone()))
+            } else {
+                drop(ws_guard);
+                let docs = self.documents.read().await;
+                let doc = docs.get(&uri);
+                (
+                    doc.map(|d| d.text.clone()),
+                    doc.and_then(|d| d.symbols.clone()),
+                )
+            }
+        } else {
+            let docs = self.documents.read().await;
+            let doc = docs.get(&uri);
+            (
+                doc.map(|d| d.text.clone()),
+                doc.and_then(|d| d.symbols.clone()),
+            )
+        };
+
+        let Some(text) = text else {
+            return Ok(None);
+        };
+        let Some(symbols) = symbols else {
+            return Ok(None);
+        };
+
+        let offset = Self::position_to_byte_offset(&text, position);
+
+        // Find the symbol at cursor
+        let Some(symbol) = symbols.find_at(offset) else {
+            return Ok(None);
+        };
+
+        // Can't rename builtins or Go package symbols
+        if symbol.go_location.is_some() {
+            return Ok(None);
+        }
+
+        // Get the definition span - this uniquely identifies the symbol
+        let Some(def_span) = symbol.definition_span else {
+            return Ok(None);
+        };
+
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        // Search in workspace mode if available
+        let ws_guard = self.workspace.read().await;
+        if let Some(ws) = ws_guard.as_ref() {
+            let open_docs = self.open_documents.read().await;
+
+            // Search all symbol tables in the workspace
+            for (fid, file_symbols) in &ws.symbol_tables {
+                let file_path = if let Some(path) = ws.file_registry.get_path(*fid) {
+                    path
+                } else {
+                    continue;
+                };
+
+                let file_uri = match Url::from_file_path(file_path) {
+                    Ok(uri) => uri,
+                    Err(_) => continue,
+                };
+
+                // Find all symbols that reference the same definition
+                for ((start, end), info) in file_symbols.all_symbols() {
+                    if let Some(info_def_span) = info.definition_span {
+                        // Check if this symbol references the same definition
+                        if info_def_span.file == def_span.file
+                            && info_def_span.byte_start == def_span.byte_start
+                            && info_def_span.byte_end == def_span.byte_end
+                        {
+                            // Get proper range from byte offsets
+                            let range = if let Some(text) = open_docs.get(file_path) {
+                                byte_offset_to_range(text, *start, *end)
+                            } else if let Ok(text) = std::fs::read_to_string(file_path) {
+                                byte_offset_to_range(&text, *start, *end)
+                            } else {
+                                Range::default()
+                            };
+
+                            changes.entry(file_uri.clone()).or_default().push(TextEdit {
+                                range,
+                                new_text: new_name.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        } else {
+            // Single-file mode: only search current file
+            for ((start, end), info) in symbols.all_symbols() {
+                if let Some(info_def_span) = info.definition_span
+                    && info_def_span.byte_start == def_span.byte_start
+                    && info_def_span.byte_end == def_span.byte_end
+                {
+                    let range = byte_offset_to_range(&text, *start, *end);
+
+                    changes.entry(uri.clone()).or_default().push(TextEdit {
+                        range,
+                        new_text: new_name.clone(),
+                    });
+                }
+            }
+        }
+
+        if changes.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }))
+        }
     }
 }
 
