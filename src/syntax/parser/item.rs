@@ -1,8 +1,8 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
-    ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic, Ident, Import,
-    InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind, VarDecl,
+    ConstDecl, Decl, DoctestCode, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic,
+    Ident, Import, InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind, VarDecl,
 };
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
@@ -905,6 +905,47 @@ impl Parser {
             decls,
             comments: std::mem::take(&mut self.comments),
         })
+    }
+
+    /// Parse doctest code: optional imports followed by statements.
+    /// Unlike parse_file(), this does not require a package declaration
+    /// and parses statements instead of declarations.
+    pub fn parse_doctest(&mut self) -> Result<DoctestCode> {
+        // Skip leading whitespace/newlines
+        self.skip_terminators();
+
+        // Parse imports (same as parse_file)
+        let mut imports = Vec::new();
+        while self.consume(&Token::Import) {
+            if self.consume(&Token::LParen) {
+                // Grouped imports: import ( ... )
+                self.skip_terminators();
+                while self.peek() != Some(&Token::RParen) {
+                    imports.push(self.parse_single_import()?);
+                    self.skip_terminators();
+                }
+                self.expect(Token::RParen)?;
+                self.skip_terminators();
+            } else {
+                // Single import: import "path" or import alias "path"
+                imports.push(self.parse_single_import()?);
+                self.skip_terminators();
+            }
+        }
+
+        // Parse statements until EOF
+        let mut stmts = Vec::new();
+        while self.peek().is_some() {
+            self.skip_terminators();
+
+            if self.peek().is_none() {
+                break;
+            }
+
+            stmts.push(self.parse_stmt()?);
+        }
+
+        Ok(DoctestCode { imports, stmts })
     }
 }
 

@@ -2,6 +2,8 @@ use std::path::Path;
 
 use miette::Result;
 
+use crate::codegen::Codegen;
+use crate::syntax::Import as AstImport;
 use crate::syntax::{Decl, File, FileId, Parser, Span};
 
 /// Attributes that can be applied to doctest code blocks.
@@ -26,12 +28,21 @@ pub struct Import {
     pub path: String,
 }
 
+impl From<&AstImport> for Import {
+    fn from(ast_import: &AstImport) -> Self {
+        Import {
+            alias: ast_import.alias.clone(),
+            path: ast_import.path.clone(),
+        }
+    }
+}
+
 /// A single doctest extracted from a doc comment.
 #[derive(Debug, Clone)]
 pub struct Doctest {
     /// The name of the declaration this doctest documents
     pub decl_name: String,
-    /// The Soppo code in the doctest (without imports)
+    /// The transpiled Go code for the doctest body
     pub code: String,
     /// Imports parsed from the doctest
     pub imports: Vec<Import>,
@@ -121,20 +132,41 @@ fn extract_doctests_from_comment(doc: &str, decl_name: &str, span: &Span) -> Res
             continue;
         }
 
-        // Parse imports from the code
-        let (imports, remaining_code) = parse_imports(&block.code);
-
-        // Parse expected output
-        let (code, expected_output) = parse_expected_output(&remaining_code);
+        // Extract expected output first (before parsing)
+        let (code_without_output, expected_output) = parse_expected_output(&block.code);
 
         // Skip empty doctests
-        if code.trim().is_empty() {
+        if code_without_output.trim().is_empty() {
+            continue;
+        }
+
+        // Parse the doctest code using the Soppo parser
+        let mut parser = Parser::new(&code_without_output, FileId(0));
+        let parsed = match parser.parse_doctest() {
+            Ok(parsed) => parsed,
+            Err(_e) => {
+                // If parsing fails, skip this doctest
+                // TODO: Consider reporting parse errors
+                continue;
+            }
+        };
+
+        // Convert AST imports to our Import type
+        let imports: Vec<Import> = parsed.imports.iter().map(Import::from).collect();
+
+        // Transpile statements to Go code using codegen
+        let mut codegen = Codegen::new();
+        codegen.gen_statements(&parsed.stmts);
+        let go_code = codegen.output().to_string();
+
+        // Skip if transpilation resulted in empty code
+        if go_code.trim().is_empty() {
             continue;
         }
 
         doctests.push(Doctest {
             decl_name: decl_name.to_string(),
-            code,
+            code: go_code,
             imports,
             expected_output,
             attrs: block.attrs,
@@ -215,114 +247,6 @@ fn parse_fence_attrs(attrs_str: &str) -> DoctestAttrs {
     attrs
 }
 
-/// Parse import statements from the beginning of doctest code.
-///
-/// Returns the parsed imports and the remaining code.
-fn parse_imports(code: &str) -> (Vec<Import>, String) {
-    let mut imports = Vec::new();
-    let mut remaining_lines = Vec::new();
-    let mut in_import_section = true;
-
-    for line in code.lines() {
-        let trimmed = line.trim();
-
-        if in_import_section {
-            // Check for single import: `import "pkg"` or `import alias "pkg"`
-            if let Some(import) = parse_import_line(trimmed) {
-                imports.push(import);
-                continue;
-            }
-
-            // Check for import block start
-            if trimmed == "import (" {
-                // Parse multi-line import block
-                continue;
-            }
-
-            // Check for import block entry or end
-            if trimmed == ")" {
-                continue;
-            }
-
-            // Check for import line within a block (just the path or alias path)
-            if let Some(import) = parse_import_block_line(trimmed) {
-                imports.push(import);
-                continue;
-            }
-
-            // Empty lines are ok in import section
-            if trimmed.is_empty() {
-                remaining_lines.push(line);
-                continue;
-            }
-
-            // First non-import, non-empty line ends the import section
-            in_import_section = false;
-        }
-
-        remaining_lines.push(line);
-    }
-
-    // Trim leading empty lines from remaining code
-    while remaining_lines.first().is_some_and(|l| l.trim().is_empty()) {
-        remaining_lines.remove(0);
-    }
-
-    (imports, remaining_lines.join("\n"))
-}
-
-/// Parse a single import line: `import "pkg"` or `import alias "pkg"`.
-fn parse_import_line(line: &str) -> Option<Import> {
-    let line = line.strip_prefix("import ")?.trim();
-
-    // Check for aliased import: `alias "pkg"`
-    if let Some((alias, path)) = line.split_once(' ') {
-        let alias = alias.trim();
-        let path = path.trim().trim_matches('"');
-        if !alias.starts_with('"') {
-            return Some(Import {
-                alias: Some(alias.to_string()),
-                path: path.to_string(),
-            });
-        }
-    }
-
-    // Simple import: `"pkg"`
-    let path = line.trim_matches('"');
-    Some(Import {
-        alias: None,
-        path: path.to_string(),
-    })
-}
-
-/// Parse an import line within an import block: `"pkg"` or `alias "pkg"`.
-fn parse_import_block_line(line: &str) -> Option<Import> {
-    let line = line.trim();
-
-    if line.is_empty() || !line.contains('"') {
-        return None;
-    }
-
-    // Check for aliased import: `alias "pkg"`
-    if let Some((alias, path)) = line.split_once(' ') {
-        let alias = alias.trim();
-        let path = path.trim().trim_matches('"');
-        if !alias.starts_with('"') && !alias.is_empty() {
-            return Some(Import {
-                alias: Some(alias.to_string()),
-                path: path.to_string(),
-            });
-        }
-    }
-
-    // Simple import: `"pkg"`
-    let path = line.trim_matches('"');
-    Some(Import {
-        alias: None,
-        path: path.to_string(),
-    })
-}
-
 /// Parse expected output from `// Output:` comment at the end of code.
 fn parse_expected_output(code: &str) -> (String, Option<String>) {
     let lines: Vec<&str> = code.lines().collect();
@@ -373,10 +297,12 @@ pub fn generate_example_file(
     // Collect all unique imports
     let mut all_imports = Vec::new();
 
-    // Add the package being tested
+    // Add the package being tested with dot import so exported symbols
+    // are available without qualification (doctest code is written as if
+    // inside the package)
     let package_import_path = compute_import_path(module_path, source_path);
     all_imports.push(Import {
-        alias: None,
+        alias: Some(".".to_string()),
         path: package_import_path,
     });
 
@@ -427,7 +353,8 @@ pub fn generate_example_file(
             output.push_str("\t}()\n");
         }
 
-        // Add the doctest code (indented)
+        // Add the transpiled Go code (already indented by codegen)
+        // We need to add one level of indentation since we're inside a function
         for line in doctest.code.lines() {
             if line.trim().is_empty() {
                 output.push('\n');
@@ -492,36 +419,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_import_line() {
-        let import = parse_import_line(r#"import "fmt""#).unwrap();
-        assert_eq!(import.path, "fmt");
-        assert!(import.alias.is_none());
-
-        let import = parse_import_line(r#"import stdmath "math""#).unwrap();
-        assert_eq!(import.path, "math");
-        assert_eq!(import.alias, Some("stdmath".to_string()));
-    }
-
-    #[test]
-    fn test_parse_imports() {
-        let code = r#"import "fmt"
-import stdmath "math"
-
-result := Add(1, 2)
-fmt.Println(result)"#;
-
-        let (imports, remaining) = parse_imports(code);
-
-        assert_eq!(imports.len(), 2);
-        assert_eq!(imports[0].path, "fmt");
-        assert_eq!(imports[1].path, "math");
-        assert_eq!(imports[1].alias, Some("stdmath".to_string()));
-
-        assert!(remaining.contains("result := Add(1, 2)"));
-        assert!(remaining.contains("fmt.Println(result)"));
-    }
-
-    #[test]
     fn test_parse_expected_output() {
         let code = r#"result := Add(1, 2)
 fmt.Println(result)
@@ -563,5 +460,24 @@ Add(MaxInt, 1)
         assert_eq!(generate_example_name("Add", 0), "ExampleAdd");
         assert_eq!(generate_example_name("Add", 1), "ExampleAdd_1");
         assert_eq!(generate_example_name("Add", 2), "ExampleAdd_2");
+    }
+
+    #[test]
+    fn test_doctest_parsing_with_parser() {
+        // Test that we can parse a simple doctest
+        let code = r#"import "fmt"
+
+compat := GoCompatFor("0.5.0")
+fmt.Println(compat.Min)"#;
+
+        let mut parser = Parser::new(code, FileId(0));
+        let parsed = parser.parse_doctest().unwrap();
+
+        // Should have 1 import
+        assert_eq!(parsed.imports.len(), 1);
+        assert_eq!(parsed.imports[0].path, "fmt");
+
+        // Should have 2 statements
+        assert_eq!(parsed.stmts.len(), 2);
     }
 }

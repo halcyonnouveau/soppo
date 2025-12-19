@@ -32,16 +32,18 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
 
     // Compute output directory (absolute) and relative path for Go imports
     // When output_dir is None, output next to source (no import rewriting needed)
-    // When output_dir is Some, use that directory (with import rewriting if under project root)
-    let output_dir_relative = output_dir.map(|dir| {
+    // When output_dir is Some and under project root, use relative path for import rewriting
+    // When output_dir is outside project root (e.g., temp dir), don't rewrite imports
+    // (the go.mod replace directive handles import resolution in that case)
+    let output_dir_relative = output_dir.and_then(|dir| {
         if dir.is_relative() {
             // Relative path is already the relative portion
-            dir.to_string_lossy().to_string()
+            Some(dir.to_string_lossy().to_string())
         } else {
-            // Absolute path - strip project root prefix
+            // Absolute path - only use if under project root
             dir.strip_prefix(&project.root)
+                .ok()
                 .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| dir.to_string_lossy().to_string())
         }
     });
 

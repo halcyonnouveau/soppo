@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::error::Result;
-use crate::syntax::{AssignOp, BinOp, Comment, Decl, EnumVariant, File, Generic, TypeDecl};
+use crate::syntax::{AssignOp, BinOp, Comment, Decl, EnumVariant, File, Generic, Stmt, TypeDecl};
 use crate::types::GlobalCtxt;
 
 /// Code generator for emitting Go code
@@ -167,6 +167,13 @@ impl Codegen {
     /// Get the generated output
     pub fn output(&self) -> &str {
         &self.output
+    }
+
+    /// Generate Go code for a list of statements (used for doctests)
+    pub fn gen_statements(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            self.gen_stmt(stmt);
+        }
     }
 
     /// Emit a line with current indentation

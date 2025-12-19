@@ -73,6 +73,13 @@ pub struct File {
     pub comments: Vec<Comment>,
 }
 
+/// Parsed doctest code (imports + statements without package declaration)
+#[derive(Debug, Clone)]
+pub struct DoctestCode {
+    pub imports: Vec<Import>,
+    pub stmts: Vec<Stmt>,
+}
+
 /// Import declaration
 #[derive(Debug, Clone, PartialEq)]
 pub struct Import {
