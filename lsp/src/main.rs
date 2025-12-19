@@ -1,4 +1,4 @@
 #[tokio::main]
 async fn main() {
-    soppo_lsp::run_server().await;
+    sopls::run_server().await;
 }

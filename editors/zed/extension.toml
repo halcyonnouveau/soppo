@@ -15,6 +15,6 @@ path = "editors/tree-sitter"
 repository = "https://github.com/tree-sitter/tree-sitter-toml"
 rev = "342d9be207c2dba869b9967124c679b5e6fd0ebe"
 
-[language_servers.soppo-lsp]
+[language_servers.sopls]
 name = "Soppo LSP"
 languages = ["Soppo"]

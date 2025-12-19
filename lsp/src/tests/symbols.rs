@@ -326,3 +326,36 @@ func main() {
     assert!(symbol.is_some(), "Should find 'x' symbol");
     assert_eq!(symbol.unwrap().name, "x");
 }
+
+#[test]
+fn symbol_lookup_finds_try_expression_variable() {
+    let code = r#"
+package main
+
+func readLines(path string) ([]string, error) {
+    return []string{}, nil
+}
+
+func main() error {
+    lines := readLines("input.txt") ?
+    println(lines)
+    return nil
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    assert!(
+        diagnostics.is_empty(),
+        "Should have no diagnostics: {:?}",
+        diagnostics
+    );
+    let symbols = symbols.expect("Should have symbols");
+
+    // Find 'lines' at its definition
+    let lines_def_offset = code.find("lines :=").unwrap();
+    let symbol = symbols.find_at(lines_def_offset);
+    assert!(symbol.is_some(), "Should find 'lines' symbol at definition");
+    let symbol = symbol.unwrap();
+    assert_eq!(symbol.name, "lines");
+    // The type should be []string (error stripped by ?)
+    assert_eq!(symbol.ty.to_string(), "[]string");
+}

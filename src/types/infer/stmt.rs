@@ -1210,6 +1210,18 @@ impl Infer {
                         let var_ty = self.strip_error_from_tuple(&value_ty_sub);
                         self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))?;
                         self.update_nil_state_for_assignment(&ident.name, value, &var_ty);
+
+                        // Record variable definition for LSP
+                        self.record_symbol(
+                            ident.span,
+                            ident.name.clone(),
+                            var_ty,
+                            Some(stmt.span),
+                            Some(ident.span),
+                            SymbolKind::Variable,
+                            None,
+                        );
+
                         (value_ty_sub, value.span)
                     }
                     StmtKind::MultiDecl {
@@ -1247,6 +1259,17 @@ impl Infer {
                                         ty.clone(),
                                         Some(var_ident.span),
                                     )?;
+
+                                    // Record variable definition for LSP
+                                    self.record_symbol(
+                                        var_ident.span,
+                                        var_ident.name.clone(),
+                                        ty.clone(),
+                                        Some(stmt.span),
+                                        Some(var_ident.span),
+                                        SymbolKind::Variable,
+                                        None,
+                                    );
                                 }
                             }
                         }

@@ -4,10 +4,10 @@ git_release_name = "v{{ version }}"
 
 [[package]]
 name = "soppo"
-changelog_include = ["soppo-lsp"]
+changelog_include = ["sopls"]
 
 [[package]]
-name = "soppo-lsp"
+name = "sopls"
 changelog_update = false
 git_tag_enable = false
 git_release_enable = false

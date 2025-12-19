@@ -1680,6 +1680,19 @@ impl Infer {
             }
             // Just update - either new or existing, we put it in scope
             self.update_var(name.clone(), ty.clone(), *span);
+
+            // Record variable definition for LSP
+            if let Some(span) = span {
+                self.record_symbol(
+                    *span,
+                    name.clone(),
+                    ty.clone(),
+                    Some(*span), // definition_span same as name_span for short decls
+                    Some(*span),
+                    SymbolKind::Variable,
+                    None,
+                );
+            }
         }
 
         Ok(())

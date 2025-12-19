@@ -25,7 +25,7 @@ impl SoppoExtension {
 
         let (platform, arch) = zed::current_platform();
         let asset_name = format!(
-            "soppo-lsp-{}-{}.tar.gz",
+            "sopls-{}-{}.tar.gz",
             match arch {
                 zed::Architecture::Aarch64 => "aarch64",
                 zed::Architecture::X8664 => "x86_64",
@@ -44,8 +44,8 @@ impl SoppoExtension {
             .find(|asset| asset.name == asset_name)
             .ok_or_else(|| format!("no asset found matching {:?}", asset_name))?;
 
-        let version_dir = format!("soppo-lsp-{}", release.version);
-        let binary_path = format!("{version_dir}/soppo-lsp");
+        let version_dir = format!("sopls-{}", release.version);
+        let binary_path = format!("{version_dir}/sopls");
 
         if !fs::metadata(&binary_path).map_or(false, |stat| stat.is_file()) {
             zed::set_language_server_installation_status(

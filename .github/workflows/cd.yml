@@ -64,8 +64,8 @@ jobs:
           ref: ${{ github.event.inputs.tag && format('refs/tags/{0}', github.event.inputs.tag) || github.ref }}
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: soppo-lsp
-          package: soppo-lsp
+          bin: sopls
+          package: sopls
           target: ${{ matrix.target }}
           archive: $bin-$target
           token: ${{ secrets.GITHUB_TOKEN }}
