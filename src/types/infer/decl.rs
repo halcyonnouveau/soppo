@@ -2,7 +2,7 @@ use super::Infer;
 use crate::error::{Result, SoppoError};
 use crate::syntax::{Block, ConstDecl, EnumVariant, FuncDecl, TypeDecl, TypeKind};
 use crate::types::ctx::TypeDefKind;
-use crate::types::{SymbolKind, Type};
+use crate::types::{SymbolInfo, SymbolKind, Type};
 
 impl Infer {
     /// Infer the type of a function body, adding named return parameters to scope
@@ -123,13 +123,15 @@ impl Infer {
         };
         self.record_symbol(
             func.ident.span,
-            func.ident.name.clone(),
-            func_ty,
-            Some(func.span),
-            Some(func.ident.span),
-            kind,
-            func.doc_comment.clone(),
-            None,
+            SymbolInfo {
+                name: func.ident.name.clone(),
+                ty: func_ty,
+                definition_span: Some(func.span),
+                name_span: Some(func.ident.span),
+                kind,
+                doc_comment: func.doc_comment.clone(),
+                go_location: None,
+            },
         );
 
         // Register function in global state so it can be looked up for method calls
@@ -267,13 +269,15 @@ impl Infer {
         // Record constant definition for LSP
         self.record_symbol(
             const_decl.ident.span,
-            const_decl.ident.name.clone(),
-            const_ty,
-            Some(const_decl.span),
-            Some(const_decl.ident.span),
-            SymbolKind::Constant,
-            const_decl.doc_comment.clone(),
-            None,
+            SymbolInfo {
+                name: const_decl.ident.name.clone(),
+                ty: const_ty,
+                definition_span: Some(const_decl.span),
+                name_span: Some(const_decl.ident.span),
+                kind: SymbolKind::Constant,
+                doc_comment: const_decl.doc_comment.clone(),
+                go_location: None,
+            },
         );
 
         Ok(())
@@ -323,13 +327,15 @@ impl Infer {
         // Record variable definition for LSP
         self.record_symbol(
             var_decl.ident.span,
-            var_decl.ident.name.clone(),
-            var_ty,
-            Some(var_decl.span),
-            Some(var_decl.ident.span),
-            SymbolKind::Variable,
-            None,
-            None,
+            SymbolInfo {
+                name: var_decl.ident.name.clone(),
+                ty: var_ty,
+                definition_span: Some(var_decl.span),
+                name_span: Some(var_decl.ident.span),
+                kind: SymbolKind::Variable,
+                doc_comment: None,
+                go_location: None,
+            },
         );
 
         Ok(())
@@ -340,13 +346,15 @@ impl Infer {
         // Record type definition for LSP
         self.record_symbol(
             type_decl.ident.span,
-            type_decl.ident.name.clone(),
-            Type::simple(&type_decl.ident.name),
-            Some(type_decl.span),
-            Some(type_decl.ident.span),
-            SymbolKind::Type,
-            type_decl.doc_comment.clone(),
-            None,
+            SymbolInfo {
+                name: type_decl.ident.name.clone(),
+                ty: Type::simple(&type_decl.ident.name),
+                definition_span: Some(type_decl.span),
+                name_span: Some(type_decl.ident.span),
+                kind: SymbolKind::Type,
+                doc_comment: type_decl.doc_comment.clone(),
+                go_location: None,
+            },
         );
 
         match &type_decl.kind {

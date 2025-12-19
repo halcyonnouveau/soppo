@@ -236,37 +236,9 @@ impl Infer {
     /// Record a symbol at the given span
     ///
     /// - `span`: The span of the symbol reference (where it's used)
-    /// - `name`: The symbol's name
-    /// - `ty`: The symbol's type
-    /// - `definition_span`: The full declaration span (e.g., entire `func foo(x int) int`)
-    /// - `name_span`: Just the identifier span (e.g., just `foo`) for goto-definition highlighting
-    /// - `kind`: The kind of symbol
-    /// - `doc_comment`: Optional documentation comment
-    /// - `go_location`: Source location for Go package symbols
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn record_symbol(
-        &mut self,
-        span: Span,
-        name: String,
-        ty: Type,
-        definition_span: Option<Span>,
-        name_span: Option<Span>,
-        kind: SymbolKind,
-        doc_comment: Option<String>,
-        go_location: Option<SourceLocation>,
-    ) {
-        self.symbols.record(
-            span,
-            SymbolInfo {
-                name,
-                ty,
-                definition_span,
-                name_span,
-                kind,
-                doc_comment,
-                go_location,
-            },
-        );
+    /// - `info`: The symbol information (name, type, definition location, etc.)
+    pub(super) fn record_symbol(&mut self, span: Span, info: SymbolInfo) {
+        self.symbols.record(span, info);
     }
 
     /// Record a type annotation as a symbol for LSP hover/goto-definition
@@ -312,13 +284,15 @@ impl Infer {
                 {
                     self.record_symbol(
                         ty.span,
-                        member_name.to_string(),
-                        go_ty,
-                        None,
-                        None,
-                        SymbolKind::Type,
-                        doc_comment,
-                        go_location,
+                        SymbolInfo {
+                            name: member_name.to_string(),
+                            ty: go_ty,
+                            definition_span: None,
+                            name_span: None,
+                            kind: SymbolKind::Type,
+                            doc_comment,
+                            go_location,
+                        },
                     );
                 }
             }
@@ -333,13 +307,15 @@ impl Infer {
         if let Some(type_def) = self.global_state.lookup_type(type_name).cloned() {
             self.record_symbol(
                 ty.span,
-                type_name.clone(),
-                Type::simple(type_name),
-                type_def.span,
-                type_def.name_span,
-                SymbolKind::Type,
-                type_def.doc_comment,
-                None,
+                SymbolInfo {
+                    name: type_name.clone(),
+                    ty: Type::simple(type_name),
+                    definition_span: type_def.span,
+                    name_span: type_def.name_span,
+                    kind: SymbolKind::Type,
+                    doc_comment: type_def.doc_comment,
+                    go_location: None,
+                },
             );
         }
 
@@ -1747,13 +1723,15 @@ impl Infer {
             if let Some(span) = span {
                 self.record_symbol(
                     *span,
-                    name.clone(),
-                    ty.clone(),
-                    Some(*span), // definition_span same as name_span for short decls
-                    Some(*span),
-                    SymbolKind::Variable,
-                    None,
-                    None,
+                    SymbolInfo {
+                        name: name.clone(),
+                        ty: ty.clone(),
+                        definition_span: Some(*span), // definition_span same as name_span for short decls
+                        name_span: Some(*span),
+                        kind: SymbolKind::Variable,
+                        doc_comment: None,
+                        go_location: None,
+                    },
                 );
             }
         }

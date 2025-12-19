@@ -7,7 +7,7 @@ use crate::syntax::{
 };
 use crate::types::ctx::TypeDefKind;
 use crate::types::ty::Nullability;
-use crate::types::{SymbolKind, Type};
+use crate::types::{SymbolInfo, SymbolKind, Type};
 
 /// Result of analysing a nil check condition
 #[derive(Debug)]
@@ -111,13 +111,15 @@ impl Infer {
                 // Record variable definition for LSP
                 self.record_symbol(
                     ident.span,
-                    ident.name.clone(),
-                    value_ty,
-                    Some(stmt.span),
-                    Some(ident.span),
-                    SymbolKind::Variable,
-                    None,
-                    None,
+                    SymbolInfo {
+                        name: ident.name.clone(),
+                        ty: value_ty,
+                        definition_span: Some(stmt.span),
+                        name_span: Some(ident.span),
+                        kind: SymbolKind::Variable,
+                        doc_comment: None,
+                        go_location: None,
+                    },
                 );
 
                 // Track nil state for pointer types
@@ -266,13 +268,15 @@ impl Infer {
                 // Record variable definition for LSP
                 self.record_symbol(
                     ident.span,
-                    ident.name.clone(),
-                    var_ty,
-                    Some(stmt.span),
-                    Some(ident.span),
-                    SymbolKind::Variable,
-                    None,
-                    None,
+                    SymbolInfo {
+                        name: ident.name.clone(),
+                        ty: var_ty,
+                        definition_span: Some(stmt.span),
+                        name_span: Some(ident.span),
+                        kind: SymbolKind::Variable,
+                        doc_comment: None,
+                        go_location: None,
+                    },
                 );
 
                 // Track nil state for nilable types
@@ -1216,13 +1220,15 @@ impl Infer {
                         // Record variable definition for LSP
                         self.record_symbol(
                             ident.span,
-                            ident.name.clone(),
-                            var_ty,
-                            Some(stmt.span),
-                            Some(ident.span),
-                            SymbolKind::Variable,
-                            None,
-                            None,
+                            SymbolInfo {
+                                name: ident.name.clone(),
+                                ty: var_ty,
+                                definition_span: Some(stmt.span),
+                                name_span: Some(ident.span),
+                                kind: SymbolKind::Variable,
+                                doc_comment: None,
+                                go_location: None,
+                            },
                         );
 
                         (value_ty_sub, value.span)
@@ -1266,13 +1272,15 @@ impl Infer {
                                     // Record variable definition for LSP
                                     self.record_symbol(
                                         var_ident.span,
-                                        var_ident.name.clone(),
-                                        ty.clone(),
-                                        Some(stmt.span),
-                                        Some(var_ident.span),
-                                        SymbolKind::Variable,
-                                        None,
-                                        None,
+                                        SymbolInfo {
+                                            name: var_ident.name.clone(),
+                                            ty: ty.clone(),
+                                            definition_span: Some(stmt.span),
+                                            name_span: Some(var_ident.span),
+                                            kind: SymbolKind::Variable,
+                                            doc_comment: None,
+                                            go_location: None,
+                                        },
                                     );
                                 }
                             }

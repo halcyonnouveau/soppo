@@ -5,7 +5,7 @@ use crate::error::{Result, SoppoError};
 use crate::syntax::{BinOp, EnumVariant, Expr, ExprKind, ModuleId, Span, Symbol, UnaryOp};
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
-use crate::types::symbols::SymbolKind;
+use crate::types::symbols::{SymbolInfo, SymbolKind};
 use crate::types::ty::Nullability;
 
 impl Infer {
@@ -70,13 +70,15 @@ impl Infer {
 
                     self.record_symbol(
                         expr.span,
-                        name.clone(),
-                        ty.clone(),
-                        def_span,
-                        name_span,
-                        kind,
-                        doc_comment,
-                        None,
+                        SymbolInfo {
+                            name: name.clone(),
+                            ty: ty.clone(),
+                            definition_span: def_span,
+                            name_span,
+                            kind,
+                            doc_comment,
+                            go_location: None,
+                        },
                     );
                     return Ok(ty);
                 }
@@ -100,13 +102,15 @@ impl Infer {
 
                     self.record_symbol(
                         expr.span,
-                        name.clone(),
-                        ty.clone(),
-                        func_def.span,
-                        func_def.name_span,
-                        SymbolKind::Function,
-                        func_def.doc_comment.clone(),
-                        None,
+                        SymbolInfo {
+                            name: name.clone(),
+                            ty: ty.clone(),
+                            definition_span: func_def.span,
+                            name_span: func_def.name_span,
+                            kind: SymbolKind::Function,
+                            doc_comment: func_def.doc_comment.clone(),
+                            go_location: None,
+                        },
                     );
                     return Ok(ty);
                 }
@@ -115,13 +119,15 @@ impl Infer {
                 if let Some(const_def) = self.global_state.lookup_constant(name).cloned() {
                     self.record_symbol(
                         expr.span,
-                        name.clone(),
-                        const_def.ty.clone(),
-                        const_def.span,
-                        const_def.name_span,
-                        SymbolKind::Constant,
-                        const_def.doc_comment.clone(),
-                        None,
+                        SymbolInfo {
+                            name: name.clone(),
+                            ty: const_def.ty.clone(),
+                            definition_span: const_def.span,
+                            name_span: const_def.name_span,
+                            kind: SymbolKind::Constant,
+                            doc_comment: const_def.doc_comment.clone(),
+                            go_location: None,
+                        },
                     );
                     return Ok(const_def.ty);
                 }
@@ -342,13 +348,15 @@ impl Infer {
                     // Record the type name as a symbol for hover/go-to-definition
                     self.record_symbol(
                         ty.span,
-                        ty.name.clone(),
-                        Type::simple(&ty.name),
-                        type_def.span,
-                        type_def.name_span,
-                        SymbolKind::Type,
-                        type_def.doc_comment.clone(),
-                        None,
+                        SymbolInfo {
+                            name: ty.name.clone(),
+                            ty: Type::simple(&ty.name),
+                            definition_span: type_def.span,
+                            name_span: type_def.name_span,
+                            kind: SymbolKind::Type,
+                            doc_comment: type_def.doc_comment.clone(),
+                            go_location: None,
+                        },
                     );
 
                     if let TypeDefKind::Struct { fields: field_defs } = &type_def.kind {
@@ -657,13 +665,15 @@ impl Infer {
             if let Some((import_path, import_span)) = self.get_import_info(name) {
                 self.record_symbol(
                     field_expr.span,
-                    name.to_string(),
-                    Type::simple(import_path), // Type shows the import path
-                    Some(import_span),         // Definition is the import statement
-                    None,
-                    SymbolKind::Package,
-                    Some(format!("import \"{}\"", import_path)),
-                    None,
+                    SymbolInfo {
+                        name: name.to_string(),
+                        ty: Type::simple(import_path), // Type shows the import path
+                        definition_span: Some(import_span), // Definition is the import statement
+                        name_span: None,
+                        kind: SymbolKind::Package,
+                        doc_comment: Some(format!("import \"{}\"", import_path)),
+                        go_location: None,
+                    },
                 );
             }
 
@@ -679,13 +689,15 @@ impl Infer {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
-                        field.to_string(),
-                        func_ty.clone(),
-                        def_span,
-                        name_span,
-                        SymbolKind::Function,
-                        doc_comment,
-                        None,
+                        SymbolInfo {
+                            name: field.to_string(),
+                            ty: func_ty.clone(),
+                            definition_span: def_span,
+                            name_span,
+                            kind: SymbolKind::Function,
+                            doc_comment,
+                            go_location: None,
+                        },
                     );
                     return Ok(func_ty);
                 }
@@ -696,13 +708,15 @@ impl Infer {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
-                        field.to_string(),
-                        ty.clone(),
-                        def_span,
-                        name_span,
-                        SymbolKind::Type,
-                        doc_comment,
-                        None,
+                        SymbolInfo {
+                            name: field.to_string(),
+                            ty: ty.clone(),
+                            definition_span: def_span,
+                            name_span,
+                            kind: SymbolKind::Type,
+                            doc_comment,
+                            go_location: None,
+                        },
                     );
                     return Ok(ty);
                 }
@@ -713,13 +727,15 @@ impl Infer {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
-                        field.to_string(),
-                        ty.clone(),
-                        def_span,
-                        name_span,
-                        SymbolKind::Constant,
-                        doc_comment,
-                        None,
+                        SymbolInfo {
+                            name: field.to_string(),
+                            ty: ty.clone(),
+                            definition_span: def_span,
+                            name_span,
+                            kind: SymbolKind::Constant,
+                            doc_comment,
+                            go_location: None,
+                        },
                     );
                     return Ok(ty);
                 }
@@ -736,13 +752,15 @@ impl Infer {
                 // Record symbol for go-to-definition (with Go source location)
                 self.record_symbol(
                     *field_span,
-                    field.to_string(),
-                    func_ty.clone(),
-                    None, // no Soppo definition span
-                    None, // no Soppo name span
-                    SymbolKind::Function,
-                    doc_comment,
-                    go_location,
+                    SymbolInfo {
+                        name: field.to_string(),
+                        ty: func_ty.clone(),
+                        definition_span: None, // no Soppo definition span
+                        name_span: None,       // no Soppo name span
+                        kind: SymbolKind::Function,
+                        doc_comment,
+                        go_location,
+                    },
                 );
                 return Ok(func_ty);
             }
@@ -751,13 +769,15 @@ impl Infer {
                 // Record symbol for go-to-definition (with Go source location)
                 self.record_symbol(
                     *field_span,
-                    field.to_string(),
-                    ty.clone(),
-                    None, // no Soppo definition span
-                    None, // no Soppo name span
-                    SymbolKind::Type,
-                    doc_comment,
-                    go_location,
+                    SymbolInfo {
+                        name: field.to_string(),
+                        ty: ty.clone(),
+                        definition_span: None, // no Soppo definition span
+                        name_span: None,       // no Soppo name span
+                        kind: SymbolKind::Type,
+                        doc_comment,
+                        go_location,
+                    },
                 );
                 return Ok(ty);
             }
@@ -1088,13 +1108,15 @@ impl Infer {
                     // Record field access for LSP
                     self.record_symbol(
                         *field_span,
-                        field.to_string(),
-                        field_ty.clone(),
-                        type_def.span, // Point to struct definition
-                        type_def.span, // No specific field span in TypeDef currently
-                        SymbolKind::Field,
-                        None,
-                        None,
+                        SymbolInfo {
+                            name: field.to_string(),
+                            ty: field_ty.clone(),
+                            definition_span: type_def.span, // Point to struct definition
+                            name_span: type_def.span, // No specific field span in TypeDef currently
+                            kind: SymbolKind::Field,
+                            doc_comment: None,
+                            go_location: None,
+                        },
                     );
                     return Ok(field_ty.clone());
                 } else {
@@ -1507,13 +1529,15 @@ impl Infer {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
-                        name.clone(),
-                        func_ty.clone(),
-                        def_span,
-                        name_span,
-                        SymbolKind::Function,
-                        doc_comment,
-                        None,
+                        SymbolInfo {
+                            name: name.clone(),
+                            ty: func_ty.clone(),
+                            definition_span: def_span,
+                            name_span,
+                            kind: SymbolKind::Function,
+                            doc_comment,
+                            go_location: None,
+                        },
                     );
 
                     // Found the function - infer args and check against signature
@@ -1560,13 +1584,15 @@ impl Infer {
                     // Record symbol for go-to-definition
                     self.record_symbol(
                         *field_span,
-                        name.clone(),
-                        ty.clone(),
-                        def_span,
-                        name_span,
-                        SymbolKind::Type,
-                        doc_comment,
-                        None,
+                        SymbolInfo {
+                            name: name.clone(),
+                            ty: ty.clone(),
+                            definition_span: def_span,
+                            name_span,
+                            kind: SymbolKind::Type,
+                            doc_comment,
+                            go_location: None,
+                        },
                     );
 
                     if args.len() != 1 {
@@ -1594,13 +1620,15 @@ impl Infer {
                 // Record symbol for go-to-definition (with Go source location)
                 self.record_symbol(
                     *field_span,
-                    name.clone(),
-                    ty.clone(),
-                    None, // no Soppo definition span
-                    None, // no Soppo name span
-                    SymbolKind::Type,
-                    doc_comment,
-                    go_location,
+                    SymbolInfo {
+                        name: name.clone(),
+                        ty: ty.clone(),
+                        definition_span: None, // no Soppo definition span
+                        name_span: None,       // no Soppo name span
+                        kind: SymbolKind::Type,
+                        doc_comment,
+                        go_location,
+                    },
                 );
 
                 // This is a type conversion
