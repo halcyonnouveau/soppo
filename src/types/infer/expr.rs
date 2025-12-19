@@ -76,6 +76,7 @@ impl Infer {
                         name_span,
                         kind,
                         doc_comment,
+                        None,
                     );
                     return Ok(ty);
                 }
@@ -105,6 +106,7 @@ impl Infer {
                         func_def.name_span,
                         SymbolKind::Function,
                         func_def.doc_comment.clone(),
+                        None,
                     );
                     return Ok(ty);
                 }
@@ -119,6 +121,7 @@ impl Infer {
                         const_def.name_span,
                         SymbolKind::Constant,
                         const_def.doc_comment.clone(),
+                        None,
                     );
                     return Ok(const_def.ty);
                 }
@@ -345,6 +348,7 @@ impl Infer {
                         type_def.name_span,
                         SymbolKind::Type,
                         type_def.doc_comment.clone(),
+                        None,
                     );
 
                     if let TypeDefKind::Struct { fields: field_defs } = &type_def.kind {
@@ -648,6 +652,21 @@ impl Infer {
         if let ExprKind::Ident(name) = &field_expr.kind
             && self.is_imported_package(name)
         {
+            // Record symbol for the package name itself (e.g., "bufio" in bufio.NewScanner)
+            // Go-to-definition on the package name goes to the import statement
+            if let Some((import_path, import_span)) = self.get_import_info(name) {
+                self.record_symbol(
+                    field_expr.span,
+                    name.to_string(),
+                    Type::simple(import_path), // Type shows the import path
+                    Some(import_span),         // Definition is the import statement
+                    None,
+                    SymbolKind::Package,
+                    Some(format!("import \"{}\"", import_path)),
+                    None,
+                );
+            }
+
             // For Soppo imports, look up from GlobalCtxt
             if self.is_soppo_import(name) {
                 // Mark the import as used
@@ -666,6 +685,7 @@ impl Infer {
                         name_span,
                         SymbolKind::Function,
                         doc_comment,
+                        None,
                     );
                     return Ok(func_ty);
                 }
@@ -682,6 +702,7 @@ impl Infer {
                         name_span,
                         SymbolKind::Type,
                         doc_comment,
+                        None,
                     );
                     return Ok(ty);
                 }
@@ -698,6 +719,7 @@ impl Infer {
                         name_span,
                         SymbolKind::Constant,
                         doc_comment,
+                        None,
                     );
                     return Ok(ty);
                 }
@@ -709,11 +731,34 @@ impl Infer {
             }
 
             // Go packages: try to look up as a function first
-            if let Some(func_ty) = self.lookup_go_function(name, field) {
+            if let Some((func_ty, go_location, doc_comment)) = self.lookup_go_function(name, field)
+            {
+                // Record symbol for go-to-definition (with Go source location)
+                self.record_symbol(
+                    *field_span,
+                    field.to_string(),
+                    func_ty.clone(),
+                    None, // no Soppo definition span
+                    None, // no Soppo name span
+                    SymbolKind::Function,
+                    doc_comment,
+                    go_location,
+                );
                 return Ok(func_ty);
             }
             // Try to look up as a type or constant
-            if let Some(ty) = self.lookup_go_type(name, field) {
+            if let Some((ty, go_location, doc_comment)) = self.lookup_go_type(name, field) {
+                // Record symbol for go-to-definition (with Go source location)
+                self.record_symbol(
+                    *field_span,
+                    field.to_string(),
+                    ty.clone(),
+                    None, // no Soppo definition span
+                    None, // no Soppo name span
+                    SymbolKind::Type,
+                    doc_comment,
+                    go_location,
+                );
                 return Ok(ty);
             }
             // Couldn't find it - error
@@ -1048,6 +1093,7 @@ impl Infer {
                         type_def.span, // Point to struct definition
                         type_def.span, // No specific field span in TypeDef currently
                         SymbolKind::Field,
+                        None,
                         None,
                     );
                     return Ok(field_ty.clone());
@@ -1467,6 +1513,7 @@ impl Infer {
                         name_span,
                         SymbolKind::Function,
                         doc_comment,
+                        None,
                     );
 
                     // Found the function - infer args and check against signature
@@ -1519,6 +1566,7 @@ impl Infer {
                         name_span,
                         SymbolKind::Type,
                         doc_comment,
+                        None,
                     );
 
                     if args.len() != 1 {
@@ -1542,7 +1590,19 @@ impl Infer {
             }
 
             // Look up the type from a Go package
-            if let Some(ty) = self.lookup_go_type(pkg_name, name) {
+            if let Some((ty, go_location, doc_comment)) = self.lookup_go_type(pkg_name, name) {
+                // Record symbol for go-to-definition (with Go source location)
+                self.record_symbol(
+                    *field_span,
+                    name.clone(),
+                    ty.clone(),
+                    None, // no Soppo definition span
+                    None, // no Soppo name span
+                    SymbolKind::Type,
+                    doc_comment,
+                    go_location,
+                );
+
                 // This is a type conversion
                 if args.len() != 1 {
                     return Err(SoppoError::Type {

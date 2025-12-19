@@ -1,7 +1,10 @@
+use std::path::PathBuf;
+
+use soppo::go::SourceLocation;
 use soppo::types::SymbolKind as SoppoSymbolKind;
 use tower_lsp::lsp_types::SymbolKind;
 
-use crate::{Backend, span_to_range};
+use crate::{Backend, go_location_to_lsp, span_to_range};
 
 #[test]
 fn to_lsp_symbol_kind_converts_correctly() {
@@ -32,6 +35,10 @@ fn to_lsp_symbol_kind_converts_correctly() {
     assert_eq!(
         Backend::to_lsp_symbol_kind(SoppoSymbolKind::Variant),
         SymbolKind::ENUM_MEMBER
+    );
+    assert_eq!(
+        Backend::to_lsp_symbol_kind(SoppoSymbolKind::Package),
+        SymbolKind::MODULE
     );
 }
 
@@ -399,4 +406,268 @@ func main() error {
         symbol
     );
     assert_eq!(symbol.doc_comment.as_ref().unwrap(), " help me doc");
+}
+
+#[test]
+fn go_package_function_has_go_location() {
+    let code = r#"
+package main
+
+import "bufio"
+
+func main() {
+    scanner := bufio.NewScanner(nil)
+    println(scanner)
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    assert!(
+        diagnostics.is_empty(),
+        "Should have no diagnostics: {:?}",
+        diagnostics
+    );
+    let symbols = symbols.expect("Should have symbols");
+
+    // Find 'NewScanner' at the call site
+    let call_offset = code.find("NewScanner").unwrap();
+    let symbol = symbols.find_at(call_offset);
+    assert!(
+        symbol.is_some(),
+        "Should find 'NewScanner' symbol at call site"
+    );
+    let symbol = symbol.unwrap();
+    assert_eq!(symbol.name, "NewScanner");
+    assert_eq!(symbol.kind, SoppoSymbolKind::Function);
+
+    // Should have a Go source location
+    assert!(
+        symbol.go_location.is_some(),
+        "Go package function should have go_location. Symbol: {:?}",
+        symbol
+    );
+
+    let go_loc = symbol.go_location.as_ref().unwrap();
+    // The location should point to the bufio package
+    assert!(
+        go_loc.file.to_string_lossy().contains("bufio"),
+        "Go location should be in bufio package, got: {:?}",
+        go_loc.file
+    );
+    assert!(go_loc.start_line > 0, "Line should be positive");
+}
+
+#[test]
+fn go_package_type_annotation_has_go_location() {
+    // Test that Go types in type annotations (e.g., var x *bufio.Scanner) record symbols with go_location
+    let code = r#"
+package main
+
+import "bufio"
+
+func main() {
+    var scanner ?*bufio.Scanner = nil
+    println(scanner)
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    assert!(
+        diagnostics.is_empty(),
+        "Should have no diagnostics: {:?}",
+        diagnostics
+    );
+    let symbols = symbols.expect("Should have symbols");
+
+    // Find 'Scanner' in the type annotation
+    let type_offset = code.find("Scanner").unwrap();
+    let symbol = symbols.find_at(type_offset);
+    assert!(
+        symbol.is_some(),
+        "Should find 'Scanner' symbol in type annotation"
+    );
+    let symbol = symbol.unwrap();
+    assert_eq!(symbol.name, "Scanner");
+    assert_eq!(symbol.kind, SoppoSymbolKind::Type);
+
+    // Should have a Go source location
+    assert!(
+        symbol.go_location.is_some(),
+        "Go package type in annotation should have go_location. Symbol: {:?}",
+        symbol
+    );
+
+    let go_loc = symbol.go_location.as_ref().unwrap();
+    assert!(
+        go_loc.file.to_string_lossy().contains("bufio"),
+        "Go location should be in bufio package, got: {:?}",
+        go_loc.file
+    );
+}
+
+#[test]
+fn go_location_to_lsp_converts_correctly() {
+    let go_loc = SourceLocation {
+        file: PathBuf::from("/home/user/go/src/bufio/scan.go"),
+        start_line: 10,
+        start_col: 5,
+        end_line: 10,
+        end_col: 15,
+    };
+
+    let lsp_loc = go_location_to_lsp(&go_loc);
+    assert!(lsp_loc.is_some(), "Should convert to LSP location");
+
+    let lsp_loc = lsp_loc.unwrap();
+    // LSP uses 0-based line/col, SourceLocation uses 1-based
+    assert_eq!(lsp_loc.range.start.line, 9);
+    assert_eq!(lsp_loc.range.start.character, 4);
+    assert_eq!(lsp_loc.range.end.line, 9);
+    assert_eq!(lsp_loc.range.end.character, 14);
+    assert!(lsp_loc.uri.path().ends_with("bufio/scan.go"));
+}
+
+#[test]
+fn go_package_function_has_doc_comment() {
+    let code = r#"
+package main
+
+import "bufio"
+
+func main() {
+    scanner := bufio.NewScanner(nil)
+    println(scanner)
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    assert!(
+        diagnostics.is_empty(),
+        "Should have no diagnostics: {:?}",
+        diagnostics
+    );
+    let symbols = symbols.expect("Should have symbols");
+
+    // Find 'NewScanner' at the call site
+    let call_offset = code.find("NewScanner").unwrap();
+    let symbol = symbols.find_at(call_offset);
+    assert!(
+        symbol.is_some(),
+        "Should find 'NewScanner' symbol at call site"
+    );
+    let symbol = symbol.unwrap();
+    assert_eq!(symbol.name, "NewScanner");
+
+    // Should have a doc comment from Go source
+    assert!(
+        symbol.doc_comment.is_some(),
+        "Go package function should have doc_comment. Symbol: {:?}",
+        symbol
+    );
+
+    // NewScanner's doc comment should mention Scanner or io.Reader
+    let doc = symbol.doc_comment.as_ref().unwrap();
+    assert!(
+        doc.contains("Scanner") || doc.contains("io.Reader") || doc.contains("NewScanner"),
+        "Doc comment should be relevant: {:?}",
+        doc
+    );
+}
+
+#[test]
+fn go_package_type_has_doc_comment() {
+    let code = r#"
+package main
+
+import "bufio"
+
+func main() {
+    var scanner ?*bufio.Scanner = nil
+    println(scanner)
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    assert!(
+        diagnostics.is_empty(),
+        "Should have no diagnostics: {:?}",
+        diagnostics
+    );
+    let symbols = symbols.expect("Should have symbols");
+
+    // Find 'Scanner' in the type annotation
+    let type_offset = code.find("Scanner").unwrap();
+    let symbol = symbols.find_at(type_offset);
+    assert!(
+        symbol.is_some(),
+        "Should find 'Scanner' symbol in type annotation"
+    );
+    let symbol = symbol.unwrap();
+    assert_eq!(symbol.name, "Scanner");
+    assert_eq!(symbol.kind, SoppoSymbolKind::Type);
+
+    // Should have a doc comment from Go source
+    assert!(
+        symbol.doc_comment.is_some(),
+        "Go package type should have doc_comment. Symbol: {:?}",
+        symbol
+    );
+
+    // Scanner's doc comment should be relevant
+    let doc = symbol.doc_comment.as_ref().unwrap();
+    assert!(
+        doc.contains("Scanner") || doc.contains("split") || doc.contains("token"),
+        "Doc comment should be relevant: {:?}",
+        doc
+    );
+}
+
+#[test]
+fn package_name_has_symbol_for_goto() {
+    let code = r#"
+package main
+
+import "bufio"
+
+func main() {
+    scanner := bufio.NewScanner(nil)
+    println(scanner)
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    assert!(
+        diagnostics.is_empty(),
+        "Should have no diagnostics: {:?}",
+        diagnostics
+    );
+    let symbols = symbols.expect("Should have symbols");
+
+    // Find 'bufio' (the package name) at the usage site
+    let bufio_offset = code.find("bufio.New").unwrap();
+    let symbol = symbols.find_at(bufio_offset);
+    assert!(
+        symbol.is_some(),
+        "Should find 'bufio' symbol at package usage"
+    );
+    let symbol = symbol.unwrap();
+    assert_eq!(symbol.name, "bufio");
+    assert_eq!(symbol.kind, SoppoSymbolKind::Package);
+
+    // Should have a definition span pointing to the import
+    assert!(
+        symbol.definition_span.is_some(),
+        "Package symbol should have definition_span pointing to import. Symbol: {:?}",
+        symbol
+    );
+
+    // The type should show the import path
+    assert_eq!(symbol.ty.to_string(), "bufio");
+
+    // Doc comment should show the import
+    assert!(
+        symbol.doc_comment.is_some(),
+        "Package symbol should have doc_comment"
+    );
+    let doc = symbol.doc_comment.as_ref().unwrap();
+    assert!(
+        doc.contains("import") && doc.contains("bufio"),
+        "Doc comment should show import: {:?}",
+        doc
+    );
 }

@@ -117,6 +117,7 @@ impl Infer {
                     Some(ident.span),
                     SymbolKind::Variable,
                     None,
+                    None,
                 );
 
                 // Track nil state for pointer types
@@ -270,6 +271,7 @@ impl Infer {
                     Some(stmt.span),
                     Some(ident.span),
                     SymbolKind::Variable,
+                    None,
                     None,
                 );
 
@@ -1220,6 +1222,7 @@ impl Infer {
                             Some(ident.span),
                             SymbolKind::Variable,
                             None,
+                            None,
                         );
 
                         (value_ty_sub, value.span)
@@ -1268,6 +1271,7 @@ impl Infer {
                                         Some(stmt.span),
                                         Some(var_ident.span),
                                         SymbolKind::Variable,
+                                        None,
                                         None,
                                     );
                                 }

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use miette::{Diagnostic, Result};
 use thiserror::Error;
@@ -44,6 +44,16 @@ pub struct GoPackage {
     pub soppo_types: HashMap<String, SoppoTypeDef>,
 }
 
+/// Source location in a Go file
+#[derive(Debug, Clone)]
+pub struct SourceLocation {
+    pub file: PathBuf,
+    pub start_line: usize,
+    pub start_col: usize,
+    pub end_line: usize,
+    pub end_col: usize,
+}
+
 /// Function definition
 #[derive(Debug, Clone)]
 pub struct FuncDef {
@@ -51,6 +61,8 @@ pub struct FuncDef {
     pub generics: Vec<String>,
     pub params: Vec<Param>,
     pub return_type: String,
+    pub location: Option<SourceLocation>,
+    pub doc_comment: Option<String>,
 }
 
 /// Function parameter
@@ -69,6 +81,8 @@ pub struct TypeDef {
     pub fields: Vec<Field>,
     /// For type aliases, the underlying type (e.g., "int64" for "type Duration int64")
     pub underlying: Option<String>,
+    pub location: Option<SourceLocation>,
+    pub doc_comment: Option<String>,
 }
 
 /// Struct field
@@ -85,6 +99,8 @@ pub struct Field {
 pub struct ConstDef {
     pub name: String,
     pub ty: String,
+    pub location: Option<SourceLocation>,
+    pub doc_comment: Option<String>,
 }
 
 /// Variable definition
@@ -92,6 +108,8 @@ pub struct ConstDef {
 pub struct VarDef {
     pub name: String,
     pub ty: String,
+    pub location: Option<SourceLocation>,
+    pub doc_comment: Option<String>,
 }
 
 /// Method definition (function with receiver)
@@ -101,6 +119,8 @@ pub struct MethodDef {
     pub receiver_type: String, // e.g., "Reader", "*Reader"
     pub params: Vec<Param>,
     pub return_type: String,
+    pub location: Option<SourceLocation>,
+    pub doc_comment: Option<String>,
 }
 
 /// Soppo type definition recovered from marker comments
@@ -166,8 +186,11 @@ fn extract_file(path: &Path, pkg: &mut GoPackage) -> Result<()> {
     // Extract soppo markers from comments first
     extract_soppo_markers(&source, pkg);
 
+    // Get absolute path for source locations
+    let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
     // Extract declarations
-    extract_declarations(&tree, &source, pkg);
+    extract_declarations(&tree, &source, &abs_path, pkg);
 
     Ok(())
 }
@@ -297,7 +320,7 @@ fn parse_soppo_enum(text: &str) -> Option<SoppoTypeDef> {
     Some(st)
 }
 
-fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
+fn extract_declarations(tree: &Tree, source: &str, file_path: &Path, pkg: &mut GoPackage) {
     let root = tree.root_node();
 
     // First pass: extract package name, functions, types, and constants
@@ -315,14 +338,14 @@ fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
                 }
             }
             "function_declaration" => {
-                if let Some(func) = extract_function(child, source)
+                if let Some(func) = extract_function(child, source, file_path)
                     && is_exported(&func.name)
                 {
                     pkg.functions.insert(func.name.clone(), func);
                 }
             }
             "method_declaration" => {
-                if let Some(method) = extract_method(child, source)
+                if let Some(method) = extract_method(child, source, file_path)
                     && is_exported(&method.name)
                 {
                     // Store methods by receiver type (base type without pointer)
@@ -335,10 +358,10 @@ fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
                 }
             }
             "type_declaration" => {
-                extract_type_specs(child, source, pkg);
+                extract_type_specs(child, source, file_path, pkg);
             }
             "const_declaration" => {
-                extract_const_specs(child, source, pkg);
+                extract_const_specs(child, source, file_path, pkg);
             }
             _ => {}
         }
@@ -348,12 +371,81 @@ fn extract_declarations(tree: &Tree, source: &str, pkg: &mut GoPackage) {
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         if child.kind() == "var_declaration" {
-            extract_var_specs(child, source, pkg);
+            extract_var_specs(child, source, file_path, pkg);
         }
     }
 }
 
-fn extract_function(node: tree_sitter::Node, source: &str) -> Option<FuncDef> {
+/// Create a SourceLocation from a tree-sitter node
+fn node_location(node: tree_sitter::Node, file_path: &Path) -> SourceLocation {
+    let start = node.start_position();
+    let end = node.end_position();
+    SourceLocation {
+        file: file_path.to_path_buf(),
+        start_line: start.row + 1, // tree-sitter is 0-indexed, we want 1-indexed
+        start_col: start.column + 1,
+        end_line: end.row + 1,
+        end_col: end.column + 1,
+    }
+}
+
+/// Extract doc comment from preceding comment nodes.
+/// In Go, doc comments are comments directly preceding a declaration with no blank lines between.
+fn extract_doc_comment(node: tree_sitter::Node, source: &str) -> Option<String> {
+    let mut comments = Vec::new();
+    let node_start_row = node.start_position().row;
+
+    // Walk backwards through previous siblings to find comment nodes
+    let mut prev = node.prev_sibling();
+    while let Some(sibling) = prev {
+        if sibling.kind() == "comment" {
+            let comment_end_row = sibling.end_position().row;
+            // Check if this comment is directly adjacent (no blank line between)
+            // Allow for comments to be on consecutive lines
+            let next_node_row = comments
+                .last()
+                .map(|(_, row): &(String, usize)| *row)
+                .unwrap_or(node_start_row);
+
+            if next_node_row.saturating_sub(comment_end_row) <= 1 {
+                let text = node_text(sibling, source);
+                comments.push((text.to_string(), sibling.start_position().row));
+                prev = sibling.prev_sibling();
+                continue;
+            }
+        }
+        break;
+    }
+
+    if comments.is_empty() {
+        return None;
+    }
+
+    // Reverse to get comments in correct order (top to bottom)
+    comments.reverse();
+
+    // Process comments: strip // or /* */ and join
+    let doc = comments
+        .into_iter()
+        .map(|(text, _)| {
+            if text.starts_with("//") {
+                text.strip_prefix("//").unwrap_or(&text).to_string()
+            } else if text.starts_with("/*") && text.ends_with("*/") {
+                text.strip_prefix("/*")
+                    .and_then(|s| s.strip_suffix("*/"))
+                    .unwrap_or(&text)
+                    .to_string()
+            } else {
+                text
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Some(doc)
+}
+
+fn extract_function(node: tree_sitter::Node, source: &str, file_path: &Path) -> Option<FuncDef> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source).to_string();
 
@@ -362,6 +454,8 @@ fn extract_function(node: tree_sitter::Node, source: &str) -> Option<FuncDef> {
         generics: Vec::new(),
         params: Vec::new(),
         return_type: String::new(),
+        location: Some(node_location(name_node, file_path)),
+        doc_comment: extract_doc_comment(node, source),
     };
 
     // Extract type parameters (generics)
@@ -382,7 +476,7 @@ fn extract_function(node: tree_sitter::Node, source: &str) -> Option<FuncDef> {
     Some(func)
 }
 
-fn extract_method(node: tree_sitter::Node, source: &str) -> Option<MethodDef> {
+fn extract_method(node: tree_sitter::Node, source: &str, file_path: &Path) -> Option<MethodDef> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source).to_string();
 
@@ -395,6 +489,8 @@ fn extract_method(node: tree_sitter::Node, source: &str) -> Option<MethodDef> {
         receiver_type,
         params: Vec::new(),
         return_type: String::new(),
+        location: Some(node_location(name_node, file_path)),
+        doc_comment: extract_doc_comment(node, source),
     };
 
     // Extract parameters
@@ -515,13 +611,34 @@ fn extract_params(node: tree_sitter::Node, source: &str, params: &mut Vec<Param>
     }
 }
 
-fn extract_type_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+fn extract_type_specs(
+    node: tree_sitter::Node,
+    source: &str,
+    file_path: &Path,
+    pkg: &mut GoPackage,
+) {
+    // Count type specs to determine if this is a single or grouped declaration
+    let mut spec_count = 0;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_spec" || child.kind() == "type_alias" {
+            spec_count += 1;
+        }
+    }
+
+    // For single type declarations, the doc comment is on the type_declaration node
+    let parent_doc = if spec_count == 1 {
+        extract_doc_comment(node, source)
+    } else {
+        None
+    };
+
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         // Handle both type_spec (type X Y) and type_alias (type X = Y)
         let type_def = match child.kind() {
-            "type_spec" => extract_type_spec(child, source),
-            "type_alias" => extract_type_alias(child, source),
+            "type_spec" => extract_type_spec(child, source, file_path, parent_doc.as_deref()),
+            "type_alias" => extract_type_alias(child, source, file_path, parent_doc.as_deref()),
             _ => None,
         };
 
@@ -533,9 +650,19 @@ fn extract_type_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage
     }
 }
 
-fn extract_type_spec(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
+fn extract_type_spec(
+    node: tree_sitter::Node,
+    source: &str,
+    file_path: &Path,
+    parent_doc: Option<&str>,
+) -> Option<TypeDef> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source).to_string();
+
+    // Use parent doc comment, or extract own doc comment (for grouped types)
+    let doc_comment = parent_doc
+        .map(|s| s.to_string())
+        .or_else(|| extract_doc_comment(node, source));
 
     let mut type_def = TypeDef {
         name,
@@ -543,6 +670,8 @@ fn extract_type_spec(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
         kind: "alias".to_string(),
         fields: Vec::new(),
         underlying: None,
+        location: Some(node_location(name_node, file_path)),
+        doc_comment,
     };
 
     // Extract type parameters
@@ -572,12 +701,22 @@ fn extract_type_spec(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
 }
 
 /// Extract a type alias (type X = Y)
-fn extract_type_alias(node: tree_sitter::Node, source: &str) -> Option<TypeDef> {
+fn extract_type_alias(
+    node: tree_sitter::Node,
+    source: &str,
+    file_path: &Path,
+    parent_doc: Option<&str>,
+) -> Option<TypeDef> {
     let name_node = node.child_by_field_name("name")?;
     let name = node_text(name_node, source).to_string();
 
     let type_node = node.child_by_field_name("type")?;
     let underlying = extract_type_string(type_node, source);
+
+    // Use parent doc comment, or extract own doc comment (for grouped types)
+    let doc_comment = parent_doc
+        .map(|s| s.to_string())
+        .or_else(|| extract_doc_comment(node, source));
 
     Some(TypeDef {
         name,
@@ -585,6 +724,8 @@ fn extract_type_alias(node: tree_sitter::Node, source: &str) -> Option<TypeDef> 
         kind: "alias".to_string(),
         fields: Vec::new(),
         underlying: Some(underlying),
+        location: Some(node_location(name_node, file_path)),
+        doc_comment,
     })
 }
 
@@ -641,7 +782,12 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
     }
 }
 
-fn extract_const_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+fn extract_const_specs(
+    node: tree_sitter::Node,
+    source: &str,
+    file_path: &Path,
+    pkg: &mut GoPackage,
+) {
     // In Go, const blocks can have implicit typing:
     // const (
     //     Nanosecond Duration = 1       // explicit type
@@ -650,10 +796,33 @@ fn extract_const_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackag
     // Track the inherited type across const_specs in the block
     let mut inherited_type = String::new();
 
+    // Count specs to determine if this is a single or grouped declaration
+    let mut spec_count = 0;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "const_spec" {
-            inherited_type = extract_const_spec_with_type(child, source, pkg, &inherited_type);
+            spec_count += 1;
+        }
+    }
+
+    // For single const declarations, the doc comment is on the const_declaration node
+    let parent_doc = if spec_count == 1 {
+        extract_doc_comment(node, source)
+    } else {
+        None
+    };
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "const_spec" {
+            inherited_type = extract_const_spec_with_type(
+                child,
+                source,
+                file_path,
+                pkg,
+                &inherited_type,
+                parent_doc.as_deref(),
+            );
         }
     }
 }
@@ -662,17 +831,19 @@ fn extract_const_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackag
 fn extract_const_spec_with_type(
     node: tree_sitter::Node,
     source: &str,
+    file_path: &Path,
     pkg: &mut GoPackage,
     inherited_type: &str,
+    parent_doc: Option<&str>,
 ) -> String {
-    let mut names = Vec::new();
+    let mut names: Vec<(String, tree_sitter::Node)> = Vec::new();
     let mut explicit_ty = String::new();
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
             "identifier" => {
-                names.push(node_text(child, source).to_string());
+                names.push((node_text(child, source).to_string(), child));
             }
             _ if is_type_node(child.kind()) => {
                 explicit_ty = extract_type_string(child, source);
@@ -696,13 +867,20 @@ fn extract_const_spec_with_type(
         "untyped".to_string()
     };
 
-    for name in names {
+    // Use parent doc comment, or extract own doc comment (for grouped consts)
+    let doc_comment = parent_doc
+        .map(|s| s.to_string())
+        .or_else(|| extract_doc_comment(node, source));
+
+    for (name, name_node) in names {
         if is_exported(&name) {
             pkg.constants.insert(
                 name.clone(),
                 ConstDef {
                     name,
                     ty: ty.clone(),
+                    location: Some(node_location(name_node, file_path)),
+                    doc_comment: doc_comment.clone(),
                 },
             );
         }
@@ -733,19 +911,43 @@ fn infer_const_type(node: tree_sitter::Node) -> String {
     "untyped".to_string()
 }
 
-fn extract_var_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
+fn extract_var_specs(node: tree_sitter::Node, source: &str, file_path: &Path, pkg: &mut GoPackage) {
+    // Count specs to determine if this is a single or grouped declaration
+    let mut spec_count = 0;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "var_spec" {
+            spec_count += 1;
+        } else if child.kind() == "var_spec_list" {
+            // For var blocks, count inner specs
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "var_spec" {
+                    spec_count += 1;
+                }
+            }
+        }
+    }
+
+    // For single var declarations, the doc comment is on the var_declaration node
+    let parent_doc = if spec_count == 1 {
+        extract_doc_comment(node, source)
+    } else {
+        None
+    };
+
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
             "var_spec" => {
-                extract_var_spec(child, source, pkg);
+                extract_var_spec(child, source, file_path, pkg, parent_doc.as_deref());
             }
             "var_spec_list" => {
                 // For var blocks: var ( ... )
                 let mut inner_cursor = child.walk();
                 for inner_child in child.children(&mut inner_cursor) {
                     if inner_child.kind() == "var_spec" {
-                        extract_var_spec(inner_child, source, pkg);
+                        extract_var_spec(inner_child, source, file_path, pkg, None);
                     }
                 }
             }
@@ -754,15 +956,21 @@ fn extract_var_specs(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage)
     }
 }
 
-fn extract_var_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) {
-    let mut names = Vec::new();
+fn extract_var_spec(
+    node: tree_sitter::Node,
+    source: &str,
+    file_path: &Path,
+    pkg: &mut GoPackage,
+    parent_doc: Option<&str>,
+) {
+    let mut names: Vec<(String, tree_sitter::Node)> = Vec::new();
     let mut ty = String::new();
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
             "identifier" => {
-                names.push(node_text(child, source).to_string());
+                names.push((node_text(child, source).to_string(), child));
             }
             "expression_list" => {
                 // Try to infer type from expression (e.g., function call)
@@ -777,15 +985,22 @@ fn extract_var_spec(node: tree_sitter::Node, source: &str, pkg: &mut GoPackage) 
         }
     }
 
+    // Use parent doc comment, or extract own doc comment (for grouped vars)
+    let doc_comment = parent_doc
+        .map(|s| s.to_string())
+        .or_else(|| extract_doc_comment(node, source));
+
     // Only add exported variables with known types
     if !ty.is_empty() {
-        for name in names {
+        for (name, name_node) in names {
             if is_exported(&name) {
                 pkg.variables.insert(
                     name.clone(),
                     VarDef {
                         name,
                         ty: ty.clone(),
+                        location: Some(node_location(name_node, file_path)),
+                        doc_comment: doc_comment.clone(),
                     },
                 );
             }

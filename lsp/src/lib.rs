@@ -9,6 +9,7 @@ use miette::Diagnostic as MietteDiagnostic;
 use soppo::build::{typecheck, typecheck_with_symbols, typecheck_workspace};
 use soppo::error::SoppoError;
 use soppo::format::format_source;
+use soppo::go::SourceLocation;
 use soppo::syntax::{FileId, FileRegistry, Span};
 use soppo::types::{GlobalCtxt, SymbolKind as SoppoSymbolKind, SymbolTable};
 use tokio::sync::RwLock;
@@ -29,6 +30,25 @@ pub fn span_to_range(span: Span) -> Range {
             character: span.end.col.saturating_sub(1) as u32,
         },
     }
+}
+
+/// Convert a Go SourceLocation to an LSP Location.
+/// SourceLocation uses 1-based line/col, LSP uses 0-based.
+pub fn go_location_to_lsp(loc: &SourceLocation) -> Option<Location> {
+    let uri = Url::from_file_path(&loc.file).ok()?;
+    Some(Location {
+        uri,
+        range: Range {
+            start: Position {
+                line: loc.start_line.saturating_sub(1) as u32,
+                character: loc.start_col.saturating_sub(1) as u32,
+            },
+            end: Position {
+                line: loc.end_line.saturating_sub(1) as u32,
+                character: loc.end_col.saturating_sub(1) as u32,
+            },
+        },
+    })
 }
 
 /// Convert a SoppoError to LSP diagnostics.
@@ -453,6 +473,7 @@ impl Backend {
             SoppoSymbolKind::Variant => SymbolKind::ENUM_MEMBER,
             SoppoSymbolKind::Constant => SymbolKind::CONSTANT,
             SoppoSymbolKind::Method => SymbolKind::METHOD,
+            SoppoSymbolKind::Package => SymbolKind::MODULE,
         }
     }
 
@@ -467,6 +488,7 @@ impl Backend {
             SoppoSymbolKind::Variant => CompletionItemKind::ENUM_MEMBER,
             SoppoSymbolKind::Constant => CompletionItemKind::CONSTANT,
             SoppoSymbolKind::Method => CompletionItemKind::METHOD,
+            SoppoSymbolKind::Package => CompletionItemKind::MODULE,
         }
     }
 
@@ -618,6 +640,7 @@ impl LanguageServer for Backend {
                 SymbolKind::Type => format!("type {} {}", symbol.name, symbol.ty),
                 SymbolKind::Field => format!("{} {}", symbol.name, symbol.ty),
                 SymbolKind::Variant => symbol.name.clone(),
+                SymbolKind::Package => format!("package {}", symbol.name),
                 SymbolKind::Function | SymbolKind::Method => {
                     // Type displays as "func(...) ret", so strip the "func" prefix
                     let ty_str = symbol.ty.to_string();
@@ -702,30 +725,38 @@ impl LanguageServer for Backend {
                 let open_docs = self.open_documents.read().await;
                 if let Some(text) = open_docs.get(&path) {
                     let offset = Self::position_to_byte_offset(text, position);
-                    if let Some(symbol) = symbols.find_at(offset)
-                        && let Some(def_span) = symbol.definition_span
-                    {
-                        // Use name_span for highlighting if available, otherwise fall back to def_span
-                        let highlight_span = symbol.name_span.unwrap_or(def_span);
+                    if let Some(symbol) = symbols.find_at(offset) {
+                        // Check for Go source location first (external Go packages)
+                        if let Some(ref go_loc) = symbol.go_location
+                            && let Some(location) = go_location_to_lsp(go_loc)
+                        {
+                            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                        }
 
-                        // Check if definition is in a different file
-                        let def_uri = if def_span.file != file_id {
-                            // Cross-file: look up the path
-                            if let Some(def_path) = ws.file_registry.get_path(def_span.file) {
-                                Url::from_file_path(def_path).ok()
+                        // Fall back to Soppo definition span
+                        if let Some(def_span) = symbol.definition_span {
+                            // Use name_span for highlighting if available, otherwise fall back to def_span
+                            let highlight_span = symbol.name_span.unwrap_or(def_span);
+
+                            // Check if definition is in a different file
+                            let def_uri = if def_span.file != file_id {
+                                // Cross-file: look up the path
+                                if let Some(def_path) = ws.file_registry.get_path(def_span.file) {
+                                    Url::from_file_path(def_path).ok()
+                                } else {
+                                    None
+                                }
                             } else {
-                                None
-                            }
-                        } else {
-                            // Same file
-                            Some(uri.clone())
-                        };
+                                // Same file
+                                Some(uri.clone())
+                            };
 
-                        if let Some(def_uri) = def_uri {
-                            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                                uri: def_uri,
-                                range: span_to_range(highlight_span),
-                            })));
+                            if let Some(def_uri) = def_uri {
+                                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                                    uri: def_uri,
+                                    range: span_to_range(highlight_span),
+                                })));
+                            }
                         }
                     }
                 }
@@ -747,6 +778,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        // Check for Go source location first (external Go packages)
+        if let Some(ref go_loc) = symbol.go_location
+            && let Some(location) = go_location_to_lsp(go_loc)
+        {
+            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+        }
+
+        // Fall back to Soppo definition span
         let Some(def_span) = symbol.definition_span else {
             return Ok(None);
         };

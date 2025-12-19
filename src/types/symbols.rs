@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use super::ty::Type;
+use crate::go::SourceLocation;
 use crate::syntax::{ModuleId, Span};
 
 /// Information about a symbol at a specific location
@@ -22,6 +23,9 @@ pub struct SymbolInfo {
     pub kind: SymbolKind,
     /// Documentation comment for this symbol
     pub doc_comment: Option<String>,
+    /// Source location for Go package symbols (file path + line/col)
+    /// Used for goto-definition in external Go packages
+    pub go_location: Option<SourceLocation>,
 }
 
 /// What kind of symbol this is
@@ -43,6 +47,8 @@ pub enum SymbolKind {
     Constant,
     /// Method
     Method,
+    /// Package or module import
+    Package,
 }
 
 /// Symbol table mapping byte ranges to symbol information.
@@ -133,6 +139,7 @@ mod tests {
                 name_span: Some(make_span(10, 15)),
                 kind: SymbolKind::Variable,
                 doc_comment: None,
+                go_location: None,
             },
         );
 
@@ -167,6 +174,7 @@ mod tests {
                 name_span: None,
                 kind: SymbolKind::Variable,
                 doc_comment: None,
+                go_location: None,
             },
         );
 
@@ -179,6 +187,7 @@ mod tests {
                 name_span: None,
                 kind: SymbolKind::Function,
                 doc_comment: None,
+                go_location: None,
             },
         );
 

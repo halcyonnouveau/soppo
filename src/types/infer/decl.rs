@@ -129,6 +129,7 @@ impl Infer {
             Some(func.ident.span),
             kind,
             func.doc_comment.clone(),
+            None,
         );
 
         // Register function in global state so it can be looked up for method calls
@@ -272,6 +273,7 @@ impl Infer {
             Some(const_decl.ident.span),
             SymbolKind::Constant,
             const_decl.doc_comment.clone(),
+            None,
         );
 
         Ok(())
@@ -327,6 +329,7 @@ impl Infer {
             Some(var_decl.ident.span),
             SymbolKind::Variable,
             None,
+            None,
         );
 
         Ok(())
@@ -343,6 +346,7 @@ impl Infer {
             Some(type_decl.ident.span),
             SymbolKind::Type,
             type_decl.doc_comment.clone(),
+            None,
         );
 
         match &type_decl.kind {

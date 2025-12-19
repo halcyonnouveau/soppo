@@ -10,7 +10,7 @@ use super::ctx::GlobalCtxt;
 use super::symbols::{SymbolInfo, SymbolKind, SymbolTable};
 use super::ty::{Nullability, Type};
 use crate::error::{Result, SoppoError};
-use crate::go::{GoCache, Project, parse_go_type};
+use crate::go::{GoCache, Project, SourceLocation, parse_go_type};
 use crate::syntax::{
     Expr, ExprKind, Import, ModuleId, Span, Symbol, TypeAnnotation as AstType, UnaryOp,
 };
@@ -242,6 +242,7 @@ impl Infer {
     /// - `name_span`: Just the identifier span (e.g., just `foo`) for goto-definition highlighting
     /// - `kind`: The kind of symbol
     /// - `doc_comment`: Optional documentation comment
+    /// - `go_location`: Source location for Go package symbols
     #[allow(clippy::too_many_arguments)]
     pub(super) fn record_symbol(
         &mut self,
@@ -252,6 +253,7 @@ impl Infer {
         name_span: Option<Span>,
         kind: SymbolKind,
         doc_comment: Option<String>,
+        go_location: Option<SourceLocation>,
     ) {
         self.symbols.record(
             span,
@@ -262,6 +264,7 @@ impl Infer {
                 name_span,
                 kind,
                 doc_comment,
+                go_location,
             },
         );
     }
@@ -296,23 +299,47 @@ impl Infer {
             return;
         }
 
-        // Handle qualified types like pkg.Type - extract the base type name
-        let base_name = if let Some(dot_idx) = type_name.find('.') {
-            &type_name[dot_idx + 1..]
-        } else {
-            type_name.as_str()
-        };
+        // Handle qualified types like pkg.Type
+        if let Some(dot_idx) = type_name.find('.') {
+            let pkg_name = &type_name[..dot_idx];
+            let member_name = &type_name[dot_idx + 1..];
 
-        // Look up user-defined type
-        if let Some(type_def) = self.global_state.lookup_type(base_name).cloned() {
+            // Check if this is a Go package import
+            if matches!(self.imports.get(pkg_name), Some((_, _, _, ImportKind::Go))) {
+                // Look up Go type and record with Go location
+                if let Some((go_ty, go_location, doc_comment)) =
+                    self.lookup_go_type(pkg_name, member_name)
+                {
+                    self.record_symbol(
+                        ty.span,
+                        member_name.to_string(),
+                        go_ty,
+                        None,
+                        None,
+                        SymbolKind::Type,
+                        doc_comment,
+                        go_location,
+                    );
+                }
+            }
+            // Also recurse into generic type arguments
+            for arg in &ty.args {
+                self.record_type_annotation(arg);
+            }
+            return;
+        }
+
+        // Look up user-defined Soppo type
+        if let Some(type_def) = self.global_state.lookup_type(type_name).cloned() {
             self.record_symbol(
                 ty.span,
                 type_name.clone(),
-                Type::simple(base_name),
+                Type::simple(type_name),
                 type_def.span,
                 type_def.name_span,
                 SymbolKind::Type,
                 type_def.doc_comment,
+                None,
             );
         }
 
@@ -517,11 +544,12 @@ impl Infer {
     }
 
     /// Look up a function in an imported Go package
+    /// Returns (type, location, doc_comment) if found
     pub(super) fn lookup_go_function(
         &mut self,
         package_name: &str,
         func_name: &str,
-    ) -> Option<Type> {
+    ) -> Option<(Type, Option<SourceLocation>, Option<String>)> {
         // Get the import path for this package and mark as used
         let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
@@ -551,7 +579,11 @@ impl Infer {
             Self::parse_go_type_with_module(&func_def.return_type, package_name)
         };
 
-        Some(Type::fun(param_types, return_type))
+        Some((
+            Type::fun(param_types, return_type),
+            func_def.location.clone(),
+            func_def.doc_comment.clone(),
+        ))
     }
 
     /// Parse a Go type string and set the module for types that are from the given package
@@ -619,8 +651,13 @@ impl Infer {
         }
     }
 
-    /// Look up a type in an imported Go package
-    pub(super) fn lookup_go_type(&mut self, package_name: &str, type_name: &str) -> Option<Type> {
+    /// Look up a type, constant, or variable in an imported Go package
+    /// Returns (type, location, doc_comment) if found
+    pub(super) fn lookup_go_type(
+        &mut self,
+        package_name: &str,
+        type_name: &str,
+    ) -> Option<(Type, Option<SourceLocation>, Option<String>)> {
         // Get the import path for this package and mark as used
         let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
@@ -633,55 +670,73 @@ impl Infer {
             .ok()?;
 
         // Check if it's a regular Go type
-        if pkg.types.contains_key(type_name) {
-            return Some(Type::Con {
-                sym: Symbol {
-                    module: ModuleId::new(package_name),
-                    name: type_name.to_string(),
-                    span: Span::dummy(),
+        if let Some(type_def) = pkg.types.get(type_name) {
+            return Some((
+                Type::Con {
+                    sym: Symbol {
+                        module: ModuleId::new(package_name),
+                        name: type_name.to_string(),
+                        span: Span::dummy(),
+                    },
+                    args: vec![],
+                    nullable: false,
                 },
-                args: vec![],
-                nullable: false,
-            });
+                type_def.location.clone(),
+                type_def.doc_comment.clone(),
+            ));
         }
 
         // Check if it's a Soppo type (from //soppo:enum markers)
         if pkg.soppo_types.contains_key(type_name) {
-            return Some(Type::Con {
-                sym: Symbol {
-                    module: ModuleId::new(package_name),
-                    name: type_name.to_string(),
-                    span: Span::dummy(),
+            return Some((
+                Type::Con {
+                    sym: Symbol {
+                        module: ModuleId::new(package_name),
+                        name: type_name.to_string(),
+                        span: Span::dummy(),
+                    },
+                    args: vec![],
+                    nullable: false,
                 },
-                args: vec![],
-                nullable: false,
-            });
+                None,
+                None,
+            )); // Soppo types from markers don't have precise locations or docs
         }
 
         // Check if it's a constant
         if let Some(const_def) = pkg.constants.get(type_name) {
             let const_ty = &const_def.ty;
+            let location = const_def.location.clone();
+            let doc_comment = const_def.doc_comment.clone();
             // If the constant's type is a type defined in this package, return it with module info
             if pkg.types.contains_key(const_ty) {
-                return Some(Type::Con {
-                    sym: Symbol {
-                        module: ModuleId::new(package_name),
-                        name: const_ty.to_string(),
-                        span: Span::dummy(),
+                return Some((
+                    Type::Con {
+                        sym: Symbol {
+                            module: ModuleId::new(package_name),
+                            name: const_ty.to_string(),
+                            span: Span::dummy(),
+                        },
+                        args: vec![],
+                        nullable: false,
                     },
-                    args: vec![],
-                    nullable: false,
-                });
+                    location,
+                    doc_comment,
+                ));
             }
             // Otherwise parse it as a Go type (for primitive types, etc.)
-            return Some(parse_go_type(const_ty));
+            return Some((parse_go_type(const_ty), location, doc_comment));
         }
 
         // Check if it's a variable (e.g., os.Stdin, os.Stdout, http.DefaultClient)
         // Use parse_go_type_with_module to set the module on types from this package
         // so that method lookups work correctly (e.g., http.DefaultClient.Do)
         if let Some(var_def) = pkg.variables.get(type_name) {
-            return Some(Self::parse_go_type_with_module(&var_def.ty, package_name));
+            return Some((
+                Self::parse_go_type_with_module(&var_def.ty, package_name),
+                var_def.location.clone(),
+                var_def.doc_comment.clone(),
+            ));
         }
 
         None
@@ -796,6 +851,13 @@ impl Infer {
     /// Check if a name refers to an imported Go package
     pub(super) fn is_imported_package(&self, name: &str) -> bool {
         self.imports.contains_key(name)
+    }
+
+    /// Get import info for a package name (import path and span of import statement)
+    pub(super) fn get_import_info(&self, name: &str) -> Option<(&str, Span)> {
+        self.imports
+            .get(name)
+            .map(|(path, span, _, _)| (path.as_str(), *span))
     }
 
     /// Check if a type is an interface from a Go package
@@ -1690,6 +1752,7 @@ impl Infer {
                     Some(*span), // definition_span same as name_span for short decls
                     Some(*span),
                     SymbolKind::Variable,
+                    None,
                     None,
                 );
             }
