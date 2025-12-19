@@ -72,8 +72,8 @@ type Colour enum {
 func main() {
 	light := Colour.Red
 
-	fmt.Println("Light is:", light)
-	fmt.Println("Is red?", light == Colour.Red)
+	fmt.Println("Light is: {light}")
+	fmt.Println("Is red? {light == Colour.Red}")
 }
 `,
   },
@@ -103,8 +103,8 @@ func main() {
 	c := Shape.Circle{radius: 5.0}
 	r := Shape.Rectangle{width: 3.0, height: 4.0}
 
-	fmt.Println("Circle:", c)
-	fmt.Println("Rectangle:", r)
+	fmt.Println("Circle: {c}")
+	fmt.Println("Rectangle: {r}")
 }
 `,
   },
@@ -138,8 +138,8 @@ func main() {
 	c := Shape.Circle{radius: 5.0}
 	r := Shape.Rectangle{width: 3.0, height: 4.0}
 
-	fmt.Println("Circle area:", area(c))
-	fmt.Println("Rectangle area:", area(r))
+	fmt.Println("Circle area: {area(c)}")
+	fmt.Println("Rectangle area: {area(r)}")
 }
 `,
   },
@@ -208,10 +208,10 @@ func findUser(id int) ?*User {
 
 func main() {
 	user := findUser(1)
-	fmt.Println("Found:", user)
+	fmt.Println("Found: {user}")
 
 	nobody := findUser(0)
-	fmt.Println("Not found:", nobody)
+	fmt.Println("Not found: {nobody}")
 }
 `,
   },
@@ -248,7 +248,7 @@ func main() {
 	}
 
 	// user is *User here (narrowed)
-	fmt.Println("Hello,", user.name)
+	fmt.Println("Hello, {user.name}")
 }
 `,
   },
@@ -282,7 +282,7 @@ func connect() (string, error) {
 func main() {
 	result, err := connect()
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("Error: {err}")
 		return
 	}
 	fmt.Println(result)
@@ -323,7 +323,7 @@ func process(id int) (string, error) {
 func main() {
 	result, err := process(0)
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("Error: {err}")
 		return
 	}
 	fmt.Println(result)
@@ -343,9 +343,9 @@ You can mix positional and named arguments. Named arguments use the parameter na
 import "fmt"
 
 func createUser(name string, age int, active bool) {
-	fmt.Println("Name:", name)
-	fmt.Println("Age:", age)
-	fmt.Println("Active:", active)
+	fmt.Println("Name: {name}")
+	fmt.Println("Age: {age}")
+	fmt.Println("Active: {active}")
 }
 
 func main() {
@@ -394,7 +394,7 @@ func main() {
 	result := divide(10, 2)
 	match result {
 	case Option.Some{Value: v}:
-		fmt.Println("Result:", v)
+		fmt.Println("Result: {v}")
 	case Option.None:
 		fmt.Println("Cannot divide by zero")
 	}
@@ -402,7 +402,7 @@ func main() {
 	result2 := divide(10, 0)
 	match result2 {
 	case Option.Some{Value: v}:
-		fmt.Println("Result:", v)
+		fmt.Println("Result: {v}")
 	case Option.None:
 		fmt.Println("Cannot divide by zero")
 	}
@@ -431,11 +431,11 @@ func main() {
 
 	// Direct assertion - compiler knows it's Circle
 	circle := shape.(Shape.Circle)
-	fmt.Println("Radius:", circle.radius)
+	fmt.Println("Radius: {circle.radius}")
 
 	// For unknown variants, use comma-ok form
 	if rect, ok := shape.(Shape.Rectangle); ok {
-		fmt.Println("Width:", rect.width)
+		fmt.Println("Width: {rect.width}")
 	} else {
 		fmt.Println("Not a rectangle")
 	}
@@ -468,7 +468,7 @@ func findUser(id int) ?*User {
 func main() {
 	// We know user 1 exists
 	user := findUser(1).(!nil)
-	fmt.Println("Hello,", user.name)
+	fmt.Println("Hello, {user.name}")
 
 	// This would panic:
 	// nobody := findUser(0).(!nil)
