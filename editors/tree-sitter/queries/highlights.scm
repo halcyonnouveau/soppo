@@ -2,6 +2,7 @@
 [
   "break"
   "case"
+  "chan"
   "const"
   "continue"
   "default"
@@ -89,6 +90,10 @@
 ; Soppo: ? for nullable types and try
 "?" @operator
 
+; Soppo: error name in try expression
+(try_expression
+  error_name: (identifier) @variable)
+
 ; Literals
 (int_literal) @number
 (float_literal) @number.float
@@ -163,7 +168,7 @@
 
 ; Imports
 (import_spec
-  path: (_) @string.special)
+  path: (_) @string)
 
 ; Package clause
 (package_clause

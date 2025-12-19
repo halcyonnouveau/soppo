@@ -2391,6 +2391,26 @@
     "type": "try_expression",
     "named": true,
     "fields": {
+      "error_name": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "handler": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
       "operand": {
         "multiple": false,
         "required": true,

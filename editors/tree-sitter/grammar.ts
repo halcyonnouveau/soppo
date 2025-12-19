@@ -791,9 +791,21 @@ export default grammar({
         $.nil_assertion_expression,
       ),
 
-    // Soppo: try expression (expr?)
+    // Soppo: try expression (expr? or expr? err { block })
     try_expression: ($) =>
-      prec(PREC.primary, seq(field("operand", $._expression), "?")),
+      prec.right(
+        PREC.primary,
+        seq(
+          field("operand", $._expression),
+          "?",
+          optional(
+            seq(
+              field("error_name", optional($.identifier)),
+              field("handler", $.block),
+            ),
+          ),
+        ),
+      ),
 
     // Soppo: nil assertion (expr.(!nil))
     nil_assertion_expression: ($) =>

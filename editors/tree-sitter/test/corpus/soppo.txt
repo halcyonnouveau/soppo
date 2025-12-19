@@ -151,6 +151,113 @@ func foo() error {
             (nil)))))))
 
 ================================================================================
+Try expression with error handler
+================================================================================
+
+func foo() error {
+  x := bar() ? err {
+    return err
+  }
+  return nil
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    result: (type_identifier)
+    body: (block
+      (statement_list
+        (short_var_declaration
+          left: (expression_list
+            (identifier))
+          right: (expression_list
+            (try_expression
+              operand: (call_expression
+                function: (identifier)
+                arguments: (argument_list))
+              error_name: (identifier)
+              handler: (block
+                (statement_list
+                  (return_statement
+                    (expression_list
+                      (identifier))))))))
+        (return_statement
+          (expression_list
+            (nil)))))))
+
+================================================================================
+Try expression with empty error handler
+================================================================================
+
+func foo() error {
+  x := bar() ? err {}
+  return nil
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    result: (type_identifier)
+    body: (block
+      (statement_list
+        (short_var_declaration
+          left: (expression_list
+            (identifier))
+          right: (expression_list
+            (try_expression
+              operand: (call_expression
+                function: (identifier)
+                arguments: (argument_list))
+              error_name: (identifier)
+              handler: (block))))
+        (return_statement
+          (expression_list
+            (nil)))))))
+
+================================================================================
+Try expression with anonymous error handler
+================================================================================
+
+func foo() error {
+  x := bar() ? {
+    return nil
+  }
+  return nil
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    result: (type_identifier)
+    body: (block
+      (statement_list
+        (short_var_declaration
+          left: (expression_list
+            (identifier))
+          right: (expression_list
+            (try_expression
+              operand: (call_expression
+                function: (identifier)
+                arguments: (argument_list))
+              handler: (block
+                (statement_list
+                  (return_statement
+                    (expression_list
+                      (nil))))))))
+        (return_statement
+          (expression_list
+            (nil)))))))
+
+================================================================================
 Nil assertion expression
 ================================================================================
 
