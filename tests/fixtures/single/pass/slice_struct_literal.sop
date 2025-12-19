@@ -1,0 +1,30 @@
+package main
+
+import "fmt"
+
+func main() {
+    // Slice of anonymous struct with newline before opening brace
+    tests := []struct {
+        input               string
+        major, minor, patch int
+        wantErr             bool
+    }{
+        {"1.22.0", major: 1, minor: 22, patch: 0, wantErr: false},
+        {"1.21", 1, 21, patch: 0, wantErr: false},
+        {"invalid", 0, 0, 0, true},
+    }
+
+    for _, tt := range tests {
+        fmt.Println(tt.input, tt.major, tt.minor, tt.patch, tt.wantErr)
+    }
+
+    // Array of structs with newline
+    points := [3]struct {
+        x, y int
+    }{
+        {x: 0, y: 0},
+        {x: 1, y: 1},
+        {x: 2, y: 2},
+    }
+    fmt.Println(points[0].x, points[0].y)
+}

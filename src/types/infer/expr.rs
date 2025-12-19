@@ -292,19 +292,29 @@ impl Infer {
 
             ExprKind::ArrayLit { ty, elements } => {
                 // Infer element type from the declared type or first element
-                let (elem_ty, declared_type) = if let Some(ty) = ty {
+                let (elem_ty, declared_type, anon_struct_fields) = if let Some(ty) = ty {
                     // Extract element type from []T or T
                     if ty.name.starts_with("[]") {
                         let elem_name = &ty.name[2..];
+                        // Check if element type is an anonymous struct
+                        let anon_fields = if elem_name.starts_with("struct{") {
+                            self.parse_anon_struct_fields(elem_name)
+                        } else {
+                            None
+                        };
                         // Return the resolved type to match how return types are handled
-                        (Type::simple(elem_name), Some(self.resolve_type(ty)))
+                        (
+                            Type::simple(elem_name),
+                            Some(self.resolve_type(ty)),
+                            anon_fields,
+                        )
                     } else {
-                        (Type::simple(&ty.name), None)
+                        (Type::simple(&ty.name), None, None)
                     }
                 } else if !elements.is_empty() {
-                    (self.infer_expr(&elements[0])?, None)
+                    (self.infer_expr(&elements[0])?, None, None)
                 } else {
-                    (self.fresh_ty_var(), None)
+                    (self.fresh_ty_var(), None, None)
                 };
 
                 // All elements must have the same type
@@ -315,8 +325,41 @@ impl Infer {
                     {
                         return Err(err);
                     }
-                    let elem_ty_actual = self.infer_expr(elem)?;
-                    self.unify(&elem_ty, &elem_ty_actual, &elem.span)?;
+
+                    // Special handling for implicit StructLit with positional fields
+                    // when element type is an anonymous struct
+                    if let (
+                        Some(field_defs),
+                        ExprKind::StructLit {
+                            ty: None,
+                            fields: struct_fields,
+                        },
+                    ) = (&anon_struct_fields, &elem.kind)
+                    {
+                        // Check positional fields against struct field definitions
+                        for (i, (field_name, value)) in struct_fields.iter().enumerate() {
+                            let value_ty = self.infer_expr(value)?;
+                            match field_name {
+                                Some(name) => {
+                                    // Named field - look up by name
+                                    if let Some((_, expected_ty)) =
+                                        field_defs.iter().find(|(n, _)| n == name)
+                                    {
+                                        self.unify(expected_ty, &value_ty, &value.span)?;
+                                    }
+                                }
+                                None => {
+                                    // Positional field - look up by index
+                                    if let Some((_, expected_ty)) = field_defs.get(i) {
+                                        self.unify(expected_ty, &value_ty, &value.span)?;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        let elem_ty_actual = self.infer_expr(elem)?;
+                        self.unify(&elem_ty, &elem_ty_actual, &elem.span)?;
+                    }
                 }
 
                 // Return proper slice/array type
@@ -368,7 +411,9 @@ impl Infer {
 
                         // Type check each field
                         for (field_name, value) in fields {
-                            if let Some(field_ty) = field_types.get(field_name.as_str()) {
+                            if let Some(name) = field_name
+                                && let Some(field_ty) = field_types.get(name.as_str())
+                            {
                                 // Check: assigning nil to a non-nilable field is an error
                                 if matches!(value.kind, ExprKind::Nil)
                                     && let Some(err) =
@@ -377,6 +422,7 @@ impl Infer {
                                     return Err(err);
                                 }
                             }
+                            // TODO: Handle positional fields (field_name = None)
                             self.infer_expr(value)?;
                         }
                     }
@@ -541,19 +587,43 @@ impl Infer {
                     .map(|f| (f.ident.name.clone(), self.resolve_type(&f.ty)))
                     .collect();
 
+                // Build a list of field types in order for positional matching
+                let field_types_ordered: Vec<Type> = field_defs
+                    .iter()
+                    .map(|f| self.resolve_type(&f.ty))
+                    .collect();
+
                 // Type check each field value against its declared type
-                for (field_name, value) in fields {
+                for (i, (field_name, value)) in fields.iter().enumerate() {
                     let value_ty = self.infer_expr(value)?;
-                    if let Some(expected_ty) = field_types.get(field_name) {
-                        self.unify(expected_ty, &value_ty, &value.span)?;
-                    } else {
-                        return Err(SoppoError::Type {
-                            message: format!(
-                                "Anonymous struct has no field named `{}`",
-                                field_name
-                            ),
-                            span: value.span,
-                        });
+                    match field_name {
+                        Some(name) => {
+                            if let Some(expected_ty) = field_types.get(name) {
+                                self.unify(expected_ty, &value_ty, &value.span)?;
+                            } else {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "Anonymous struct has no field named `{}`",
+                                        name
+                                    ),
+                                    span: value.span,
+                                });
+                            }
+                        }
+                        None => {
+                            // Positional field - match by index
+                            if let Some(expected_ty) = field_types_ordered.get(i) {
+                                self.unify(expected_ty, &value_ty, &value.span)?;
+                            } else {
+                                return Err(SoppoError::Type {
+                                    message: format!(
+                                        "Too many fields in anonymous struct literal (expected {})",
+                                        field_defs.len()
+                                    ),
+                                    span: value.span,
+                                });
+                            }
+                        }
                     }
                 }
 
@@ -2009,6 +2079,34 @@ impl Infer {
                 Ok(self.fresh_ty_var())
             }
         }
+    }
+
+    /// Parse anonymous struct field definitions from a string like "struct{a int; b string}"
+    /// Returns None if parsing fails
+    fn parse_anon_struct_fields(&self, s: &str) -> Option<Vec<(String, Type)>> {
+        // Remove "struct{" prefix and "}" suffix
+        let inner = s.strip_prefix("struct{")?.strip_suffix('}')?;
+        if inner.is_empty() {
+            return Some(Vec::new());
+        }
+
+        let mut fields = Vec::new();
+        // Split by semicolons (field separator in Go struct types)
+        for field_def in inner.split(';') {
+            let field_def = field_def.trim();
+            if field_def.is_empty() {
+                continue;
+            }
+            // Each field is "name type" separated by whitespace
+            let parts: Vec<&str> = field_def.splitn(2, ' ').collect();
+            if parts.len() == 2 {
+                let name = parts[0].trim().to_string();
+                let ty_str = parts[1].trim();
+                fields.push((name, Type::simple(ty_str)));
+            }
+        }
+
+        Some(fields)
     }
 }
 

@@ -268,30 +268,71 @@ impl Codegen {
 
             ExprKind::ArrayLit { ty, elements } => {
                 // Generate []type{elements} for slices or [size]type{elements} for arrays
-                if let Some(ty) = ty {
+                let anon_struct_fields = if let Some(ty) = ty {
                     let type_name = &ty.name;
-                    if type_name.starts_with("[]") {
+                    if let Some(elem_name) = type_name.strip_prefix("[]") {
                         // Slice literal: []type{elements}
-                        self.emit(self.go_type(type_name));
+                        // Format anonymous struct types with proper multiline formatting
+                        if elem_name.starts_with("struct {") || elem_name.starts_with("struct{") {
+                            self.emit("[]");
+                            self.emit_anon_struct_type(elem_name);
+                        } else {
+                            self.emit(self.go_type(type_name));
+                        }
+                        // Get field names for positional expansion
+                        Self::parse_anon_struct_field_names(elem_name)
                     } else {
                         // Array literal: [size]type{elements}
                         self.emit("[");
                         self.emit(elements.len().to_string());
                         self.emit("]");
-                        self.emit(self.go_type(type_name));
+                        let elem_name = type_name;
+                        if elem_name.starts_with("struct {") || elem_name.starts_with("struct{") {
+                            self.emit_anon_struct_type(elem_name);
+                        } else {
+                            self.emit(self.go_type(type_name));
+                        }
+                        Self::parse_anon_struct_field_names(elem_name)
                     }
                 } else {
                     // No type - infer as array with size
                     self.emit("[");
                     self.emit(elements.len().to_string());
                     self.emit("]");
-                }
+                    None
+                };
+
+                // Check if elements span multiple lines (for formatting)
+                let multiline = elements.len() > 1
+                    && elements
+                        .first()
+                        .zip(elements.last())
+                        .is_some_and(|(first, last)| first.span.start.line != last.span.start.line);
+
                 self.emit("{");
+                if multiline {
+                    self.emit("\n");
+                    self.indent();
+                }
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
-                        self.emit(", ");
+                        self.emit(",");
+                        if multiline {
+                            self.emit("\n");
+                        } else {
+                            self.emit(" ");
+                        }
                     }
-                    self.gen_expr(elem);
+                    if multiline {
+                        self.emit_indent();
+                    }
+                    // Generate element with field name context for positional expansion
+                    self.gen_expr_with_struct_context(elem, anon_struct_fields.as_deref());
+                }
+                if multiline {
+                    self.emit(",\n");
+                    self.dedent();
+                    self.emit_indent();
                 }
                 self.emit("}");
             }
@@ -332,8 +373,10 @@ impl Codegen {
                     if i > 0 {
                         self.emit(", ");
                     }
-                    self.emit(field_name);
-                    self.emit(": ");
+                    if let Some(name) = field_name {
+                        self.emit(name);
+                        self.emit(": ");
+                    }
                     self.gen_expr(value);
                 }
                 self.emit("}");
@@ -355,8 +398,10 @@ impl Codegen {
                     if i > 0 {
                         self.emit(", ");
                     }
-                    self.emit(field_name);
-                    self.emit(": ");
+                    if let Some(name) = field_name {
+                        self.emit(name);
+                        self.emit(": ");
+                    }
                     self.gen_expr(value);
                 }
                 self.emit("}");
@@ -620,6 +665,134 @@ impl Codegen {
                 }
             }
         }
+    }
+
+    /// Parse field names from anonymous struct type like "struct { a int; b int }"
+    fn parse_anon_struct_field_names(s: &str) -> Option<Vec<String>> {
+        // Handle both "struct{...}" and "struct { ... }" formats
+        let inner = s
+            .strip_prefix("struct {")
+            .or_else(|| s.strip_prefix("struct{"))?
+            .strip_suffix('}')?
+            .trim();
+        if inner.is_empty() {
+            return Some(Vec::new());
+        }
+
+        let mut names = Vec::new();
+        for field_def in inner.split(';') {
+            let field_def = field_def.trim();
+            if field_def.is_empty() {
+                continue;
+            }
+            // Each field is "name type" separated by whitespace
+            if let Some(name) = field_def.split_whitespace().next() {
+                names.push(name.to_string());
+            }
+        }
+        Some(names)
+    }
+
+    /// Parse anonymous struct fields into (name, type) pairs
+    fn parse_anon_struct_fields(s: &str) -> Option<Vec<(String, String)>> {
+        let inner = s
+            .strip_prefix("struct {")
+            .or_else(|| s.strip_prefix("struct{"))?
+            .strip_suffix('}')?
+            .trim();
+        if inner.is_empty() {
+            return Some(Vec::new());
+        }
+
+        let mut fields = Vec::new();
+        for field_def in inner.split(';') {
+            let field_def = field_def.trim();
+            if field_def.is_empty() {
+                continue;
+            }
+            // Each field is "name type" separated by whitespace
+            let parts: Vec<&str> = field_def.splitn(2, ' ').collect();
+            if parts.len() == 2 {
+                fields.push((parts[0].trim().to_string(), parts[1].trim().to_string()));
+            }
+        }
+        Some(fields)
+    }
+
+    /// Emit anonymous struct type with proper multiline formatting
+    fn emit_anon_struct_type(&mut self, s: &str) {
+        let fields = match Self::parse_anon_struct_fields(s) {
+            Some(f) => f,
+            None => {
+                // Fallback: emit as-is
+                self.emit(s);
+                return;
+            }
+        };
+
+        if fields.is_empty() {
+            self.emit("struct {}");
+            return;
+        }
+
+        // Single field: emit on one line
+        if fields.len() == 1 {
+            self.emit("struct { ");
+            self.emit(&fields[0].0);
+            self.emit(" ");
+            self.emit(&fields[0].1);
+            self.emit(" }");
+            return;
+        }
+
+        // Multiple fields: emit with proper alignment
+        let max_name_len = fields.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+
+        self.emit("struct {\n");
+        self.indent();
+        for (name, ty) in &fields {
+            self.emit_indent();
+            self.emit(name);
+            // Pad to align types
+            for _ in 0..(max_name_len - name.len() + 1) {
+                self.emit(" ");
+            }
+            self.emit(ty);
+            self.emit("\n");
+        }
+        self.dedent();
+        self.emit_indent();
+        self.emit("}");
+    }
+
+    /// Generate expression with struct field name context for positional expansion
+    fn gen_expr_with_struct_context(&mut self, expr: &Expr, field_names: Option<&[String]>) {
+        // Only apply context to implicit StructLit
+        if let ExprKind::StructLit { ty: None, fields } = &expr.kind
+            && let Some(names) = field_names
+        {
+            // Emit struct literal with positional fields expanded to named
+            self.emit("{");
+            for (i, (field_name, value)) in fields.iter().enumerate() {
+                if i > 0 {
+                    self.emit(", ");
+                }
+                // Use provided name or explicit name
+                let name = match field_name {
+                    Some(n) => n.as_str(),
+                    None => names.get(i).map(|s| s.as_str()).unwrap_or(""),
+                };
+                if !name.is_empty() {
+                    self.emit(name);
+                    self.emit(": ");
+                }
+                self.gen_expr(value);
+            }
+            self.emit("}");
+            return;
+        }
+        // Default: use normal expression generation
+        self.gen_expr(expr);
     }
 }
 

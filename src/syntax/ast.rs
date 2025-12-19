@@ -460,12 +460,12 @@ pub enum ExprKind {
     },
     StructLit {
         ty: Option<TypeAnnotation>, // The struct type name (None for implicit like `{Name: "x"}`)
-        fields: Vec<(String, Expr)>, // field_name: value pairs
+        fields: Vec<(Option<String>, Expr)>, // field_name: value pairs (None = positional)
     },
     /// Anonymous struct literal: struct { X int; Y int }{X: 1, Y: 2}
     AnonStructLit {
-        field_defs: Vec<Field>,      // The inline field definitions
-        fields: Vec<(String, Expr)>, // field_name: value pairs
+        field_defs: Vec<Field>,              // The inline field definitions
+        fields: Vec<(Option<String>, Expr)>, // field_name: value pairs (None = positional)
     },
     MapLit {
         ty: TypeAnnotation,         // The map type: map[K]V

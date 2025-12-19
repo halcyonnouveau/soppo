@@ -578,13 +578,31 @@ impl Formatter {
     }
 
     fn format_type_annotation(ty: &TypeAnnotation) -> String {
+        Self::format_type_annotation_with_indent(ty, 0)
+    }
+
+    fn format_type_annotation_with_indent(ty: &TypeAnnotation, indent: usize) -> String {
         let mut result = String::new();
 
         if ty.nullable {
             result.push('?');
         }
 
-        result.push_str(&ty.name);
+        // Handle anonymous struct types specially
+        if ty.name.starts_with("struct {") || ty.name.starts_with("struct{") {
+            result.push_str(&Self::format_anon_struct_type(&ty.name, indent));
+        } else if ty.name.starts_with("[]") {
+            // Slice type - check if element is anonymous struct
+            let elem = &ty.name[2..];
+            if elem.starts_with("struct {") || elem.starts_with("struct{") {
+                result.push_str("[]");
+                result.push_str(&Self::format_anon_struct_type(elem, indent));
+            } else {
+                result.push_str(&ty.name);
+            }
+        } else {
+            result.push_str(&ty.name);
+        }
 
         // Only add [args] for generic types, not for built-in compound types
         // (slices, arrays, pointers, maps, channels, variadics, funcs)
@@ -600,11 +618,70 @@ impl Formatter {
 
         if !ty.args.is_empty() && !is_builtin_compound {
             result.push('[');
-            let args: Vec<_> = ty.args.iter().map(Self::format_type_annotation).collect();
+            let args: Vec<_> = ty
+                .args
+                .iter()
+                .map(|a| Self::format_type_annotation_with_indent(a, indent))
+                .collect();
             result.push_str(&args.join(", "));
             result.push(']');
         }
 
+        result
+    }
+
+    /// Format anonymous struct type with proper multiline layout
+    fn format_anon_struct_type(s: &str, indent: usize) -> String {
+        let inner = s
+            .strip_prefix("struct {")
+            .or_else(|| s.strip_prefix("struct{"))
+            .and_then(|s| s.strip_suffix('}'))
+            .map(|s| s.trim());
+
+        let Some(inner) = inner else {
+            return s.to_string();
+        };
+
+        if inner.is_empty() {
+            return "struct {}".to_string();
+        }
+
+        // Parse fields
+        let mut fields = Vec::new();
+        for field_def in inner.split(';') {
+            let field_def = field_def.trim();
+            if field_def.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = field_def.splitn(2, ' ').collect();
+            if parts.len() == 2 {
+                fields.push((parts[0].trim(), parts[1].trim()));
+            }
+        }
+
+        // Single field: one line
+        if fields.len() == 1 {
+            return format!("struct {{ {} {} }}", fields[0].0, fields[0].1);
+        }
+
+        // Multiple fields: multiline with alignment
+        let max_name_len = fields.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+        let indent_str = "    ".repeat(indent + 1);
+        let close_indent = "    ".repeat(indent);
+
+        let mut result = String::from("struct {\n");
+        for (name, ty) in &fields {
+            result.push_str(&indent_str);
+            result.push_str(name);
+            // Pad for alignment
+            for _ in 0..(max_name_len - name.len() + 1) {
+                result.push(' ');
+            }
+            result.push_str(ty);
+            result.push('\n');
+        }
+        result.push_str(&close_indent);
+        result.push('}');
         result
     }
 
@@ -1327,7 +1404,10 @@ impl Formatter {
                 result.push('{');
                 let field_strs: Vec<_> = fields
                     .iter()
-                    .map(|(name, val)| format!("{}: {}", name, self.format_expr(val)))
+                    .map(|(name, val)| match name {
+                        Some(n) => format!("{}: {}", n, self.format_expr(val)),
+                        None => self.format_expr(val),
+                    })
                     .collect();
                 result.push_str(&field_strs.join(", "));
                 result.push('}');
@@ -1345,7 +1425,10 @@ impl Formatter {
                 result.push_str(" }{");
                 let field_strs: Vec<_> = fields
                     .iter()
-                    .map(|(name, val)| format!("{}: {}", name, self.format_expr(val)))
+                    .map(|(name, val)| match name {
+                        Some(n) => format!("{}: {}", n, self.format_expr(val)),
+                        None => self.format_expr(val),
+                    })
                     .collect();
                 result.push_str(&field_strs.join(", "));
                 result.push('}');

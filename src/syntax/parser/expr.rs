@@ -442,7 +442,6 @@ impl Parser {
                         }
 
                         self.advance(); // consume {
-                        // Skip terminators after opening brace
                         self.skip_terminators();
 
                         let mut fields = Vec::new();
@@ -472,13 +471,12 @@ impl Parser {
                                 self.expect(Token::Colon)?;
                                 let value = self.parse_expr()?;
 
-                                fields.push((field_name, value));
+                                fields.push((Some(field_name), value));
 
                                 if !self.consume(&Token::Comma) {
                                     break;
                                 }
 
-                                // Skip terminators after comma
                                 self.skip_terminators();
 
                                 // Allow trailing comma
@@ -674,7 +672,10 @@ impl Parser {
                         span: elem_ty.span,
                         nullable: false,
                     };
+
+                    self.skip_terminators();
                     self.expect(Token::LBrace)?;
+                    self.skip_terminators();
 
                     let mut elements = Vec::new();
                     if !matches!(self.peek(), Some(Token::RBrace)) {
@@ -684,6 +685,7 @@ impl Parser {
                             if !self.consume(&Token::Comma) {
                                 break;
                             }
+                            self.skip_terminators();
                             // Check for closing brace after trailing comma
                             if matches!(self.peek(), Some(Token::RBrace)) {
                                 break;
@@ -709,7 +711,10 @@ impl Parser {
                     self.expect(Token::RBracket)?;
 
                     let ty = self.parse_type()?;
+
+                    self.skip_terminators();
                     self.expect(Token::LBrace)?;
+                    self.skip_terminators();
 
                     let mut elements = Vec::new();
                     if !matches!(self.peek(), Some(Token::RBrace)) {
@@ -718,6 +723,7 @@ impl Parser {
                             if !self.consume(&Token::Comma) {
                                 break;
                             }
+                            self.skip_terminators();
                             if matches!(self.peek(), Some(Token::RBrace)) {
                                 break;
                             }
@@ -757,6 +763,7 @@ impl Parser {
                 self.expect(Token::RBrace)?;
 
                 // Now parse the field values: {Name: value, ...}
+                self.skip_terminators();
                 self.expect(Token::LBrace)?;
                 self.skip_terminators();
 
@@ -783,13 +790,12 @@ impl Parser {
                         self.expect(Token::Colon)?;
                         let value = self.parse_expr()?;
 
-                        fields.push((field_name, value));
+                        fields.push((Some(field_name), value));
 
                         if !self.consume(&Token::Comma) {
                             break;
                         }
 
-                        // Skip terminators after comma
                         self.skip_terminators();
 
                         // Allow trailing comma
@@ -849,94 +855,68 @@ impl Parser {
             // Implicit composite literal: {expr, expr, ...} or {Field: value, ...}
             // Used inside array/slice literals like [][]int{{1, 2}, {3, 4}}
             // or []Item{{Name: "x"}, {Name: "y"}}
+            // We always parse as StructLit - positional fields have None names.
+            // Type checker determines if it's a struct or array based on context.
             Token::LBrace => {
-                // Check if this looks like a struct literal (Ident followed by Colon)
-                let is_struct_lit = matches!(self.peek(), Some(Token::Ident(_)))
-                    && matches!(self.peek_at(1), Some(Token::Colon));
+                let mut fields = Vec::new();
+                let mut seen_named = false;
 
-                if is_struct_lit {
-                    // Parse as implicit struct literal: {Field: value, ...}
-                    let mut fields = Vec::new();
+                if !matches!(self.peek(), Some(Token::RBrace)) {
+                    loop {
+                        self.skip_terminators();
 
-                    if !matches!(self.peek(), Some(Token::RBrace)) {
-                        loop {
-                            // Skip any terminators
-                            self.skip_terminators();
+                        if matches!(self.peek(), Some(Token::RBrace)) {
+                            break;
+                        }
 
-                            if matches!(self.peek(), Some(Token::RBrace)) {
-                                break;
-                            }
+                        // Check if this is a named field (Ident followed by Colon)
+                        let is_named = matches!(self.peek(), Some(Token::Ident(_)))
+                            && matches!(self.peek_at(1), Some(Token::Colon));
 
+                        if is_named {
+                            seen_named = true;
                             let field_name = match self.advance() {
                                 Some((Token::Ident(name), _)) => name,
-                                Some((tok, tok_span)) => {
-                                    return Err(SoppoError::Parse {
-                                        message: format!("Expected field name, found {:?}", tok),
-                                        span: tok_span,
-                                    });
-                                }
-                                None => {
-                                    return Err(SoppoError::Parse {
-                                        message: "Expected field name".to_string(),
-                                        span: Span::dummy(),
-                                    });
-                                }
+                                _ => unreachable!(),
                             };
-
                             self.expect(Token::Colon)?;
                             let value = self.parse_expr()?;
-
-                            fields.push((field_name, value));
-
-                            if !self.consume(&Token::Comma) {
-                                break;
+                            fields.push((Some(field_name), value));
+                        } else {
+                            // Positional field - must come before named fields
+                            if seen_named {
+                                return Err(SoppoError::Parse {
+                                    message: "Positional fields must come before named fields"
+                                        .to_string(),
+                                    span,
+                                });
                             }
+                            let value = self.parse_expr()?;
+                            fields.push((None, value));
+                        }
 
-                            // Skip terminators after comma
-                            self.skip_terminators();
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
 
-                            // Allow trailing comma
-                            if matches!(self.peek(), Some(Token::RBrace)) {
-                                break;
-                            }
+                        self.skip_terminators();
+
+                        // Allow trailing comma
+                        if matches!(self.peek(), Some(Token::RBrace)) {
+                            break;
                         }
                     }
-
-                    let end_span = self.expect(Token::RBrace)?;
-
-                    Ok(Expr::new(
-                        ExprKind::StructLit {
-                            ty: None, // Type inferred from context
-                            fields,
-                        },
-                        self.merge_spans(span, end_span),
-                    ))
-                } else {
-                    // Parse as implicit array literal: {expr, expr, ...}
-                    let mut elements = Vec::new();
-
-                    if !matches!(self.peek(), Some(Token::RBrace)) {
-                        loop {
-                            elements.push(self.parse_expr()?);
-                            if !self.consume(&Token::Comma) {
-                                break;
-                            }
-                            if matches!(self.peek(), Some(Token::RBrace)) {
-                                break;
-                            }
-                        }
-                    }
-
-                    let end_span = self.expect(Token::RBrace)?;
-
-                    Ok(Expr::new(
-                        ExprKind::ArrayLit {
-                            ty: None, // Type inferred from context
-                            elements,
-                        },
-                        self.merge_spans(span, end_span),
-                    ))
                 }
+
+                let end_span = self.expect(Token::RBrace)?;
+
+                Ok(Expr::new(
+                    ExprKind::StructLit {
+                        ty: None, // Type inferred from context
+                        fields,
+                    },
+                    self.merge_spans(span, end_span),
+                ))
             }
 
             _ => Err(SoppoError::Parse {
