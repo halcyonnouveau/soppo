@@ -8,18 +8,18 @@ package main
 import "fmt"
 
 func add(x int, y int) int {
-    return x + y
+	return x + y
 }
 
 func counter() int {
-    x := 0
-    x = 10
-    x = x + 5
-    return x
+	x := 0
+	x = 10
+	x = x + 5
+	return x
 }
 
 func main() {
-    result := add(10, 20)
-    count := counter()
-    fmt.Printf("%d %d", result, count)
+	result := add(10, 20)
+	count := counter()
+	fmt.Printf("%d %d", result, count)
 }

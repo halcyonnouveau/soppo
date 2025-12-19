@@ -19,32 +19,32 @@ Shape {
 }
 */
 type Shape interface {
-    isShape()
+	isShape()
 }
 
 type Shape_Circle struct {
-    radius float64
+	radius float64
 }
 func (Shape_Circle) isShape() {}
 
 type Shape_Rectangle struct {
-    width float64
-    height float64
+	width float64
+	height float64
 }
 func (Shape_Rectangle) isShape() {}
 
 
 func main() {
-    var shape Shape = Shape_Circle{radius: 5.0}
+	var shape Shape = Shape_Circle{radius: 5.0}
 
-    // Type assertion on enum variant - returns the struct data directly
-    circle := shape.(Shape_Circle)
-    fmt.Println("Radius:", circle.radius)
+	// Type assertion on enum variant - returns the struct data directly
+	circle := shape.(Shape_Circle)
+	fmt.Println("Radius:", circle.radius)
 
-    // Safe assertion with ok check
-    if rect, ok := shape.(Shape_Rectangle); ok {
-        fmt.Println("Width:", rect.width)
-    } else {
-        fmt.Println("Not a rectangle")
-    }
+	// Safe assertion with ok check
+	if rect, ok := shape.(Shape_Rectangle); ok {
+		fmt.Println("Width:", rect.width)
+	} else {
+		fmt.Println("Not a rectangle")
+	}
 }

@@ -10,7 +10,7 @@ import "fmt"
 import "github.com/test/chain/pkgb"
 
 func main() {
-    fmt.Println(pkgb.GetB())
+	fmt.Println(pkgb.GetB())
 }
 
 
@@ -20,7 +20,7 @@ func main() {
 package pkga
 
 func GetA() int {
-    return 1
+	return 1
 }
 
 
@@ -32,5 +32,5 @@ package pkgb
 import "github.com/test/chain/pkga"
 
 func GetB() int {
-    return pkga.GetA() + 1
+	return pkga.GetA() + 1
 }

@@ -12,23 +12,23 @@ import "os"
 // This tests type inference for variables declared with composite literals.
 // Also tests that method calls work on these variables (requires module info).
 func main() {
-    // Variables declared as: var DefaultClient = &Client{}
-    // Type should be inferred as *Client
-    _ = http.DefaultClient
+	// Variables declared as: var DefaultClient = &Client{}
+	// Type should be inferred as *Client
+	_ = http.DefaultClient
 
-    // Variables with explicit types like: var Stdin *File
-    _ = os.Stdin
-    _ = os.Stdout
-    _ = os.Stderr
+	// Variables with explicit types like: var Stdin *File
+	_ = os.Stdin
+	_ = os.Stdout
+	_ = os.Stderr
 
-    // Method calls on package variables should work
-    // This requires the module info to be set on the type
-    client := http.DefaultClient
-    req, _err0 := http.NewRequest("GET", "https://example.com", nil)
-    if _err0 != nil {
-        return 
-    }
-    resp, err := client.Do(req)
-    _ = resp
-    _ = err
+	// Method calls on package variables should work
+	// This requires the module info to be set on the type
+	client := http.DefaultClient
+	req, _err0 := http.NewRequest("GET", "https://example.com", nil)
+	if _err0 != nil {
+		return 
+	}
+	resp, err := client.Do(req)
+	_ = resp
+	_ = err
 }

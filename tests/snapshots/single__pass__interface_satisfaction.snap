@@ -8,42 +8,42 @@ package main
 import "fmt"
 
 type Stringer interface {
-    String() string
+	String() string
 }
 
 type Greeter interface {
-    Greet(name string) string
+	Greet(name string) string
 }
 
 type MyInt int
 
 func (m MyInt) String() string {
-    return fmt.Sprintf("MyInt(%d)", m)
+	return fmt.Sprintf("MyInt(%d)", m)
 }
 
 type Person struct {
-    Name string
+	Name string
 }
 
 func (p Person) String() string {
-    return p.Name
+	return p.Name
 }
 
 func (p Person) Greet(name string) string {
-    return fmt.Sprintf("Hello %s, I'm %s", name, p.Name)
+	return fmt.Sprintf("Hello %s, I'm %s", name, p.Name)
 }
 
 func printString(s Stringer) {
-    fmt.Println(s.String())
+	fmt.Println(s.String())
 }
 
 func main() {
-    var s Stringer = MyInt(42)
-    printString(s)
+	var s Stringer = MyInt(42)
+	printString(s)
 
-    var p Stringer = Person{Name: "Alice"}
-    printString(p)
+	var p Stringer = Person{Name: "Alice"}
+	printString(p)
 
-    var g Greeter = Person{Name: "Bob"}
-    fmt.Println(g.Greet("World"))
+	var g Greeter = Person{Name: "Bob"}
+	fmt.Println(g.Greet("World"))
 }

@@ -10,318 +10,318 @@ import "errors"
 
 // === Helper functions that return errors ===
 func parsePort(s string) (int, error) {
-    if s == "" {
-        return 0, errors.New("empty string")
-    }
-    return 8080, nil
+	if s == "" {
+		return 0, errors.New("empty string")
+	}
+	return 8080, nil
 }
 
 func deleteFile(path string) error {
-    if path == "" {
-        return errors.New("empty path")
-    }
-    return nil
+	if path == "" {
+		return errors.New("empty path")
+	}
+	return nil
 }
 
 func getConfig() (string, string, error) {
-    return "host", "port", nil
+	return "host", "port", nil
 }
 
 type User struct {
-    name string
-    age int
+	name string
+	age int
 }
 
 //soppo:nilable : 0
 func getUser(id int) (*User, error) {
-    if id <= 0 {
-        return nil, errors.New("invalid id")
-    }
-    u := User{}
-    u.name = "Alice"
-    u.age = 30
-    return (&u), nil
+	if id <= 0 {
+		return nil, errors.New("invalid id")
+	}
+	u := User{}
+	u.name = "Alice"
+	u.age = 30
+	return (&u), nil
 }
 
 // === Simple ? propagation ===
 func simplePropagate() error {
-    port, _err0 := parsePort("8080")
-    if _err0 != nil {
-        return _err0
-    }
-    fmt.Println(port)
-    return nil
+	port, _err0 := parsePort("8080")
+	if _err0 != nil {
+		return _err0
+	}
+	fmt.Println(port)
+	return nil
 }
 
 // === Custom handler without error access ===
 func customHandler() error {
-    port, _err0 := parsePort("")
-    if _err0 != nil {
-        return errors.New("custom error: parse failed")
-    }
-    fmt.Println(port)
-    return nil
+	port, _err0 := parsePort("")
+	if _err0 != nil {
+		return errors.New("custom error: parse failed")
+	}
+	fmt.Println(port)
+	return nil
 }
 
 // === Custom handler with named error ===
 func namedError() error {
-    port, _err0 := parsePort("")
-    if _err0 != nil {
-        parseErr := _err0
-        return fmt.Errorf("parse failed: %v", parseErr)
-    }
-    fmt.Println(port)
-    return nil
+	port, _err0 := parsePort("")
+	if _err0 != nil {
+		parseErr := _err0
+		return fmt.Errorf("parse failed: %v", parseErr)
+	}
+	fmt.Println(port)
+	return nil
 }
 
 // === Error-only return ===
 func errorOnly() error {
-    _err0 := deleteFile("/tmp/test")
-    if _err0 != nil {
-        return _err0
-    }
-    return nil
+	_err0 := deleteFile("/tmp/test")
+	if _err0 != nil {
+		return _err0
+	}
+	return nil
 }
 
 // === Multi-value return with ? ===
 func multiReturn() error {
-    host, port, _err0 := getConfig()
-    if _err0 != nil {
-        return _err0
-    }
-    fmt.Println(host, port)
-    return nil
+	host, port, _err0 := getConfig()
+	if _err0 != nil {
+		return _err0
+	}
+	fmt.Println(host, port)
+	return nil
 }
 
 // === Nil safety: pointer is non-null after ? ===
 func nilSafety() error {
-    user, _err0 := getUser(1)
-    if _err0 != nil {
-        return _err0
-    }
+	user, _err0 := getUser(1)
+	if _err0 != nil {
+		return _err0
+	}
 
-    // After ?, user is known to be non-nil
-    fmt.Println(user.name)
-    return nil
+	// After ?, user is known to be non-nil
+	fmt.Println(user.name)
+	return nil
 }
 
 // === Nil safety for other nilable types after ? ===
 func getNames() ([]string, error) {
-    return []string{"alice", "bob"}, nil
+	return []string{"alice", "bob"}, nil
 }
 
 func getScores() (map[string]int, error) {
-    return map[string]int{"alice": 1, "bob": 2}, nil
+	return map[string]int{"alice": 1, "bob": 2}, nil
 }
 
 func nilSafetySlice() error {
-    names, _err0 := getNames()
-    if _err0 != nil {
-        return _err0
-    }
+	names, _err0 := getNames()
+	if _err0 != nil {
+		return _err0
+	}
 
-    // After ?, slice is known to be non-nil
-    fmt.Println(len(names))
-    fmt.Println(names[0])
-    return nil
+	// After ?, slice is known to be non-nil
+	fmt.Println(len(names))
+	fmt.Println(names[0])
+	return nil
 }
 
 func nilSafetyMap() error {
-    scores, _err0 := getScores()
-    if _err0 != nil {
-        return _err0
-    }
+	scores, _err0 := getScores()
+	if _err0 != nil {
+		return _err0
+	}
 
-    // After ?, map is known to be non-nil
-    fmt.Println(len(scores))
-    fmt.Println(scores["alice"])
-    return nil
+	// After ?, map is known to be non-nil
+	fmt.Println(len(scores))
+	fmt.Println(scores["alice"])
+	return nil
 }
 
 // === Multiple ? in same function ===
 func multipleTry() error {
-    port, _err0 := parsePort("8080")
-    if _err0 != nil {
-        return _err0
-    }
-    _err1 := deleteFile("/tmp/test")
-    if _err1 != nil {
-        return _err1
-    }
-    user, _err2 := getUser(1)
-    if _err2 != nil {
-        return _err2
-    }
-    fmt.Printf("port=%d, user=%s\n", port, user.name)
-    return nil
+	port, _err0 := parsePort("8080")
+	if _err0 != nil {
+		return _err0
+	}
+	_err1 := deleteFile("/tmp/test")
+	if _err1 != nil {
+		return _err1
+	}
+	user, _err2 := getUser(1)
+	if _err2 != nil {
+		return _err2
+	}
+	fmt.Printf("port=%d, user=%s\n", port, user.name)
+	return nil
 }
 
 // === Nested ? with different error names (avoids shadowing) ===
 func nestedTry() error {
-    port, _err0 := parsePort("8080")
-    if _err0 != nil {
-        err := _err0
-        _err1 := deleteFile("/tmp/cleanup")
-        if _err1 != nil {
-            deleteErr := _err1
-            return fmt.Errorf("cleanup failed after %v: %v", err, deleteErr)
-        }
-        return fmt.Errorf("parse failed: %v", err)
-    }
-    fmt.Println(port)
-    return nil
+	port, _err0 := parsePort("8080")
+	if _err0 != nil {
+		err := _err0
+		_err1 := deleteFile("/tmp/cleanup")
+		if _err1 != nil {
+			deleteErr := _err1
+			return fmt.Errorf("cleanup failed after %v: %v", err, deleteErr)
+		}
+		return fmt.Errorf("parse failed: %v", err)
+	}
+	fmt.Println(port)
+	return nil
 }
 
 // === ? with int return ===
 func tryWithIntReturn() (int, error) {
-    port, _err0 := parsePort("8080")
-    if _err0 != nil {
-        return 0, _err0
-    }
-    return port, nil
+	port, _err0 := parsePort("8080")
+	if _err0 != nil {
+		return 0, _err0
+	}
+	return port, nil
 }
 
 // === ? with string return ===
 func tryWithStringReturn() (string, error) {
-    user, _err0 := getUser(1)
-    if _err0 != nil {
-        return "", _err0
-    }
-    return user.name, nil
+	user, _err0 := getUser(1)
+	if _err0 != nil {
+		return "", _err0
+	}
+	return user.name, nil
 }
 
 // === ? with struct return ===
 func tryWithStructReturn() (User, error) {
-    user, _err0 := getUser(1)
-    if _err0 != nil {
-        return User{}, _err0
-    }
-    return (*user), nil
+	user, _err0 := getUser(1)
+	if _err0 != nil {
+		return User{}, _err0
+	}
+	return (*user), nil
 }
 
 // === ? with bare expression discarding return values ===
 func multiReturnNoCapture(s string) (int, error) {
-    return len(s), nil
+	return len(s), nil
 }
 
 func threeReturnNoCapture(s string) (int, string, error) {
-    return len(s), s, nil
+	return len(s), s, nil
 }
 
 func discardSingleReturn() error {
-    // f() ? where f returns (int, error) - should generate: _, _err := f()
-    _, _err0 := multiReturnNoCapture("test")
-    if _err0 != nil {
-        return _err0
-    }
-    return nil
+	// f() ? where f returns (int, error) - should generate: _, _err := f()
+	_, _err0 := multiReturnNoCapture("test")
+	if _err0 != nil {
+		return _err0
+	}
+	return nil
 }
 
 func discardMultipleReturns() error {
-    // f() ? where f returns (int, string, error) - should generate: _, _, _err := f()
-    _, _, _err0 := threeReturnNoCapture("test")
-    if _err0 != nil {
-        return _err0
-    }
-    return nil
+	// f() ? where f returns (int, string, error) - should generate: _, _, _err := f()
+	_, _, _err0 := threeReturnNoCapture("test")
+	if _err0 != nil {
+		return _err0
+	}
+	return nil
 }
 
 func discardErrorOnly() error {
-    // f() ? where f returns just error - should generate: _err := f()
-    _err0 := deleteFile("/tmp/test")
-    if _err0 != nil {
-        return _err0
-    }
-    return nil
+	// f() ? where f returns just error - should generate: _err := f()
+	_err0 := deleteFile("/tmp/test")
+	if _err0 != nil {
+		return _err0
+	}
+	return nil
 }
 
 // === ? without handler in function that doesn't return error ===
 // Returns zero values automatically on error
 func tryZeroValueReturn() int {
-    // On error, automatically returns 0 (zero value for int)
-    port, _err0 := parsePort("")
-    if _err0 != nil {
-        return 0
-    }
-    return port
+	// On error, automatically returns 0 (zero value for int)
+	port, _err0 := parsePort("")
+	if _err0 != nil {
+		return 0
+	}
+	return port
 }
 
 func tryZeroValueMultiReturn() (string, int) {
-    // On error, automatically returns ("", 0)
-    user, _err0 := getUser(0)
-    if _err0 != nil {
-        return "", 0
-    }
-    return user.name, user.age
+	// On error, automatically returns ("", 0)
+	user, _err0 := getUser(0)
+	if _err0 != nil {
+		return "", 0
+	}
+	return user.name, user.age
 }
 
 // === ? with handler in function that doesn't return error ===
 // Handler that returns a fallback value - no error propagation needed
 func tryWithFallback() int {
-    port, _err0 := parsePort("")
-    if _err0 != nil {
-        return 80 // fallback to default port
-    }
-    return port
+	port, _err0 := parsePort("")
+	if _err0 != nil {
+		return 80 // fallback to default port
+	}
+	return port
 }
 
 // Handler with named error that returns a fallback value
 func tryWithFallbackNamed() int {
-    port, _err0 := parsePort("")
-    if _err0 != nil {
-        err := _err0
-        fmt.Println("using default port due to:", err)
-        return 80
-    }
-    return port
+	port, _err0 := parsePort("")
+	if _err0 != nil {
+		err := _err0
+		fmt.Println("using default port due to:", err)
+		return 80
+	}
+	return port
 }
 
 // Handler that panics - function doesn't need error return
 func tryWithPanic() string {
-    user, _err0 := getUser(0)
-    if _err0 != nil {
-        err := _err0
-        panic("failed to get user: " + err.Error())
-    }
-    return user.name
+	user, _err0 := getUser(0)
+	if _err0 != nil {
+		err := _err0
+		panic("failed to get user: " + err.Error())
+	}
+	return user.name
 }
 
 // Multiple ? with handlers in non-error-returning function
 func tryMultipleWithFallbacks() (string, int) {
-    user, _err0 := getUser(0)
-    if _err0 != nil {
-        u := User{name: "guest", age: 0}
-        return u.name, u.age
-    }
-    return user.name, user.age
+	user, _err0 := getUser(0)
+	if _err0 != nil {
+		u := User{name: "guest", age: 0}
+		return u.name, u.age
+	}
+	return user.name, user.age
 }
 
 func main() {
-    simplePropagate()
-    customHandler()
-    namedError()
-    errorOnly()
-    multiReturn()
-    nilSafety()
-    nilSafetySlice()
-    nilSafetyMap()
-    multipleTry()
-    nestedTry()
-    tryWithIntReturn()
-    tryWithStringReturn()
-    tryWithStructReturn()
-    discardSingleReturn()
-    discardMultipleReturns()
-    discardErrorOnly()
+	simplePropagate()
+	customHandler()
+	namedError()
+	errorOnly()
+	multiReturn()
+	nilSafety()
+	nilSafetySlice()
+	nilSafetyMap()
+	multipleTry()
+	nestedTry()
+	tryWithIntReturn()
+	tryWithStringReturn()
+	tryWithStructReturn()
+	discardSingleReturn()
+	discardMultipleReturns()
+	discardErrorOnly()
 
-    // New tests for ? returning zero values without handler
-    fmt.Println(tryZeroValueReturn())
-    fmt.Println(tryZeroValueMultiReturn())
+	// New tests for ? returning zero values without handler
+	fmt.Println(tryZeroValueReturn())
+	fmt.Println(tryZeroValueMultiReturn())
 
-    // Tests for ? with handlers in non-error-returning functions
-    fmt.Println(tryWithFallback())
-    fmt.Println(tryWithFallbackNamed())
-    fmt.Println(tryMultipleWithFallbacks())
+	// Tests for ? with handlers in non-error-returning functions
+	fmt.Println(tryWithFallback())
+	fmt.Println(tryWithFallbackNamed())
+	fmt.Println(tryMultipleWithFallbacks())
 }
 
 // Note: tryWithPanic() would panic, so we don't call it

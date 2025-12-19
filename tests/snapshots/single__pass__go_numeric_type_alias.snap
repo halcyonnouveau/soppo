@@ -11,10 +11,10 @@ import "os"
 // os.FileMode -> fs.FileMode -> uint32, so int literals should be accepted.
 // Importantly, this works WITHOUT importing "io/fs".
 func createDir(path string) error {
-    // FileMode has underlying type uint32, so it should accept an int literal
-    return os.MkdirAll(path, 0o755)
+	// FileMode has underlying type uint32, so it should accept an int literal
+	return os.MkdirAll(path, 0o755)
 }
 
 func main() {
-    createDir("/tmp/test")
+	createDir("/tmp/test")
 }

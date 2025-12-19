@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -12,15 +12,15 @@ type MyInt = int
 type StringSlice = []string
 
 func getInt() MyInt {
-    return 42
+	return 42
 }
 
 func getNames() StringSlice {
-    return []string{"Alice", "Bob"}
+	return []string{"Alice", "Bob"}
 }
 
 func main() {
-    x := getInt()
-    names := getNames()
-    fmt.Println(x, names)
+	x := getInt()
+	names := getNames()
+	fmt.Println(x, names)
 }

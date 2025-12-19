@@ -15,7 +15,7 @@ Colour {
 }
 */
 type Colour interface {
-    isColour()
+	isColour()
 }
 
 type Colour_Red struct {}
@@ -31,9 +31,9 @@ func (Colour_Green) isColour() {}
 func (Colour_Green) String() string { return "Green" }
 
 var (
-    ColourRed Colour = Colour_Red{}
-    ColourYellow Colour = Colour_Yellow{}
-    ColourGreen Colour = Colour_Green{}
+	ColourRed Colour = Colour_Red{}
+	ColourYellow Colour = Colour_Yellow{}
+	ColourGreen Colour = Colour_Green{}
 )
 
 /*soppo:enum
@@ -43,24 +43,24 @@ MyResult {
 }
 */
 type MyResult interface {
-    isMyResult()
+	isMyResult()
 }
 
 type MyResult_Ok struct {
-    Value int
+	Value int
 }
 func (MyResult_Ok) isMyResult() {}
 
 type MyResult_Err struct {
-    Value string
+	Value string
 }
 func (MyResult_Err) isMyResult() {}
 
 func MyResultOk(value int) MyResult {
-    return MyResult_Ok{Value: value}
+	return MyResult_Ok{Value: value}
 }
 func MyResultErr(value string) MyResult {
-    return MyResult_Err{Value: value}
+	return MyResult_Err{Value: value}
 }
 
 /*soppo:enum
@@ -70,28 +70,28 @@ Material {
 }
 */
 type Material interface {
-    isMaterial()
+	isMaterial()
 }
 
 type Material_Wood struct {
-    Value string
+	Value string
 }
 func (Material_Wood) isMaterial() {}
 
 type Material_Metal struct {
-    Value string
+	Value string
 }
 func (Material_Metal) isMaterial() {}
 
 func MaterialWood(value string) Material {
-    return Material_Wood{Value: value}
+	return Material_Wood{Value: value}
 }
 func MaterialMetal(value string) Material {
-    return Material_Metal{Value: value}
+	return Material_Metal{Value: value}
 }
 
 type TriangleProps struct {
-    material Material
+	material Material
 }
 
 /*soppo:enum
@@ -107,203 +107,203 @@ Shape {
 }
 */
 type Shape interface {
-    isShape()
+	isShape()
 }
 
 type Shape_Circle struct {
-    radius float64
+	radius float64
 }
 func (Shape_Circle) isShape() {}
 
 type Shape_Rectangle struct {
-    width float64
-    height float64
+	width float64
+	height float64
 }
 func (Shape_Rectangle) isShape() {}
 
 type Shape_Triangle struct {
-    Value TriangleProps
+	Value TriangleProps
 }
 func (Shape_Triangle) isShape() {}
 
 func ShapeTriangle(value TriangleProps) Shape {
-    return Shape_Triangle{Value: value}
+	return Shape_Triangle{Value: value}
 }
 
 func area(s Shape) float64 {
-    switch __v := s.(type) {
-    case Shape_Circle:
-        r := __v.radius
-        _ = r
-        return 3.14 * r * r
-    case Shape_Rectangle:
-        w := __v.width
-        _ = w
-        h := __v.height
-        _ = h
-        return w * h
-    case Shape_Triangle:
-        p := __v.Value
-        _ = p
-        return 0.0
-    }
-    panic("unreachable")
+	switch __v := s.(type) {
+	case Shape_Circle:
+		r := __v.radius
+		_ = r
+		return 3.14 * r * r
+	case Shape_Rectangle:
+		w := __v.width
+		_ = w
+		h := __v.height
+		_ = h
+		return w * h
+	case Shape_Triangle:
+		p := __v.Value
+		_ = p
+		return 0.0
+	}
+	panic("unreachable")
 }
 
 func testNestedMatch() string {
-    mat := MaterialWood("oak")
-    props := TriangleProps{material: mat}
-    shape := ShapeTriangle(props)
+	mat := MaterialWood("oak")
+	props := TriangleProps{material: mat}
+	shape := ShapeTriangle(props)
 
-    var result string
-    switch __v := shape.(type) {
-    case Shape_Circle:
-        r := __v.radius
-        _ = r
-        result = "circle"
-    case Shape_Rectangle:
-        w := __v.width
-        _ = w
-        h := __v.height
-        _ = h
-        result = "rectangle"
-    case Shape_Triangle:
-        p := __v.Value
-        _ = p
-        switch __v := p.material.(type) {
-        case Material_Wood:
-            name := __v.Value
-            _ = name
-            result = name
-        case Material_Metal:
-            name := __v.Value
-            _ = name
-            result = name
-        }
-    }
-    return result
+	var result string
+	switch __v := shape.(type) {
+	case Shape_Circle:
+		r := __v.radius
+		_ = r
+		result = "circle"
+	case Shape_Rectangle:
+		w := __v.width
+		_ = w
+		h := __v.height
+		_ = h
+		result = "rectangle"
+	case Shape_Triangle:
+		p := __v.Value
+		_ = p
+		switch __v := p.material.(type) {
+		case Material_Wood:
+			name := __v.Value
+			_ = name
+			result = name
+		case Material_Metal:
+			name := __v.Value
+			_ = name
+			result = name
+		}
+	}
+	return result
 }
 
 func unwrapOr(r MyResult, defaultVal int) int {
-    var result int
-    switch __v := r.(type) {
-    case MyResult_Ok:
-        value := __v.Value
-        _ = value
-        result = value
-    case MyResult_Err:
-        msg := __v.Value
-        _ = msg
-        result = defaultVal
-    }
-    return result
+	var result int
+	switch __v := r.(type) {
+	case MyResult_Ok:
+		value := __v.Value
+		_ = value
+		result = value
+	case MyResult_Err:
+		msg := __v.Value
+		_ = msg
+		result = defaultVal
+	}
+	return result
 }
 
 func test() int {
-    colour := ColourRed
+	colour := ColourRed
 
-    var message string
-    switch colour.(type) {
-    case Colour_Red:
-        message = "Stop"
-    case Colour_Yellow:
-        message = "Wait"
-    case Colour_Green:
-        return 1
-    }
+	var message string
+	switch colour.(type) {
+	case Colour_Red:
+		message = "Stop"
+	case Colour_Yellow:
+		message = "Wait"
+	case Colour_Green:
+		return 1
+	}
 
-    fmt.Printf("%s\n", message)
+	fmt.Printf("%s\n", message)
 
-    return 0
+	return 0
 }
 
 // Multiple patterns in match arms
 func isPrimary(c Colour) bool {
-    var result bool
-    switch c.(type) {
-    case Colour_Red, Colour_Yellow:
-        result = true
-    case Colour_Green:
-        result = false
-    }
-    return result
+	var result bool
+	switch c.(type) {
+	case Colour_Red, Colour_Yellow:
+		result = true
+	case Colour_Green:
+		result = false
+	}
+	return result
 }
 
 // Expression-less match (like if/else chain)
 func classify(x int) string {
-    var result string
-    switch {
-    case x > 0:
-        result = "positive"
-    case x < 0:
-        result = "negative"
-    default:
-        result = "zero"
-    }
-    return result
+	var result string
+	switch {
+	case x > 0:
+		result = "positive"
+	case x < 0:
+		result = "negative"
+	default:
+		result = "zero"
+	}
+	return result
 }
 
 // Multiple literal patterns
 func isSmall(x int) bool {
-    var result bool
-    switch x {
-    case 1, 2, 3:
-        result = true
-    default:
-        result = false
-    }
-    return result
+	var result bool
+	switch x {
+	case 1, 2, 3:
+		result = true
+	default:
+		result = false
+	}
+	return result
 }
 
 // === Match divergence ===
 // Exhaustive enum match where all arms return - function doesn't need return after match
 func colourToInt(c Colour) int {
-    switch c.(type) {
-    case Colour_Red:
-        return 0
-    case Colour_Yellow:
-        return 1
-    case Colour_Green:
-        return 2
-    }
-    panic("unreachable")
+	switch c.(type) {
+	case Colour_Red:
+		return 0
+	case Colour_Yellow:
+		return 1
+	case Colour_Green:
+		return 2
+	}
+	panic("unreachable")
 }
 
 // Match with default where all arms return - function doesn't need return after match
 func valueToString(x int) string {
-    switch x {
-    case 1:
-        return "one"
-    case 2:
-        return "two"
-    default:
-        return "other"
-    }
+	switch x {
+	case 1:
+		return "one"
+	case 2:
+		return "two"
+	default:
+		return "other"
+	}
 }
 
 // Expression-less match with default where all arms return
 func signToString(x int) string {
-    switch {
-    case x > 0:
-        return "positive"
-    case x < 0:
-        return "negative"
-    default:
-        return "zero"
-    }
+	switch {
+	case x > 0:
+		return "positive"
+	case x < 0:
+		return "negative"
+	default:
+		return "zero"
+	}
 }
 
 func main() {
-    ok := MyResultOk(42)
-    err := MyResultErr("failed")
+	ok := MyResultOk(42)
+	err := MyResultErr("failed")
 
-    result1 := unwrapOr(ok, 0)
-    result2 := unwrapOr(err, 99)
+	result1 := unwrapOr(ok, 0)
+	result2 := unwrapOr(err, 99)
 
-    var circle Shape = Shape_Circle{radius: 5.0}
-    var rect Shape = Shape_Rectangle{width: 3.0, height: 4.0}
+	var circle Shape = Shape_Circle{radius: 5.0}
+	var rect Shape = Shape_Rectangle{width: 3.0, height: 4.0}
 
-    nested := testNestedMatch()
+	nested := testNestedMatch()
 
-    fmt.Printf("%d %d %d %f %f %s\n", test(), result1, result2, area(circle), area(rect), nested)
+	fmt.Printf("%d %d %d %f %f %s\n", test(), result1, result2, area(circle), area(rect), nested)
 }

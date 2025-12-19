@@ -9,22 +9,22 @@ package main
 import "fmt"
 
 func delimTest(delim rune) {
-    fmt.Printf("delimiter: %c\n", delim)
+	fmt.Printf("delimiter: %c\n", delim)
 }
 
 func main() {
-    // Basic rune literals
-    newline := '\n'
-    tab := '\t'
-    quote := '\''
-    backslash := '\\'
-    letter := 'a'
-    digit := '0'
+	// Basic rune literals
+	newline := '\n'
+	tab := '\t'
+	quote := '\''
+	backslash := '\\'
+	letter := 'a'
+	digit := '0'
 
-    fmt.Printf("newline: %c, tab: %c, letter: %c, digit: %c\n", newline, tab, letter, digit)
-    _ = quote
-    _ = backslash
+	fmt.Printf("newline: %c, tab: %c, letter: %c, digit: %c\n", newline, tab, letter, digit)
+	_ = quote
+	_ = backslash
 
-    // Rune in function call (like reader.ReadString('\n'))
-    delimTest(newline)
+	// Rune in function call (like reader.ReadString('\n'))
+	delimTest(newline)
 }

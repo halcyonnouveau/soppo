@@ -17,11 +17,11 @@ Option[T] {
 }
 */
 type Option[T any] interface {
-    isOption()
+	isOption()
 }
 
 type Option_Some[T any] struct {
-    Value T
+	Value T
 }
 func (Option_Some[T]) isOption() {}
 
@@ -30,7 +30,7 @@ func (Option_None[T]) isOption() {}
 func (Option_None[T]) String() string { return "None" }
 
 func OptionNone[T any]() Option[T] {
-    return Option_None[T]{}
+	return Option_None[T]{}
 }
 
 /*soppo:enum
@@ -40,94 +40,94 @@ Result[T, E] {
 }
 */
 type Result[T any, E any] interface {
-    isResult()
+	isResult()
 }
 
 type Result_Ok[T any, E any] struct {
-    Value T
+	Value T
 }
 func (Result_Ok[T, E]) isResult() {}
 
 type Result_Err[T any, E any] struct {
-    Value E
+	Value E
 }
 func (Result_Err[T, E]) isResult() {}
 
 func ResultOk[T any, E any](value T) Result[T, E] {
-    return Result_Ok[T, E]{Value: value}
+	return Result_Ok[T, E]{Value: value}
 }
 func ResultErr[T any, E any](value E) Result[T, E] {
-    return Result_Err[T, E]{Value: value}
+	return Result_Err[T, E]{Value: value}
 }
 
 func divide(a int, b int) Option[int] {
-    if b == 0 {
-        return Option_None[int]{}
-    }
-    return Option_Some[int]{Value: a / b}
+	if b == 0 {
+		return Option_None[int]{}
+	}
+	return Option_Some[int]{Value: a / b}
 }
 
 func divide2(a int, b int) Option[int] {
-    if b == 0 {
-        return OptionNone[int]()
-    }
-    return Option_Some[int]{Value: a / b}
+	if b == 0 {
+		return OptionNone[int]()
+	}
+	return Option_Some[int]{Value: a / b}
 }
 
 // Test generic enum with nested type (type with dot like *bytes.Buffer)
 func getBuffer(create bool) Option[*bytes.Buffer] {
-    if create {
-        return Option_Some[*bytes.Buffer]{Value: bytes.NewBufferString("hello")}
-    }
-    return Option_None[*bytes.Buffer]{}
+	if create {
+		return Option_Some[*bytes.Buffer]{Value: bytes.NewBufferString("hello")}
+	}
+	return Option_None[*bytes.Buffer]{}
 }
 
 func main() {
-    // Test Result with single-value variants (old syntax)
-    r1 := ResultOk[int, string](1)
-    r2 := ResultErr[int, string]("failed")
-    fmt.Printf("%v %v\n", r1, r2)
+	// Test Result with single-value variants (old syntax)
+	r1 := ResultOk[int, string](1)
+	r2 := ResultErr[int, string]("failed")
+	fmt.Printf("%v %v\n", r1, r2)
 
-    // Test Option with struct variant (new syntax)
-    result := divide(10, 2)
-    switch __v := result.(type) {
-    case Option_Some[int]:
-        v := __v.Value
-        _ = v
-        fmt.Println("Result:", v)
-    case Option_None[int]:
-        fmt.Println("Cannot divide by zero")
-    }
+	// Test Option with struct variant (new syntax)
+	result := divide(10, 2)
+	switch __v := result.(type) {
+	case Option_Some[int]:
+		v := __v.Value
+		_ = v
+		fmt.Println("Result:", v)
+	case Option_None[int]:
+		fmt.Println("Cannot divide by zero")
+	}
 
-    result2 := divide(10, 0)
-    switch __v := result2.(type) {
-    case Option_Some[int]:
-        v := __v.Value
-        _ = v
-        fmt.Println("Result:", v)
-    case Option_None[int]:
-        fmt.Println("Cannot divide by zero")
-    }
+	result2 := divide(10, 0)
+	switch __v := result2.(type) {
+	case Option_Some[int]:
+		v := __v.Value
+		_ = v
+		fmt.Println("Result:", v)
+	case Option_None[int]:
+		fmt.Println("Cannot divide by zero")
+	}
 
-    // Test Option with nested type (type containing dot: *bytes.Buffer)
-    // This tests that patterns like Option[pkg.Type].Some work correctly
-    bufOpt := getBuffer(true)
-    switch __v := bufOpt.(type) {
-    case Option_Some[*bytes.Buffer]:
-        buf := __v.Value
-        _ = buf
-        fmt.Println("Buffer:", buf.String())
-    case Option_None[*bytes.Buffer]:
-        fmt.Println("No buffer")
-    }
+	// Test Option with nested type (type containing dot: *bytes.Buffer)
+	// This tests that patterns like Option[pkg.Type].Some work correctly
+	bufOpt := getBuffer(true)
+	switch __v := bufOpt.(type) {
+	case Option_Some[*bytes.Buffer]:
+		buf := __v.Value
+		_ = buf
+		fmt.Println("Buffer:", buf.String())
+	case Option_None[*bytes.Buffer]:
+		fmt.Println("No buffer")
+	}
 
-    bufOpt2 := getBuffer(false)
-    switch __v := bufOpt2.(type) {
-    case Option_Some[*bytes.Buffer]:
-        buf := __v.Value
-        _ = buf
-        fmt.Println("Buffer:", buf.String())
-    case Option_None[*bytes.Buffer]:
-        fmt.Println("No buffer")
-    }
+	bufOpt2 := getBuffer(false)
+	switch __v := bufOpt2.(type) {
+	case Option_Some[*bytes.Buffer]:
+		buf := __v.Value
+		_ = buf
+		fmt.Println("Buffer:", buf.String())
+	case Option_None[*bytes.Buffer]:
+		fmt.Println("No buffer")
+	}
 }

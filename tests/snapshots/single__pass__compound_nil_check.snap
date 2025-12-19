@@ -8,59 +8,59 @@ package main
 import "fmt"
 
 type User struct {
-    name string
-    profile *struct { //soppo:nilable
-        bio string
-    }
+	name string
+	profile *struct { //soppo:nilable
+		bio string
+	}
 }
 
 //soppo:nilable : 0
 func getUser() *User {
-    return (&User{name: "Alice", profile: nil})
+	return (&User{name: "Alice", profile: nil})
 }
 
 //soppo:nilable : 0
 func getProfile() *struct { bio string } {
-    return (&struct { bio string }{bio: "Hello!"})
+	return (&struct { bio string }{bio: "Hello!"})
 }
 
 func main() {
-    // Compound nil check with &&
-    user := getUser()
-    profile := getProfile()
+	// Compound nil check with &&
+	user := getUser()
+	profile := getProfile()
 
-    // Both narrowed as non-nil inside the if block
-    if user != nil && profile != nil {
-        fmt.Println(user.name)
-        fmt.Println(profile.bio)
-    }
+	// Both narrowed as non-nil inside the if block
+	if user != nil && profile != nil {
+		fmt.Println(user.name)
+		fmt.Println(profile.bio)
+	}
 
-    // Three variables
-    a := getUser()
-    b := getUser()
-    c := getUser()
-    if a != nil && b != nil && c != nil {
-        fmt.Println(a.name, b.name, c.name)
-    }
+	// Three variables
+	a := getUser()
+	b := getUser()
+	c := getUser()
+	if a != nil && b != nil && c != nil {
+		fmt.Println(a.name, b.name, c.name)
+	}
 
-    // Short-circuit narrowing in condition itself
-    x := getUser()
-    if x != nil && len(x.name) > 0 {
-        fmt.Println(x.name)
-    }
+	// Short-circuit narrowing in condition itself
+	x := getUser()
+	if x != nil && len(x.name) > 0 {
+		fmt.Println(x.name)
+	}
 
-    // Short-circuit narrowing with || (opposite logic)
-    // If x == nil is false (we reach RHS), then x != nil
-    y := getUser()
-    if y == nil || len(y.name) > 0 {
-        // y is narrowed to non-nil on the RHS check
-        fmt.Println("checked")
-    }
+	// Short-circuit narrowing with || (opposite logic)
+	// If x == nil is false (we reach RHS), then x != nil
+	y := getUser()
+	if y == nil || len(y.name) > 0 {
+		// y is narrowed to non-nil on the RHS check
+		fmt.Println("checked")
+	}
 
-    // Multiple || checks
-    z := getUser()
-    w := getUser()
-    if z == nil || w == nil || len(z.name) > 0 {
-        fmt.Println("one is nil or z has a name")
-    }
+	// Multiple || checks
+	z := getUser()
+	w := getUser()
+	if z == nil || w == nil || len(z.name) > 0 {
+		fmt.Println("one is nil or z has a name")
+	}
 }

@@ -16,15 +16,15 @@ const PI float64 = 3.14159
 
 // Interface definitions (pass through to Go)
 type Reader interface {
-    Read(p []byte) (int, error)
+	Read(p []byte) (int, error)
 }
 
 type Writer interface {
-    Write(p []byte) (int, error)
+	Write(p []byte) (int, error)
 }
 
 type Stringer interface {
-    String() string
+	String() string
 }
 
 // Type alias
@@ -32,418 +32,418 @@ type UserId int
 
 // Struct definition
 type User struct {
-    id UserId
-    name string
-    age int
-    active bool
+	id UserId
+	name string
+	age int
+	active bool
 }
 
 // Struct with methods
 type Counter struct {
-    value int
+	value int
 }
 
 func (c Counter) getValue() int {
-    return c.value
+	return c.value
 }
 
 func (c Counter) increment() Counter {
-    c.value = c.value + 1
-    return c
+	c.value = c.value + 1
+	return c
 }
 
 // Variadic function
 func sum(numbers int) int {
-    total := 0
-    i := 0
-    for i < 10 {
-        total = total + numbers
-        i = i + 1
-    }
-    return total
+	total := 0
+	i := 0
+	for i < 10 {
+		total = total + numbers
+		i = i + 1
+	}
+	return total
 }
 
 // Channel helper functions
 func sender(ch chan int) {
-    ch <- 42
+	ch <- 42
 }
 
 func receiver(ch chan int) int {
-    return (<-ch)
+	return (<-ch)
 }
 
 func worker(id int) {
-    fmt.Println(id)
+	fmt.Println(id)
 }
 
 func cleanup() {
-    fmt.Println("cleanup")
+	fmt.Println("cleanup")
 }
 
 // String manipulation
 func processString(s string) string {
-    if s == "" {
-        return "empty"
-    }
+	if s == "" {
+		return "empty"
+	}
 
-    upper := strings.ToUpper(s)
-    return upper
+	upper := strings.ToUpper(s)
+	return upper
 }
 
 // Array/slice operations
 func arrayOps() int {
-    arr := [5]int{1, 2, 3, 4, 5}
-    sum := 0
+	arr := [5]int{1, 2, 3, 4, 5}
+	sum := 0
 
-    i := 0
-    for i < 5 {
-        sum = sum + arr[i]
-        i = i + 1
-    }
+	i := 0
+	for i < 5 {
+		sum = sum + arr[i]
+		i = i + 1
+	}
 
-    return sum
+	return sum
 }
 
 // Struct creation and field access
 func createUser(name string, age int) User {
-    user := User{id: UserId(1), name: name, age: age, active: true}
-    return user
+	user := User{id: UserId(1), name: name, age: age, active: true}
+	return user
 }
 
 // Conditionals and comparisons
 func checkAge(age int) string {
-    if age < 18 {
-        return "minor"
-    } else {
-        if age < 65 {
-            return "adult"
-        } else {
-            return "senior"
-        }
-    }
+	if age < 18 {
+		return "minor"
+	} else {
+		if age < 65 {
+			return "adult"
+		} else {
+			return "senior"
+		}
+	}
 }
 
 // Boolean logic
 func validateInput(value int, enabled bool) bool {
-    return enabled && value > 0 && value < MAX_SIZE
+	return enabled && value > 0 && value < MAX_SIZE
 }
 
 // Mathematical operations
 func calculate(x int, y int) int {
-    a := x + y
-    b := x - y
-    c := x * y
-    d := x / y
-    e := x % y
+	a := x + y
+	b := x - y
+	c := x * y
+	d := x / y
+	e := x % y
 
-    result := a + b + c + d + e
-    return result
+	result := a + b + c + d + e
+	return result
 }
 
 // Multi-value return: two values
 func divide(a int, b int) (int, int) {
-    return a / b, a % b
+	return a / b, a % b
 }
 
 // Multi-value return: three values
 func minMax(a int, b int, c int) (int, int, int) {
-    min := a
-    max := a
-    mid := a
+	min := a
+	max := a
+	mid := a
 
-    if b < min {
-        min = b
-    }
-    if c < min {
-        min = c
-    }
-    if b > max {
-        max = b
-    }
-    if c > max {
-        max = c
-    }
+	if b < min {
+		min = b
+	}
+	if c < min {
+		min = c
+	}
+	if b > max {
+		max = b
+	}
+	if c > max {
+		max = c
+	}
 
-    if a != min && a != max {
-        mid = a
-    } else {
-        if b != min && b != max {
-            mid = b
-        } else {
-            mid = c
-        }
-    }
+	if a != min && a != max {
+		mid = a
+	} else {
+		if b != min && b != max {
+			mid = b
+		} else {
+			mid = c
+		}
+	}
 
-    return min, mid, max
+	return min, mid, max
 }
 
 func main() {
-    var a = 1
-    var b int = 1
+	var a = 1
+	var b int = 1
 
-    const c = 1
-    const d int = 1
+	const c = 1
+	const d int = 1
 
-    // Multi-var declarations
-    var e, f, g int
-    var h, i = 2, 3
-    var j, k int = 4, 5
+	// Multi-var declarations
+	var e, f, g int
+	var h, i = 2, 3
+	var j, k int = 4, 5
 
-    // Multi-const declarations
-    const l, m = 6, 7
-    const n, o int = 8, 9
+	// Multi-const declarations
+	const l, m = 6, 7
+	const n, o int = 8, 9
 
-    // Integer operations
-    x := 42
-    y := 10 + a + b + c + d + e + f + g + h + i + j + k + l + m + n + o
-    sum := x + y
+	// Integer operations
+	x := 42
+	y := 10 + a + b + c + d + e + f + g + h + i + j + k + l + m + n + o
+	sum := x + y
 
-    // Float operations
-    radius := 5.0
-    area := PI * radius * radius
+	// Float operations
+	radius := 5.0
+	area := PI * radius * radius
 
-    // String operations
-    message := "Hello, World"
-    processed := processString(message)
+	// String operations
+	message := "Hello, World"
+	processed := processString(message)
 
-    // Boolean operations
-    isValid := validateInput(50, true)
+	// Boolean operations
+	isValid := validateInput(50, true)
 
-    // Struct operations
-    user := createUser("Alice", 30)
-    category := checkAge(user.age)
+	// Struct operations
+	user := createUser("Alice", 30)
+	category := checkAge(user.age)
 
-    // Counter with methods
-    counter := Counter{value: 0}
-    counter = counter.increment()
-    count := counter.getValue()
+	// Counter with methods
+	counter := Counter{value: 0}
+	counter = counter.increment()
+	count := counter.getValue()
 
-    // Array operations
-    arraySum := arrayOps()
+	// Array operations
+	arraySum := arrayOps()
 
-    // Conditional
-    status := ""
-    if y > 0 {
-        status = "success"
-    } else {
-        status = "failure"
-    }
+	// Conditional
+	status := ""
+	if y > 0 {
+		status = "success"
+	} else {
+		status = "failure"
+	}
 
-    // Multi-value returns
-    quot, rem := divide(17, 5)
-    small, medium, large := minMax(3, 1, 2)
+	// Multi-value returns
+	quot, rem := divide(17, 5)
+	small, medium, large := minMax(3, 1, 2)
 
-    // Multi-value short declaration with literals
-    p, q := 100, 200
+	// Multi-value short declaration with literals
+	p, q := 100, 200
 
-    // Multi-var with multi-return function
-    var q2, r2 = divide(20, 6)
+	// Multi-var with multi-return function
+	var q2, r2 = divide(20, 6)
 
-    // === Pointers ===
-    px := (&x)
-    fmt.Println((*px))
-    (*px) = 100
-    fmt.Println(x)
-    pq := new(int)
-    (*pq) = 55
-    fmt.Println((*pq))
+	// === Pointers ===
+	px := (&x)
+	fmt.Println((*px))
+	(*px) = 100
+	fmt.Println(x)
+	pq := new(int)
+	(*pq) = 55
+	fmt.Println((*pq))
 
-    // === Slices ===
-    nums := []int{1, 2, 3, 4, 5}
-    fmt.Println(nums[0])
-    data := make([]int, 10)
-    data[0] = 42
-    fmt.Println(data[0])
+	// === Slices ===
+	nums := []int{1, 2, 3, 4, 5}
+	fmt.Println(nums[0])
+	data := make([]int, 10)
+	data[0] = 42
+	fmt.Println(data[0])
 
-    // === Maps ===
-    ages := map[string]int{"Alice": 30, "Bob": 25}
-    fmt.Println(ages["Alice"])
-    scores := make(map[string]int)
-    scores["test"] = 100
-    fmt.Println(scores["test"])
+	// === Maps ===
+	ages := map[string]int{"Alice": 30, "Bob": 25}
+	fmt.Println(ages["Alice"])
+	scores := make(map[string]int)
+	scores["test"] = 100
+	fmt.Println(scores["test"])
 
-    // === Channels ===
-    ch := make(chan int, 1)
-    ch <- 100
-    value := (<-ch)
-    fmt.Println(value)
-    ch2 := make(chan int, 1)
-    sender(ch2)
-    result := receiver(ch2)
-    fmt.Println(result)
+	// === Channels ===
+	ch := make(chan int, 1)
+	ch <- 100
+	value := (<-ch)
+	fmt.Println(value)
+	ch2 := make(chan int, 1)
+	sender(ch2)
+	result := receiver(ch2)
+	fmt.Println(result)
 
-    // === Goroutines ===
-    go worker(1)
-    go func() {
-        fmt.Println("anonymous goroutine")
-    }()
+	// === Goroutines ===
+	go worker(1)
+	go func() {
+		fmt.Println("anonymous goroutine")
+	}()
 
-    // === Select ===
-    selectCh1 := make(chan int, 1)
-    selectCh2 := make(chan string, 1)
-    selectCh1 <- 42
-    select {
-    case v := <-selectCh1:
-        fmt.Println(v)
-    case msg := <-selectCh2:
-        fmt.Println(msg)
-    default:
-        fmt.Println("no message")
-    }
+	// === Select ===
+	selectCh1 := make(chan int, 1)
+	selectCh2 := make(chan string, 1)
+	selectCh1 <- 42
+	select {
+	case v := <-selectCh1:
+		fmt.Println(v)
+	case msg := <-selectCh2:
+		fmt.Println(msg)
+	default:
+		fmt.Println("no message")
+	}
 
-    // Select with send
-    select {
-    case selectCh2 <- "hello":
-        fmt.Println("sent")
-    default:
-        fmt.Println("could not send")
-    }
+	// Select with send
+	select {
+	case selectCh2 <- "hello":
+		fmt.Println("sent")
+	default:
+		fmt.Println("could not send")
+	}
 
-    // Select with recv (discard value)
-    selectCh3 := make(chan int, 1)
-    selectCh3 <- 99
-    select {
-    case <-selectCh3:
-        fmt.Println("received and discarded")
-    default:
-        fmt.Println("channel empty")
-    }
+	// Select with recv (discard value)
+	selectCh3 := make(chan int, 1)
+	selectCh3 <- 99
+	select {
+	case <-selectCh3:
+		fmt.Println("received and discarded")
+	default:
+		fmt.Println("channel empty")
+	}
 
-    // Select with ok check (closed channel)
-    selectCh4 := make(chan int)
-    close(selectCh4)
-    select {
-    case val, ok := <-selectCh4:
-        fmt.Println(val, ok)
-    default:
-        fmt.Println("channel empty")
-    }
+	// Select with ok check (closed channel)
+	selectCh4 := make(chan int)
+	close(selectCh4)
+	select {
+	case val, ok := <-selectCh4:
+		fmt.Println(val, ok)
+	default:
+		fmt.Println("channel empty")
+	}
 
-    // === Defer ===
-    defer cleanup()
-    defer fmt.Println("deferred")
+	// === Defer ===
+	defer cleanup()
+	defer fmt.Println("deferred")
 
-    // === Break/Continue ===
-    loopIdx := 0
-    for loopIdx < 10 {
-        if loopIdx == 3 {
-            loopIdx = loopIdx + 1
-            continue
-        }
-        if loopIdx == 7 {
-            break
-        }
-        fmt.Println(loopIdx)
-        loopIdx = loopIdx + 1
-    }
+	// === Break/Continue ===
+	loopIdx := 0
+	for loopIdx < 10 {
+		if loopIdx == 3 {
+			loopIdx = loopIdx + 1
+			continue
+		}
+		if loopIdx == 7 {
+			break
+		}
+		fmt.Println(loopIdx)
+		loopIdx = loopIdx + 1
+	}
 
-    // === Range loops ===
-    for idx, val := range nums {
-        fmt.Println(idx, val)
-    }
-    for k, v := range ages {
-        fmt.Println(k, v)
-    }
-    for rangeIdx := range nums {
-        fmt.Println(rangeIdx)
-    }
+	// === Range loops ===
+	for idx, val := range nums {
+		fmt.Println(idx, val)
+	}
+	for k, v := range ages {
+		fmt.Println(k, v)
+	}
+	for rangeIdx := range nums {
+		fmt.Println(rangeIdx)
+	}
 
-    // === Anonymous functions ===
-    add := func(a int, b int) int {
-        return a + b
-    }
-    fmt.Println(add(1, 2))
+	// === Anonymous functions ===
+	add := func(a int, b int) int {
+		return a + b
+	}
+	fmt.Println(add(1, 2))
 
-    multiply := func(a int, b int) int {
-        return a * b
-    }
-    fmt.Println(multiply(3, 4))
+	multiply := func(a int, b int) int {
+		return a * b
+	}
+	fmt.Println(multiply(3, 4))
 
-    // === Unary operators ===
-    unaryNum := 10
-    fmt.Println((-unaryNum))
-    boolVal := true
-    fmt.Println((!boolVal))
+	// === Unary operators ===
+	unaryNum := 10
+	fmt.Println((-unaryNum))
+	boolVal := true
+	fmt.Println((!boolVal))
 
-    // === Bitwise operators ===
-    bitwiseA := 10 // 0b1010
-    bitwiseB := 12 // 0b1100
-    andResult := bitwiseA & bitwiseB // 8 (0b1000)
-    orResult := bitwiseA | bitwiseB // 14 (0b1110)
-    xorResult := bitwiseA ^ bitwiseB // 6 (0b0110)
-    shlResult := bitwiseA << 2 // 40 (10 << 2)
-    shrResult := bitwiseB >> 1 // 6 (12 >> 1)
-    fmt.Printf("Bitwise: AND=%d OR=%d XOR=%d SHL=%d SHR=%d\n", andResult, orResult, xorResult, shlResult, shrResult)
+	// === Bitwise operators ===
+	bitwiseA := 10 // 0b1010
+	bitwiseB := 12 // 0b1100
+	andResult := bitwiseA & bitwiseB // 8 (0b1000)
+	orResult := bitwiseA | bitwiseB // 14 (0b1110)
+	xorResult := bitwiseA ^ bitwiseB // 6 (0b0110)
+	shlResult := bitwiseA << 2 // 40 (10 << 2)
+	shrResult := bitwiseB >> 1 // 6 (12 >> 1)
+	fmt.Printf("Bitwise: AND=%d OR=%d XOR=%d SHL=%d SHR=%d\n", andResult, orResult, xorResult, shlResult, shrResult)
 
-    // === Compound assignments ===
-    compoundVal := 10
-    compoundVal += 5 // 15
-    compoundVal -= 3 // 12
-    compoundVal *= 2 // 24
-    compoundVal /= 4 // 6
-    compoundVal %= 4 // 2
-    fmt.Printf("Compound assignments: %d\n", compoundVal)
+	// === Compound assignments ===
+	compoundVal := 10
+	compoundVal += 5 // 15
+	compoundVal -= 3 // 12
+	compoundVal *= 2 // 24
+	compoundVal /= 4 // 6
+	compoundVal %= 4 // 2
+	fmt.Printf("Compound assignments: %d\n", compoundVal)
 
-    // Bitwise compound assignments
-    bitwiseVal := 15 // 0b1111
-    bitwiseVal &= 10 // 10 (0b1010)
-    bitwiseVal |= 5 // 15 (0b0101)
-    bitwiseVal ^= 3 // 12 (0b0011)
-    bitwiseVal <<= 1 // 24
-    bitwiseVal >>= 2 // 6
-    fmt.Printf("Bitwise compound: %d\n", bitwiseVal)
+	// Bitwise compound assignments
+	bitwiseVal := 15 // 0b1111
+	bitwiseVal &= 10 // 10 (0b1010)
+	bitwiseVal |= 5 // 15 (0b0101)
+	bitwiseVal ^= 3 // 12 (0b0011)
+	bitwiseVal <<= 1 // 24
+	bitwiseVal >>= 2 // 6
+	fmt.Printf("Bitwise compound: %d\n", bitwiseVal)
 
-    // === Increment/decrement ===
-    incVal := 5
-    incVal++
-    fmt.Printf("After ++: %d\n", incVal) // 6
-    incVal--
-    fmt.Printf("After --: %d\n", incVal) // 5
+	// === Increment/decrement ===
+	incVal := 5
+	incVal++
+	fmt.Printf("After ++: %d\n", incVal) // 6
+	incVal--
+	fmt.Printf("After --: %d\n", incVal) // 5
 
-    // === Slice expressions ===
-    sliceArr := []int{1, 2, 3, 4, 5}
-    slice1 := sliceArr[1:3] // [2, 3]
-    slice2 := sliceArr[:2] // [1, 2]
-    slice3 := sliceArr[3:] // [4, 5]
-    slice4 := sliceArr[:] // [1, 2, 3, 4, 5]
-    fmt.Printf("Slices: %v, %v, %v, %v\n", slice1, slice2, slice3, slice4)
+	// === Slice expressions ===
+	sliceArr := []int{1, 2, 3, 4, 5}
+	slice1 := sliceArr[1:3] // [2, 3]
+	slice2 := sliceArr[:2] // [1, 2]
+	slice3 := sliceArr[3:] // [4, 5]
+	slice4 := sliceArr[:] // [1, 2, 3, 4, 5]
+	fmt.Printf("Slices: %v, %v, %v, %v\n", slice1, slice2, slice3, slice4)
 
-    // 3-index slice (with capacity)
-    slice5 := sliceArr[1:3:4] // [2, 3] with cap 3
-    fmt.Printf("3-index slice: %v\n", slice5)
+	// 3-index slice (with capacity)
+	slice5 := sliceArr[1:3:4] // [2, 3] with cap 3
+	fmt.Printf("3-index slice: %v\n", slice5)
 
-    // === Type assertions ===
-    // Note: Type assertions are parsed and code-generated correctly.
-    // Full type inference for interfaces requires additional work.
-    // Syntactically demonstrating: someValue.(SomeType)
-    // === Blank identifier ===
-    _ = "ignored value"
-    _, remainder := divide(10, 3)
-    fmt.Printf("Remainder only: %d\n", remainder)
+	// === Type assertions ===
+	// Note: Type assertions are parsed and code-generated correctly.
+	// Full type inference for interfaces requires additional work.
+	// Syntactically demonstrating: someValue.(SomeType)
+	// === Blank identifier ===
+	_ = "ignored value"
+	_, remainder := divide(10, 3)
+	fmt.Printf("Remainder only: %d\n", remainder)
 
-    // === Duration arithmetic (tests const type inheritance + underlying type compatibility) ===
-    // time.Millisecond is a const with inherited type Duration (underlying int64)
-    // These test that Duration * int works via underlying type resolution
-    dur1 := time.Millisecond * 100 // Duration * int
-    dur2 := 100 * time.Millisecond // int * Duration
-    dur3 := time.Second + time.Millisecond // Duration + Duration
-    dur4 := dur1 + dur2 // Duration + Duration (variables)
-    dur5 := time.Duration(500) * 2 // Explicit conversion
-    fmt.Println(dur1, dur2, dur3, dur4, dur5)
+	// === Duration arithmetic (tests const type inheritance + underlying type compatibility) ===
+	// time.Millisecond is a const with inherited type Duration (underlying int64)
+	// These test that Duration * int works via underlying type resolution
+	dur1 := time.Millisecond * 100 // Duration * int
+	dur2 := 100 * time.Millisecond // int * Duration
+	dur3 := time.Second + time.Millisecond // Duration + Duration
+	dur4 := dur1 + dur2 // Duration + Duration (variables)
+	dur5 := time.Duration(500) * 2 // Explicit conversion
+	fmt.Println(dur1, dur2, dur3, dur4, dur5)
 
-    fmt.Println("done")
+	fmt.Println("done")
 
-    // Print results
-    fmt.Printf("Sum: %d\n", sum)
-    fmt.Printf("Area: %f\n", area)
-    fmt.Printf("Processed: %s\n", processed)
-    fmt.Printf("Valid: %t\n", isValid)
-    fmt.Printf("User: %s (%s)\n", user.name, category)
-    fmt.Printf("Count: %d\n", count)
-    fmt.Printf("Array sum: %d\n", arraySum)
-    fmt.Printf("Status: %s\n", status)
-    fmt.Printf("17 / 5 = %d remainder %d\n", quot, rem)
-    fmt.Printf("min=%d, mid=%d, max=%d\n", small, medium, large)
-    fmt.Printf("20 / 6 = %d remainder %d\n", q2, r2)
-    fmt.Printf("p=%d, q=%d\n", p, q)
+	// Print results
+	fmt.Printf("Sum: %d\n", sum)
+	fmt.Printf("Area: %f\n", area)
+	fmt.Printf("Processed: %s\n", processed)
+	fmt.Printf("Valid: %t\n", isValid)
+	fmt.Printf("User: %s (%s)\n", user.name, category)
+	fmt.Printf("Count: %d\n", count)
+	fmt.Printf("Array sum: %d\n", arraySum)
+	fmt.Printf("Status: %s\n", status)
+	fmt.Printf("17 / 5 = %d remainder %d\n", quot, rem)
+	fmt.Printf("min=%d, mid=%d, max=%d\n", small, medium, large)
+	fmt.Printf("20 / 6 = %d remainder %d\n", q2, r2)
+	fmt.Printf("p=%d, q=%d\n", p, q)
 }

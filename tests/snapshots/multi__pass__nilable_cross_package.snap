@@ -10,13 +10,13 @@ import "fmt"
 import "github.com/test/nilable_cross/types"
 
 func main() {
-    cfg1 := types.Config{Name: "app", Logger: nil}
-    cfg2 := types.Config{Name: "app", Logger: (&types.Logger{Prefix: "[INFO]"})}
+	cfg1 := types.Config{Name: "app", Logger: nil}
+	cfg2 := types.Config{Name: "app", Logger: (&types.Logger{Prefix: "[INFO]"})}
 
-    fmt.Println(cfg1.Name)
-    if cfg2.Logger != nil {
-        fmt.Println(cfg2.Logger.Prefix)
-    }
+	fmt.Println(cfg1.Name)
+	if cfg2.Logger != nil {
+		fmt.Println(cfg2.Logger.Prefix)
+	}
 }
 
 
@@ -26,10 +26,10 @@ func main() {
 package types
 
 type Logger struct {
-    Prefix string
+	Prefix string
 }
 
 type Config struct {
-    Name string
-    Logger *Logger //soppo:nilable
+	Name string
+	Logger *Logger //soppo:nilable
 }

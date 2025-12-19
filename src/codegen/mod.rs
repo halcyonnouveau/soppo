@@ -184,7 +184,7 @@ impl Codegen {
     /// Emit current indentation
     pub(crate) fn emit_indent(&mut self) {
         for _ in 0..self.indent_level {
-            self.output.push_str("    ");
+            self.output.push('\t');
         }
     }
 

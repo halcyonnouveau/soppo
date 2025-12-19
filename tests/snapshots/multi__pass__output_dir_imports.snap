@@ -11,8 +11,8 @@ import "github.com/test/output_dir_imports/gen/pkg"
 
 // sop: import
 func main() {
-    result := pkg.Add(1, 2)
-    fmt.Println(result)
+	result := pkg.Add(1, 2)
+	fmt.Println(result)
 }
 
 
@@ -22,5 +22,5 @@ func main() {
 package pkg
 
 func Add(a int, b int) int {
-    return a + b
+	return a + b
 }

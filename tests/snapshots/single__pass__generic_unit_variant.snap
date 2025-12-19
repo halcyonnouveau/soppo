@@ -14,11 +14,11 @@ Option[T] {
 }
 */
 type Option[T any] interface {
-    isOption()
+	isOption()
 }
 
 type Option_Some[T any] struct {
-    Value T
+	Value T
 }
 func (Option_Some[T]) isOption() {}
 
@@ -27,16 +27,16 @@ func (Option_None[T]) isOption() {}
 func (Option_None[T]) String() string { return "None" }
 
 func OptionSome[T any](value T) Option[T] {
-    return Option_Some[T]{Value: value}
+	return Option_Some[T]{Value: value}
 }
 func OptionNone[T any]() Option[T] {
-    return Option_None[T]{}
+	return Option_None[T]{}
 }
 
 func main() {
-    // Generic unit variant with explicit type args
-    none := OptionNone[int]()
-    some := OptionSome(42)
+	// Generic unit variant with explicit type args
+	none := OptionNone[int]()
+	some := OptionSome(42)
 
-    fmt.Printf("%v %v\n", none, some)
+	fmt.Printf("%v %v\n", none, some)
 }

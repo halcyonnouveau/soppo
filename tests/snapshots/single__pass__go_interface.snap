@@ -10,8 +10,8 @@ import "bufio"
 import "os"
 
 func main() {
-    // os.Stdin is *File, but bufio.NewReader expects io.Reader interface
-    // This tests that interface types accept any implementing type
-    reader := bufio.NewReader(os.Stdin)
-    _ = reader
+	// os.Stdin is *File, but bufio.NewReader expects io.Reader interface
+	// This tests that interface types accept any implementing type
+	reader := bufio.NewReader(os.Stdin)
+	_ = reader
 }

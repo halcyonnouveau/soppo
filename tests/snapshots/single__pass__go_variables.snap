@@ -10,16 +10,16 @@ import "fmt"
 import "os"
 
 func main() {
-    // Package-level variables from os
-    stdin := os.Stdin
-    stdout := os.Stdout
-    stderr := os.Stderr
+	// Package-level variables from os
+	stdin := os.Stdin
+	stdout := os.Stdout
+	stderr := os.Stderr
 
-    // These are *os.File types
-    _ = stdin
-    _ = stdout
-    _ = stderr
+	// These are *os.File types
+	_ = stdin
+	_ = stdout
+	_ = stderr
 
-    // Use stdout for printing
-    fmt.Fprintln(os.Stdout, "Hello via os.Stdout")
+	// Use stdout for printing
+	fmt.Fprintln(os.Stdout, "Hello via os.Stdout")
 }

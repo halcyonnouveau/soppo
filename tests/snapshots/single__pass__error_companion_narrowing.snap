@@ -10,17 +10,17 @@ import "net/http"
 // Test that error companion narrowing works:
 // After `resp, err := f(); if err != nil { return }`, resp is narrowed to non-nil.
 func fetchData() error {
-    resp, err := http.Get("https://example.com")
-    if err != nil {
-        return err
-    }
+	resp, err := http.Get("https://example.com")
+	if err != nil {
+		return err
+	}
 
-    // resp should be non-nil here without needing .(!nil)
-    defer resp.Body.Close()
+	// resp should be non-nil here without needing .(!nil)
+	defer resp.Body.Close()
 
-    return nil
+	return nil
 }
 
 func main() {
-    fetchData()
+	fetchData()
 }

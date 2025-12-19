@@ -8,24 +8,24 @@ expression: output
 package main
 
 type Item struct {
-    Name string
+	Name string
 }
 
 type Container struct {
-    Items []Item
+	Items []Item
 }
 
 func main() {
-    // Nested composite literal syntax - type inferred from slice element type
-    items := []Item{{Name: "test"}, {Name: "test2"}}
-    c := Container{Items: items}
+	// Nested composite literal syntax - type inferred from slice element type
+	items := []Item{{Name: "test"}, {Name: "test2"}}
+	c := Container{Items: items}
 
-    // This should work: indexing a slice field
-    for i := range c.Items {
-        _ = c.Items[i].Name
-    }
+	// This should work: indexing a slice field
+	for i := range c.Items {
+		_ = c.Items[i].Name
+	}
 
-    // Inline nested composite literal
-    c2 := Container{Items: []Item{{Name: "inline"}}}
-    _ = c2
+	// Inline nested composite literal
+	c2 := Container{Items: []Item{{Name: "inline"}}}
+	_ = c2
 }

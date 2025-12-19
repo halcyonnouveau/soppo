@@ -1,5 +1,5 @@
 ---
-source: tests/pass.rs
+source: tests/single.rs
 expression: output
 ---
 //soppo:generated
@@ -9,11 +9,11 @@ import "fmt"
 import "errors"
 
 func handleError(err error) string {
-    return err.Error()
+	return err.Error()
 }
 
 func main() {
-    err := errors.New("something went wrong")
-    msg := handleError(err)
-    fmt.Println(msg)
+	err := errors.New("something went wrong")
+	msg := handleError(err)
+	fmt.Println(msg)
 }

@@ -15,11 +15,11 @@ Option {
 }
 */
 type Option interface {
-    isOption()
+	isOption()
 }
 
 type Option_Some struct {
-    Value int
+	Value int
 }
 func (Option_Some) isOption() {}
 
@@ -28,10 +28,10 @@ func (Option_None) isOption() {}
 func (Option_None) String() string { return "None" }
 
 var (
-    OptionNone Option = Option_None{}
+	OptionNone Option = Option_None{}
 )
 func OptionSome(value int) Option {
-    return Option_Some{Value: value}
+	return Option_Some{Value: value}
 }
 
 /*soppo:enum
@@ -41,24 +41,24 @@ Result {
 }
 */
 type Result interface {
-    isResult()
+	isResult()
 }
 
 type Result_Ok struct {
-    Value string
+	Value string
 }
 func (Result_Ok) isResult() {}
 
 type Result_Err struct {
-    Value string
+	Value string
 }
 func (Result_Err) isResult() {}
 
 func ResultOk(value string) Result {
-    return Result_Ok{Value: value}
+	return Result_Ok{Value: value}
 }
 func ResultErr(value string) Result {
-    return Result_Err{Value: value}
+	return Result_Err{Value: value}
 }
 
 /*soppo:enum
@@ -73,17 +73,17 @@ Shape {
 }
 */
 type Shape interface {
-    isShape()
+	isShape()
 }
 
 type Shape_Circle struct {
-    radius float64
+	radius float64
 }
 func (Shape_Circle) isShape() {}
 
 type Shape_Rectangle struct {
-    width float64
-    height float64
+	width float64
+	height float64
 }
 func (Shape_Rectangle) isShape() {}
 
@@ -96,7 +96,7 @@ Colour {
 }
 */
 type Colour interface {
-    isColour()
+	isColour()
 }
 
 type Colour_Red struct {}
@@ -112,163 +112,163 @@ func (Colour_Blue) isColour() {}
 func (Colour_Blue) String() string { return "Blue" }
 
 var (
-    ColourRed Colour = Colour_Red{}
-    ColourGreen Colour = Colour_Green{}
-    ColourBlue Colour = Colour_Blue{}
+	ColourRed Colour = Colour_Red{}
+	ColourGreen Colour = Colour_Green{}
+	ColourBlue Colour = Colour_Blue{}
 )
 
 // === Helper functions ===
 func maybeValue() (int, bool) {
-    return 42, true
+	return 42, true
 }
 
 func maybeError() (string, error) {
-    return "success", nil
+	return "success", nil
 }
 
 func getPointer() *int {
-    x := 10
-    return (&x)
+	x := 10
+	return (&x)
 }
 
 // === Tests for if-init with type assertions (enum variants) ===
 // Test type assertion with single-value variant
 func unwrapOr(opt Option, defaultVal int) int {
-    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); x != nil {
-        return x.Value
-    }
-    return defaultVal
+	if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); x != nil {
+		return x.Value
+	}
+	return defaultVal
 }
 
 // Test type assertion with else block
 func unwrapOrElse(opt Option, defaultVal int) int {
-    if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); x != nil {
-        return x.Value
-    } else {
-        return defaultVal
-    }
+	if x := func() *Option_Some { if _v, _ok := opt.(Option_Some); _ok { return &_v }; return nil }(); x != nil {
+		return x.Value
+	} else {
+		return defaultVal
+	}
 }
 
 // Test type assertion with struct variant
 func getRadius(s Shape) float64 {
-    if c := func() *Shape_Circle { if _v, _ok := s.(Shape_Circle); _ok { return &_v }; return nil }(); c != nil {
-        return c.radius
-    }
-    return 0.0
+	if c := func() *Shape_Circle { if _v, _ok := s.(Shape_Circle); _ok { return &_v }; return nil }(); c != nil {
+		return c.radius
+	}
+	return 0.0
 }
 
 // Test type assertion with unit variant
 func isRed(c Colour) bool {
-    if x := func() *Colour_Red { if _v, _ok := c.(Colour_Red); _ok { return &_v }; return nil }(); x != nil {
-        return true
-    }
-    return false
+	if x := func() *Colour_Red { if _v, _ok := c.(Colour_Red); _ok { return &_v }; return nil }(); x != nil {
+		return true
+	}
+	return false
 }
 
 // Test nested type assertions
 func processResult(r Result) string {
-    if ok := func() *Result_Ok { if _v, _ok := r.(Result_Ok); _ok { return &_v }; return nil }(); ok != nil {
-        return fmt.Sprintf("success: %s", ok.Value)
-    } else {
-        if err := func() *Result_Err { if _v, _ok := r.(Result_Err); _ok { return &_v }; return nil }(); err != nil {
-            return fmt.Sprintf("error: %s", err.Value)
-        }
-    }
-    return "unknown"
+	if ok := func() *Result_Ok { if _v, _ok := r.(Result_Ok); _ok { return &_v }; return nil }(); ok != nil {
+		return fmt.Sprintf("success: %s", ok.Value)
+	} else {
+		if err := func() *Result_Err { if _v, _ok := r.(Result_Err); _ok { return &_v }; return nil }(); err != nil {
+			return fmt.Sprintf("error: %s", err.Value)
+		}
+	}
+	return "unknown"
 }
 
 // === Tests for if-init with regular expressions ===
 func testBasicIfInit() {
-    // Basic if-init with simple expression
-    if x := 5; x > 0 {
-        fmt.Println("x is positive:", x)
-    }
+	// Basic if-init with simple expression
+	if x := 5; x > 0 {
+		fmt.Println("x is positive:", x)
+	}
 
-    // If-init with multi-return (comma-ok idiom)
-    if val, ok := maybeValue(); ok {
-        fmt.Println("Got value:", val)
-    }
+	// If-init with multi-return (comma-ok idiom)
+	if val, ok := maybeValue(); ok {
+		fmt.Println("Got value:", val)
+	}
 
-    // If-init with error check
-    if result, err := maybeError(); err == nil {
-        fmt.Println("Result:", result)
-    }
+	// If-init with error check
+	if result, err := maybeError(); err == nil {
+		fmt.Println("Result:", result)
+	}
 
-    // If-init with nil check on pointer
-    if p := getPointer(); p != nil {
-        fmt.Println("Pointer value:", (*p))
-    }
+	// If-init with nil check on pointer
+	if p := getPointer(); p != nil {
+		fmt.Println("Pointer value:", (*p))
+	}
 
-    // If-init with else
-    if n := 0; n > 0 {
-        fmt.Println("positive")
-    } else {
-        fmt.Println("not positive")
-    }
+	// If-init with else
+	if n := 0; n > 0 {
+		fmt.Println("positive")
+	} else {
+		fmt.Println("not positive")
+	}
 
-    // If-init with else-if chain
-    if x := 10; x < 0 {
-        fmt.Println("negative")
-    } else {
-        if x == 0 {
-            fmt.Println("zero")
-        } else {
-            fmt.Println("positive")
-        }
-    }
+	// If-init with else-if chain
+	if x := 10; x < 0 {
+		fmt.Println("negative")
+	} else {
+		if x == 0 {
+			fmt.Println("zero")
+		} else {
+			fmt.Println("positive")
+		}
+	}
 
-    // If-init with inline function call
-    if result := func() int {
-        return 100
-    }(); result > 50 {
-        fmt.Println("Large result:", result)
-    }
+	// If-init with inline function call
+	if result := func() int {
+		return 100
+	}(); result > 50 {
+		fmt.Println("Large result:", result)
+	}
 
-    // Map lookup (single value form)
-    m := map[string]int{"a": 1, "b": 2}
-    if v := m["a"]; v != 0 {
-        fmt.Println("Found:", v)
-    }
+	// Map lookup (single value form)
+	m := map[string]int{"a": 1, "b": 2}
+	if v := m["a"]; v != 0 {
+		fmt.Println("Found:", v)
+	}
 }
 
 // Test recover with if-init
 func safeRecover() {
-    defer func() {
-        if r := recover(); r != nil {
-            fmt.Println("Recovered:", r)
-        }
-    }()
-    panic("test panic")
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered:", r)
+		}
+	}()
+	panic("test panic")
 }
 
 func main() {
-    // Test enum type assertions
-    some := OptionSome(42)
-    none := OptionNone
+	// Test enum type assertions
+	some := OptionSome(42)
+	none := OptionNone
 
-    fmt.Printf("unwrapOr(some, 0) = %d\n", unwrapOr(some, 0))
-    fmt.Printf("unwrapOr(none, 99) = %d\n", unwrapOr(none, 99))
-    fmt.Printf("unwrapOrElse(some, 0) = %d\n", unwrapOrElse(some, 0))
-    fmt.Printf("unwrapOrElse(none, 99) = %d\n", unwrapOrElse(none, 99))
+	fmt.Printf("unwrapOr(some, 0) = %d\n", unwrapOr(some, 0))
+	fmt.Printf("unwrapOr(none, 99) = %d\n", unwrapOr(none, 99))
+	fmt.Printf("unwrapOrElse(some, 0) = %d\n", unwrapOrElse(some, 0))
+	fmt.Printf("unwrapOrElse(none, 99) = %d\n", unwrapOrElse(none, 99))
 
-    var circle Shape = Shape_Circle{radius: 5.0}
-    var rect Shape = Shape_Rectangle{width: 3.0, height: 4.0}
+	var circle Shape = Shape_Circle{radius: 5.0}
+	var rect Shape = Shape_Rectangle{width: 3.0, height: 4.0}
 
-    fmt.Printf("getRadius(circle) = %f\n", getRadius(circle))
-    fmt.Printf("getRadius(rect) = %f\n", getRadius(rect))
+	fmt.Printf("getRadius(circle) = %f\n", getRadius(circle))
+	fmt.Printf("getRadius(rect) = %f\n", getRadius(rect))
 
-    red := ColourRed
-    green := ColourGreen
+	red := ColourRed
+	green := ColourGreen
 
-    fmt.Printf("isRed(red) = %t\n", isRed(red))
-    fmt.Printf("isRed(green) = %t\n", isRed(green))
+	fmt.Printf("isRed(red) = %t\n", isRed(red))
+	fmt.Printf("isRed(green) = %t\n", isRed(green))
 
-    ok := ResultOk("done")
-    err := ResultErr("failed")
+	ok := ResultOk("done")
+	err := ResultErr("failed")
 
-    fmt.Printf("processResult(ok) = %s\n", processResult(ok))
-    fmt.Printf("processResult(err) = %s\n", processResult(err))
+	fmt.Printf("processResult(ok) = %s\n", processResult(ok))
+	fmt.Printf("processResult(err) = %s\n", processResult(err))
 
-    // Test regular if-init
-    testBasicIfInit()
+	// Test regular if-init
+	testBasicIfInit()
 }

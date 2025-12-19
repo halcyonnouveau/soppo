@@ -11,20 +11,20 @@ import "github.com/test/cross_module_methods/models"
 
 // sop: import
 func main() {
-    // Create user via function from imported module
-    user := models.NewUser("Alice", 30)
+	// Create user via function from imported module
+	user := models.NewUser("Alice", 30)
 
-    // Call value receiver methods on imported type
-    name := user.GetName()
-    age := user.GetAge()
-    greeting := user.Greet()
+	// Call value receiver methods on imported type
+	name := user.GetName()
+	age := user.GetAge()
+	greeting := user.Greet()
 
-    fmt.Printf("%s is %d years old: %s\n", name, age, greeting)
+	fmt.Printf("%s is %d years old: %s\n", name, age, greeting)
 
-    // Call pointer receiver method on value (Go auto-addresses)
-    user.SetAge(31)
-    newAge := user.GetAge()
-    fmt.Printf("New age: %d\n", newAge)
+	// Call pointer receiver method on value (Go auto-addresses)
+	user.SetAge(31)
+	newAge := user.GetAge()
+	fmt.Printf("New age: %d\n", newAge)
 }
 
 
@@ -35,31 +35,31 @@ func main() {
 package models
 
 type User struct {
-    name string
-    age int
+	name string
+	age int
 }
 
 // NewUser creates a new User
 func NewUser(name string, age int) User {
-    return User{name: name, age: age}
+	return User{name: name, age: age}
 }
 
 // GetName returns the user's name (value receiver)
 func (u User) GetName() string {
-    return u.name
+	return u.name
 }
 
 // GetAge returns the user's age (value receiver)
 func (u User) GetAge() int {
-    return u.age
+	return u.age
 }
 
 // SetAge sets the user's age (pointer receiver)
 func (u *User) SetAge(age int) {
-    u.age = age
+	u.age = age
 }
 
 // Greet returns a greeting string
 func (u User) Greet() string {
-    return "Hello, " + u.name
+	return "Hello, " + u.name
 }
