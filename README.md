@@ -4,7 +4,7 @@
 
 A language that compiles to Go, adding ergonomic and type safety features that Go lacks. Soppo uses Go syntax wherever possible - if you know Go, you know most of Soppo.
 
-**[Take the Tour](https://tour.soppolang.dev)** · [Playground](https://play.soppolang.dev) · [Website](https://soppolang.dev)
+**[Take the tour](https://tour.soppolang.dev)** · [Visit the playground](https://play.soppolang.dev) · [See the website](https://soppolang.dev)
 
 Soppo is not production ready.
 
