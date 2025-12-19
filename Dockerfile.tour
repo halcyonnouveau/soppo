@@ -1,0 +1,42 @@
+# Build Rust binary (static with musl)
+FROM rust:slim AS rust-builder
+WORKDIR /build
+RUN rustup target add x86_64-unknown-linux-musl
+RUN apt-get update && apt-get install -y musl-tools && rm -rf /var/lib/apt/lists/*
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY benches ./benches
+COPY lsp/Cargo.toml ./lsp/
+RUN mkdir -p lsp/src && echo "fn main() {}" > lsp/src/main.rs
+RUN cargo build --release --target x86_64-unknown-linux-musl --package soppo
+
+# Build SvelteKit app
+FROM oven/bun:1 AS web-builder
+WORKDIR /build
+COPY www/tour/package.json www/tour/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY www/tour ./
+RUN bun run build
+
+# Runtime
+FROM golang:latest AS go-builder
+
+FROM oven/bun:1-slim
+WORKDIR /app
+
+# Copy Go from official image
+COPY --from=go-builder /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Copy the sop binary (static, no glibc dependency)
+COPY --from=rust-builder /build/target/x86_64-unknown-linux-musl/release/sop /usr/local/bin/sop
+
+# Copy the built SvelteKit app
+COPY --from=web-builder /build/build ./build
+COPY --from=web-builder /build/package.json ./
+
+ENV NODE_ENV=production
+ENV PORT=3000
+EXPOSE 3000
+
+CMD ["bun", "./build"]

@@ -24,6 +24,16 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_TOKEN_PLAYGROUND }}
 
+  deploy-tour:
+    name: Deploy tour
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy -c fly.tour.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_TOKEN_TOUR }}
+
   upload-binaries:
     name: Upload binaries
     strategy:

@@ -24,13 +24,11 @@
   } from "@codemirror/language";
   import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
   import { go } from "@codemirror/lang-go";
-  import { vim } from "@replit/codemirror-vim";
   import { ayuDark } from "$lib/theme";
 
   interface Props {
     value: string;
     readonly?: boolean;
-    vimMode?: boolean;
     onchange?: (value: string) => void;
     onrun?: () => void;
   }
@@ -38,14 +36,12 @@
   let {
     value = $bindable(),
     readonly = false,
-    vimMode = false,
     onchange,
     onrun,
   }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView;
-  let vimCompartment = new Compartment();
 
   onMount(() => {
     const extensions = [
@@ -77,7 +73,6 @@
       ayuDark,
       indentUnit.of("\t"),
       EditorState.tabSize.of(4),
-      vimCompartment.of(vimMode ? vim() : []),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           value = update.state.doc.toString();
@@ -101,14 +96,6 @@
     return () => {
       view.destroy();
     };
-  });
-
-  $effect(() => {
-    if (view) {
-      view.dispatch({
-        effects: vimCompartment.reconfigure(vimMode ? vim() : []),
-      });
-    }
   });
 
   $effect(() => {
