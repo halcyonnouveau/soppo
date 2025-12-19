@@ -246,6 +246,7 @@ impl Parser {
                 if !self.consume(&Token::Comma) {
                     break;
                 }
+                self.skip_terminators();
             }
         }
 

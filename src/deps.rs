@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use miette::{Result, miette};
+use miette::{NamedSource, Result};
 
 use crate::syntax::{FileId, Parser};
 
@@ -48,12 +48,17 @@ impl DepGraph {
             files.insert(source_path.clone());
 
             let source = std::fs::read_to_string(source_path)
-                .map_err(|e| miette!("Failed to read {}: {}", source_path.display(), e))?;
+                .map_err(|e| miette::miette!("Failed to read {}: {}", source_path.display(), e))?;
+
+            let filename = source_path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| source_path.display().to_string());
 
             let mut parser = Parser::new(&source, FileId(0));
-            let file = parser
-                .parse_file()
-                .map_err(|e| miette!("Failed to parse {}: {:?}", source_path.display(), e))?;
+            let file = parser.parse_file().map_err(|e| {
+                miette::Report::from(e).with_source_code(NamedSource::new(filename, source.clone()))
+            })?;
 
             file_packages.insert(source_path.clone(), file.package.name.clone());
 
