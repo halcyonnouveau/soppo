@@ -240,6 +240,22 @@ impl GlobalCtxt {
         self.modules.get_mut(&self.current_module).unwrap()
     }
 
+    /// Check if a type name refers to an enum in the current module
+    pub fn is_enum(&self, name: &str) -> bool {
+        self.current_module()
+            .types
+            .get(name)
+            .is_some_and(|t| matches!(t.kind, TypeDefKind::Enum { .. }))
+    }
+
+    /// Check if a type name refers to a generic type (has type parameters)
+    pub fn is_generic_type(&self, name: &str) -> bool {
+        self.current_module()
+            .types
+            .get(name)
+            .is_some_and(|t| !t.generics.is_empty())
+    }
+
     /// Register a type definition
     pub fn register_type(&mut self, type_decl: &TypeDecl) {
         let type_def = TypeDef {

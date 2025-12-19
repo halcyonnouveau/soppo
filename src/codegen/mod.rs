@@ -459,7 +459,22 @@ impl Codegen {
         let go_name = name.strip_prefix('?').unwrap_or(name);
         match go_name {
             "()" => String::new(), // Unit type
-            _ => go_name.to_string(),
+            _ => {
+                // Handle generic type arguments: Option[int] -> Option[int]
+                // Only add [args] if this is a generic type (check type system)
+                // For compound types like *T, []T, map[K]V, the args contain inner types
+                // but those are already encoded in the name, so we don't add them again
+                if !ty.args.is_empty() && self.global_state.is_generic_type(go_name) {
+                    let args: Vec<String> = ty
+                        .args
+                        .iter()
+                        .map(|a| self.go_type(&a.name).to_string())
+                        .collect();
+                    format!("{}[{}]", go_name, args.join(", "))
+                } else {
+                    go_name.to_string()
+                }
+            }
         }
     }
 

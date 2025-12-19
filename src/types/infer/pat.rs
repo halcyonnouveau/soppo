@@ -18,7 +18,7 @@ impl Infer {
                 // Default doesn't bind anything
                 Ok(())
             }
-            PatternKind::Variant(_name, _) => {
+            PatternKind::Variant { .. } => {
                 // Qualified variant names like Colour.Red don't create bindings
                 // They just match against enum variants
                 Ok(())
@@ -27,7 +27,7 @@ impl Infer {
                 // Literal pattern doesn't bind anything
                 Ok(())
             }
-            PatternKind::Destructor { name, binding } => {
+            PatternKind::Destructor { name, binding, .. } => {
                 // For destructor patterns like Ok(value), extract the inner type from variant
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
@@ -57,6 +57,7 @@ impl Infer {
                 name,
                 fields,
                 rest: _,
+                ..
             } => {
                 // For struct destructor patterns like Circle{radius: r, ...} or Point{x: 0, y}
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
@@ -154,11 +155,11 @@ impl Infer {
             PatternKind::Default | PatternKind::Literal(_) | PatternKind::Guard(_) => {
                 // These patterns don't bind anything
             }
-            PatternKind::Variant(_name, _) => {
+            PatternKind::Variant { .. } => {
                 // Qualified variant names like Colour.Red don't create bindings
                 // They just match against enum variants
             }
-            PatternKind::Destructor { name, binding } => {
+            PatternKind::Destructor { name, binding, .. } => {
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
                 let binding_ty = if let Type::Con { sym: type_name, .. } = scrutinee_ty
@@ -189,6 +190,7 @@ impl Infer {
                 name,
                 fields,
                 rest: _,
+                ..
             } => {
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 

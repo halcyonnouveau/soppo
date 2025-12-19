@@ -1,9 +1,14 @@
 package main
 
-import "fmt"
+import (
+    "bytes"
+    "fmt"
+)
 
 type Option[T any] enum {
-    Some T
+    Some struct {
+        Value T
+    }
     None
 }
 
@@ -12,13 +17,66 @@ type Result[T any, E any] enum {
     Err E
 }
 
-func main() {
-    x := Option.Some(42)
-    y := Option.Some("hello")
-    z := Option.Some[int](100)
+func divide(a, b int) Option[int] {
+    if b == 0 {
+        return Option[int].None
+    }
+    return Option[int].Some{Value: a / b}
+}
 
+func divide2(a, b int) Option[int] {
+    if b == 0 {
+        return Option.None
+    }
+    return Option.Some{Value: a / b}
+}
+
+// Test generic enum with nested type (type with dot like *bytes.Buffer)
+func getBuffer(create bool) Option[*bytes.Buffer] {
+    if create {
+        return Option[*bytes.Buffer].Some{Value: bytes.NewBufferString("hello")}
+    }
+    return Option[*bytes.Buffer].None
+}
+
+func main() {
+    // Test Result with single-value variants (old syntax)
     r1 := Result.Ok[int, string](1)
     r2 := Result.Err[int, string]("failed")
+    fmt.Printf("%v %v\n", r1, r2)
 
-    fmt.Printf("%v %v %v %v %v\n", x, y, z, r1, r2)
+    // Test Option with struct variant (new syntax)
+    result := divide(10, 2)
+    match result {
+    case Option[int].Some{Value: v}:
+        fmt.Println("Result:", v)
+    case Option[int].None:
+        fmt.Println("Cannot divide by zero")
+    }
+
+    result2 := divide(10, 0)
+    match result2 {
+    case Option.Some{Value: v}:
+        fmt.Println("Result:", v)
+    case Option.None:
+        fmt.Println("Cannot divide by zero")
+    }
+
+    // Test Option with nested type (type containing dot: *bytes.Buffer)
+    // This tests that patterns like Option[pkg.Type].Some work correctly
+    bufOpt := getBuffer(true)
+    match bufOpt {
+    case Option[*bytes.Buffer].Some{Value: buf}:
+        fmt.Println("Buffer:", buf.String())
+    case Option[*bytes.Buffer].None:
+        fmt.Println("No buffer")
+    }
+
+    bufOpt2 := getBuffer(false)
+    match bufOpt2 {
+    case Option[*bytes.Buffer].Some{Value: buf}:
+        fmt.Println("Buffer:", buf.String())
+    case Option[*bytes.Buffer].None:
+        fmt.Println("No buffer")
+    }
 }

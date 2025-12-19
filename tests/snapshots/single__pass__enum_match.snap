@@ -300,8 +300,8 @@ func main() {
     result1 := unwrapOr(ok, 0)
     result2 := unwrapOr(err, 99)
 
-    circle := Shape_Circle{radius: 5.0}
-    rect := Shape_Rectangle{width: 3.0, height: 4.0}
+    var circle Shape = Shape_Circle{radius: 5.0}
+    var rect Shape = Shape_Rectangle{width: 3.0, height: 4.0}
 
     nested := testNestedMatch()
 

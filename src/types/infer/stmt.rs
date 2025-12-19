@@ -102,6 +102,10 @@ impl Infer {
             StmtKind::Decl { ident, value } => {
                 let value_ty = self.infer_expr(value)?;
                 let value_ty_sub = self.substitute(value_ty.clone());
+
+                // Check for generic enum variants without type args (can't infer from context)
+                self.check_generic_enum_needs_type_args(value)?;
+
                 self.insert_var(ident.name.clone(), value_ty.clone(), Some(ident.span))?;
 
                 // Record variable definition for LSP
@@ -117,6 +121,8 @@ impl Infer {
 
                 // Track nil state for pointer types
                 self.update_nil_state_for_assignment(&ident.name, value, &value_ty_sub);
+                // Track variant state for enum types
+                self.update_variant_state_for_assignment(&ident.name, value);
                 Ok(Type::unit())
             }
 
@@ -431,9 +437,10 @@ impl Infer {
                 let value_ty = self.infer_expr(value)?;
                 let value_ty_sub = self.substitute(value_ty.clone());
                 self.unify(&target_ty, &value_ty, &stmt.span)?;
-                // Update nil state for reassignment
+                // Update nil state and variant state for reassignment
                 if let ExprKind::Ident(name) = &target.kind {
                     self.update_nil_state_for_assignment(name, value, &value_ty_sub);
+                    self.update_variant_state_for_assignment(name, value);
                 }
                 Ok(Type::unit())
             }
@@ -736,6 +743,9 @@ impl Infer {
 
                         let value_ty = self.infer_expr(expr)?;
                         self.unify(expected, &value_ty, &expr.span)?;
+
+                        // After unification, set inferred type args on expressions that need them
+                        self.set_inferred_type_args(expr, expected);
                     }
                 } else if !values.is_empty() {
                     // Infer types but no expected types to check against
@@ -782,10 +792,46 @@ impl Infer {
                     .unwrap_or(false);
 
                 // Set the is_soppo_enum flag on all Variant patterns
+                // Also set inferred type args from scrutinee type
+                let scrutinee_type_args: Vec<String> = scrutinee_ty
+                    .as_ref()
+                    .and_then(|ty| {
+                        if let Type::Con { args, .. } = ty {
+                            if args.is_empty() {
+                                None
+                            } else {
+                                Some(args.iter().map(|t| self.type_to_string(t)).collect())
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+
                 for arm in arms.iter() {
                     for pattern in &arm.patterns {
-                        if let PatternKind::Variant(_, is_soppo_enum) = &pattern.kind {
-                            is_soppo_enum.set(is_soppo_enum_scrutinee);
+                        match &pattern.kind {
+                            PatternKind::Variant {
+                                is_soppo_enum,
+                                type_args,
+                                ..
+                            } => {
+                                is_soppo_enum.set(is_soppo_enum_scrutinee);
+                                // Set inferred type args if pattern has no explicit args
+                                if type_args.is_empty() && !scrutinee_type_args.is_empty() {
+                                    *pattern.inferred_type_args.borrow_mut() =
+                                        Some(scrutinee_type_args.clone());
+                                }
+                            }
+                            PatternKind::Destructor { type_args, .. }
+                            | PatternKind::StructDestructor { type_args, .. } => {
+                                // Set inferred type args if pattern has no explicit args
+                                if type_args.is_empty() && !scrutinee_type_args.is_empty() {
+                                    *pattern.inferred_type_args.borrow_mut() =
+                                        Some(scrutinee_type_args.clone());
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -810,8 +856,8 @@ impl Infer {
                         .iter()
                         .flat_map(|arm| arm.patterns.iter())
                         .filter_map(|pattern| match &pattern.kind {
-                            PatternKind::Variant(v, _) => {
-                                Some(v.rsplit('.').next().unwrap_or(v).to_string())
+                            PatternKind::Variant { name, .. } => {
+                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
                             }
                             PatternKind::Destructor { name, .. } => {
                                 Some(name.rsplit('.').next().unwrap_or(name).to_string())
@@ -960,9 +1006,9 @@ impl Infer {
                             .iter()
                             .flat_map(|arm| arm.patterns.iter())
                             .filter_map(|pattern| match &pattern.kind {
-                                PatternKind::Variant(v, _) => {
+                                PatternKind::Variant { name, .. } => {
                                     // Extract variant name from qualified name like "Colour.Red"
-                                    Some(v.rsplit('.').next().unwrap_or(v).to_string())
+                                    Some(name.rsplit('.').next().unwrap_or(name).to_string())
                                 }
                                 PatternKind::Destructor { name, .. } => {
                                     Some(name.rsplit('.').next().unwrap_or(name).to_string())

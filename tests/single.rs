@@ -8,7 +8,7 @@ use test_generator::test_resources;
 #[test_resources("tests/fixtures/single/pass/*.sop")]
 fn test_pass(resource: &str) {
     let output = compile_soppo_file(resource)
-        .unwrap_or_else(|_| panic!("Pass test '{}' should succeed", resource));
+        .unwrap_or_else(|e| panic!("Pass test '{}' should succeed:\n{}", resource, e));
 
     let file_name = Path::new(resource)
         .file_stem()

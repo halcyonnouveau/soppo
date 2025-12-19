@@ -9,7 +9,7 @@ use test_generator::test_resources;
 fn test_pass(resource: &str) {
     let fixture_path = Path::new(resource);
     let results = run_multi_test(fixture_path)
-        .unwrap_or_else(|_| panic!("Multi-file test '{}' should succeed", resource));
+        .unwrap_or_else(|e| panic!("Multi-file test '{}' should succeed:\n{}", resource, e));
 
     let dir_name = fixture_path
         .file_name()

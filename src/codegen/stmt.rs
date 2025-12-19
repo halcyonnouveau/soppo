@@ -54,6 +54,23 @@ impl Codegen {
         match &stmt.kind {
             StmtKind::Decl { ident: name, value } => {
                 self.emit_indent();
+                // Check if assigning an enum variant struct literal
+                // If so, declare with interface type so type assertions work in Go
+                if let ExprKind::StructLit { ty: Some(ty), .. } = &value.kind {
+                    // Check for enum variant pattern: EnumType.Variant
+                    if let Some((enum_name, _variant)) = ty.name.split_once('.') {
+                        // Use the type system to check if this is actually an enum
+                        if self.global_state.is_enum(enum_name) {
+                            // This is an enum variant like Shape.Circle
+                            // Generate: var name EnumInterface = Variant{...}
+                            let interface_type = self.go_type(enum_name);
+                            self.emit(format!("var {} {} = ", name, interface_type));
+                            self.gen_expr(value);
+                            self.emit_stmt_end(stmt_line);
+                            return;
+                        }
+                    }
+                }
                 self.emit(format!("{} := ", name));
                 self.gen_expr(value);
                 self.emit_stmt_end(stmt_line);
@@ -111,6 +128,17 @@ impl Codegen {
                     }
                     (None, Some(expr)) => {
                         // var x = value (type inference)
+                        // For enum variants, emit explicit interface type
+                        if let ExprKind::StructLit { ty: Some(ty), .. } = &expr.kind
+                            && let Some((enum_name, _variant)) = ty.name.split_once('.')
+                            && self.global_state.is_enum(enum_name)
+                        {
+                            let interface_type = self.go_type(enum_name);
+                            self.emit(format!("var {} {} = ", name, interface_type));
+                            self.gen_expr(expr);
+                            self.emit_stmt_end(stmt_line);
+                            return;
+                        }
                         self.emit(format!("var {} = ", name));
                         self.gen_expr(expr);
                     }
@@ -327,7 +355,20 @@ impl Codegen {
                         StmtKind::Decl { ident: name, value } => {
                             self.emit(name);
                             self.emit(" := ");
-                            self.gen_expr(value);
+                            // Special handling for type assertions on enum variants
+                            // Go type assertions return structs directly, but we need
+                            // to compare to nil, so wrap in a closure returning pointer
+                            if let ExprKind::TypeAssert { expr, ty, .. } = &value.kind {
+                                let type_name = ty.name.replace('.', "_");
+                                self.emit(format!("func() *{} {{ if _v, _ok := ", type_name));
+                                self.gen_expr(expr);
+                                self.emit(format!(
+                                    ".({}); _ok {{ return &_v }}; return nil }}()",
+                                    type_name
+                                ));
+                            } else {
+                                self.gen_expr(value);
+                            }
                         }
                         StmtKind::MultiDecl {
                             ident: names,
@@ -638,12 +679,21 @@ impl Codegen {
         let is_expression_less = scrutinee.is_none();
 
         // Check if this is struct matching (regular structs, not enum variants)
-        // Struct patterns have names without dots (e.g., "Point"), enum variants have dots (e.g., "Shape.Circle")
+        // Use the type system to check if the struct destructor is for an enum variant
         let is_struct_match = !is_expression_less
             && arms.iter().any(|arm| {
                 arm.patterns.iter().any(|p| {
                     if let PatternKind::StructDestructor { name, .. } = &p.kind {
-                        !name.contains('.')
+                        // Check if this is an enum variant by seeing if the base type is an enum
+                        if let Some((base, _)) = name.split_once('.') {
+                            // Has a dot - check if base is an enum type
+                            // Strip type parameters: Option[int] -> Option
+                            let base_type = base.split('[').next().unwrap_or(base);
+                            !self.global_state.is_enum(base_type)
+                        } else {
+                            // No dot - regular struct
+                            true
+                        }
                     } else {
                         false
                     }
@@ -757,7 +807,7 @@ impl Codegen {
         let is_type_switch = !is_expression_less
             && arms.iter().any(|arm| {
                 arm.patterns.iter().any(|p| match &p.kind {
-                    PatternKind::Variant(_, is_soppo_enum) => is_soppo_enum.get(),
+                    PatternKind::Variant { is_soppo_enum, .. } => is_soppo_enum.get(),
                     PatternKind::Destructor { .. } | PatternKind::StructDestructor { .. } => true,
                     _ => false,
                 })

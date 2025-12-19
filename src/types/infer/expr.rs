@@ -369,6 +369,25 @@ impl Infer {
 
                         // Check if it's an enum variant (e.g., Shape.Circle)
                         if self.global_state.is_local_enum(pkg_name) {
+                            // Check if this is a generic enum with type args
+                            if !ty.args.is_empty() {
+                                // Generic enum struct literal: Option[int].Some{...}
+                                let type_arg_types: Vec<Type> =
+                                    ty.args.iter().map(|ta| self.resolve_type(ta)).collect();
+                                return Ok(Type::generic(pkg_name, type_arg_types));
+                            }
+
+                            // Check if the enum is generic - if so, use fresh type variables
+                            let generics_count = self
+                                .global_state
+                                .lookup_type(pkg_name)
+                                .map(|td| td.generics.len())
+                                .unwrap_or(0);
+                            if generics_count > 0 {
+                                let type_vars: Vec<Type> =
+                                    (0..generics_count).map(|_| self.fresh_ty_var()).collect();
+                                return Ok(Type::generic(pkg_name, type_vars));
+                            }
                             return Ok(Type::simple(pkg_name));
                         }
 
@@ -550,30 +569,34 @@ impl Infer {
                 Ok(expr_ty)
             }
 
-            ExprKind::TypeAssert { expr, ty } => {
-                // Type assertions have two behaviors:
+            ExprKind::TypeAssert {
+                expr,
+                ty,
+                known_match,
+            } => {
+                // Type assertions return the asserted type directly.
+                // Like Rust pattern matching - variable is typed as the enum,
+                // and assertions extract the variant data.
                 //
-                // 1. Soppo enum variants (e.g., Option.Some, Result.Err):
-                //    Returns a nilable pointer - nil if wrong variant, non-nil if matched.
-                //    Enables: `if x := opt.(Option.Some) { use(x.Value) }`
-                //
-                // 2. Go interface type assertions (e.g., x.(int), x.(MyStruct)):
-                //    Returns the actual type. Should be used with comma-ok syntax:
-                //    `v, ok := iface.(ConcreteType)`
-                //
+                // For enum variants: panics if wrong variant (use comma-ok for safe check)
+                // For Go interfaces: panics if wrong type (use comma-ok for safe check)
                 self.infer_expr(expr)?;
 
-                // Soppo enum variants contain a dot (e.g., "Option.Some")
                 let is_enum_variant = ty.name.contains('.');
 
                 if is_enum_variant {
-                    // Enum variant: return pointer for nil-check pattern
                     let inner_ty = Type::simple(&ty.name.replace('.', "_"));
-                    Ok(Type::ptr(inner_ty).as_nullable())
+
+                    // if we know the variant matches, mark it so codegen can skip the runtime assertion
+                    if let ExprKind::Ident(name) = &expr.kind
+                        && let Some(known) = self.get_variant_state(name)
+                        && known == &ty.name
+                    {
+                        known_match.set(true);
+                    }
+
+                    Ok(inner_ty)
                 } else {
-                    // Go interface assertion: return the target type directly
-                    // Matches Go semantics - panics at runtime if assertion fails
-                    // Use comma-ok syntax for safe assertions: v, ok := x.(Type)
                     let target_ty = self.resolve_type(ty);
                     Ok(target_ty)
                 }
@@ -685,6 +708,96 @@ impl Infer {
             });
         }
 
+        // Check if this is a generic enum variant like Option[int].None or Option[int].Some
+        // The parser generates Call { func: Ident(type_name), type_args, args: [] } for Option[int]
+        if let ExprKind::Call {
+            func,
+            type_args,
+            args,
+        } = &field_expr.kind
+            && let ExprKind::Ident(type_name) = &func.kind
+            && !type_args.is_empty()
+            && args.is_empty()
+            && let Some(type_def) = self.global_state.lookup_type(type_name).cloned()
+            && let TypeDefKind::Enum { variants } = &type_def.kind
+        {
+            // Validate type args match generic params
+            if type_args.len() != type_def.generics.len() {
+                return Err(SoppoError::Type {
+                    message: format!(
+                        "Expected {} type argument(s) for `{}`, got {}",
+                        type_def.generics.len(),
+                        type_name,
+                        type_args.len()
+                    ),
+                    span: field_expr.span,
+                });
+            }
+
+            // Validate and collect type arg substitutions
+            let mut generic_subst: HashMap<String, Type> = HashMap::new();
+            for (generic_param, type_arg) in type_def.generics.iter().zip(type_args.iter()) {
+                self.validate_type_arg(type_arg)?;
+                let concrete_ty = self.resolve_type(type_arg);
+                if !generic_param.satisfies(&concrete_ty) {
+                    return Err(SoppoError::ConstraintNotSatisfied {
+                        ty: concrete_ty.to_string(),
+                        constraint: generic_param.constraint.clone(),
+                        hint: Self::constraint_hint(&generic_param.constraint),
+                        span: type_arg.span,
+                    });
+                }
+                generic_subst.insert(generic_param.name.clone(), concrete_ty);
+            }
+
+            // Find the variant
+            for variant in variants {
+                let variant_name = match variant {
+                    EnumVariant::Unit { ident, .. } => &ident.name,
+                    EnumVariant::Single { ident, .. } => &ident.name,
+                    EnumVariant::Struct { ident, .. } => &ident.name,
+                };
+
+                if variant_name == field {
+                    // Build the return type with type arguments: Option[int]
+                    let type_arg_types: Vec<Type> =
+                        type_args.iter().map(|ta| self.resolve_type(ta)).collect();
+                    let return_ty = Type::generic(type_name, type_arg_types);
+
+                    return match variant {
+                        EnumVariant::Unit { .. } => {
+                            // Unit variant with type args: Option[int].None
+                            Ok(return_ty)
+                        }
+                        EnumVariant::Single { ty, .. } => {
+                            // Single variant: Option[int].Some -> fn(int) -> Option[int]
+                            let ty_simple = Type::simple(&ty.name);
+                            let param_ty =
+                                Self::instantiate_generic_type(&ty_simple, &generic_subst);
+                            Ok(Type::fun(vec![param_ty], return_ty))
+                        }
+                        EnumVariant::Struct { fields, .. } => {
+                            // Struct variant with type args
+                            let param_tys: Vec<Type> = fields
+                                .iter()
+                                .map(|f| {
+                                    let ty_simple = Type::simple(&f.ty.name);
+                                    Self::instantiate_generic_type(&ty_simple, &generic_subst)
+                                })
+                                .collect();
+                            Ok(Type::fun(param_tys, return_ty))
+                        }
+                    };
+                }
+            }
+
+            // Variant not found
+            return Err(SoppoError::Type {
+                message: format!("Enum `{}` has no variant `{}`", type_name, field),
+                span: *field_span,
+            });
+        }
+
         // Check if this is an enum constructor like Colour.Red or Result.Ok
         if let ExprKind::Ident(type_name) = &field_expr.kind {
             // Check if type_name is a registered type
@@ -698,6 +811,20 @@ impl Infer {
                         .map(|g| (g.name.clone(), self.fresh_ty_var()))
                         .collect();
 
+                    // Build the return type - use generic type for generic enums
+                    let return_ty = if type_def.generics.is_empty() {
+                        Type::simple(type_name)
+                    } else {
+                        // Generic enum: return Type::generic with fresh type vars
+                        // These will be unified with the expected type from context
+                        let type_vars: Vec<Type> = type_def
+                            .generics
+                            .iter()
+                            .map(|g| generic_subst.get(&g.name).unwrap().clone())
+                            .collect();
+                        Type::generic(type_name, type_vars)
+                    };
+
                     // Find the variant
                     for variant in variants {
                         let variant_name = match variant {
@@ -709,21 +836,10 @@ impl Infer {
                         if variant_name == field {
                             // Found the variant
                             return match variant {
-                                EnumVariant::Unit { ident, .. } => {
-                                    // Unit variant: for non-generic enums, return the enum type directly
-                                    // For generic enums, error - they must be accessed via call syntax
-                                    // with type args: Option.None[int]
-                                    if type_def.generics.is_empty() {
-                                        Ok(Type::simple(type_name))
-                                    } else {
-                                        // Generic unit variant accessed without call syntax
-                                        // This generates invalid Go (can't reference generic func without instantiation)
-                                        Err(SoppoError::GenericUnitVariant {
-                                            enum_name: type_name.clone(),
-                                            variant_name: ident.name.clone(),
-                                            span: *field_span,
-                                        })
-                                    }
+                                EnumVariant::Unit { .. } => {
+                                    // Unit variant: return the enum type
+                                    // For generic enums, the type vars will be inferred from context
+                                    Ok(return_ty)
                                 }
                                 EnumVariant::Single { ty, .. } => {
                                     // Single variant: returns a constructor function
@@ -732,7 +848,6 @@ impl Infer {
                                     let ty_simple = Type::simple(&ty.name);
                                     let param_ty =
                                         Self::instantiate_generic_type(&ty_simple, &generic_subst);
-                                    let return_ty = Type::simple(type_name);
                                     Ok(Type::fun(vec![param_ty], return_ty))
                                 }
                                 EnumVariant::Struct { fields, .. } => {
@@ -748,7 +863,6 @@ impl Infer {
                                             )
                                         })
                                         .collect();
-                                    let return_ty = Type::simple(type_name);
                                     Ok(Type::fun(param_tys, return_ty))
                                 }
                             };

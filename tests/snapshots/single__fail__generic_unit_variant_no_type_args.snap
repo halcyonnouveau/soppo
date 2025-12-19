@@ -5,11 +5,11 @@ expression: result.unwrap_err()
 Error: soppo::generic_unit_variant
 
   × Generic unit variant `Option.None` requires type arguments
-    ╭─[generic_unit_variant_no_type_args.sop:11:14]
+    ╭─[generic_unit_variant_no_type_args.sop:11:7]
  10 │ func main() {
  11 │     y := Option.None
-    ·                 ──┬─
-    ·                   ╰── missing type arguments
+    ·          ─────┬─────
+    ·               ╰── missing type arguments
  12 │     fmt.Println(y)
     ╰────
   help: use `Option.None[T]` syntax

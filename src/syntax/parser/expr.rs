@@ -50,13 +50,13 @@ impl Parser {
 
         let end_span = operand.span;
 
-        Ok(Expr {
-            kind: ExprKind::Unary {
+        Ok(Expr::new(
+            ExprKind::Unary {
                 op,
                 operand: Box::new(operand),
             },
-            span: self.merge_spans(start_span, end_span),
-        })
+            self.merge_spans(start_span, end_span),
+        ))
     }
 
     /// Parse binary operations with precedence
@@ -75,14 +75,14 @@ impl Parser {
             let right = self.parse_binary(prec + 1)?;
 
             let merged_span = self.merge_spans(left.span, right.span);
-            left = Expr {
-                span: merged_span,
-                kind: ExprKind::Binary {
+            left = Expr::new(
+                ExprKind::Binary {
                     op,
                     left: Box::new(left),
                     right: Box::new(right),
                 },
-            };
+                merged_span,
+            );
         }
 
         Ok(left)
@@ -184,14 +184,15 @@ impl Parser {
                             let args = self.parse_argument_list()?;
                             let end_span = self.expect(Token::RParen)?;
 
-                            expr = Expr {
-                                span: self.merge_spans(expr.span, end_span),
-                                kind: ExprKind::Call {
+                            let expr_span = expr.span;
+                            expr = Expr::new(
+                                ExprKind::Call {
                                     func: Box::new(expr),
                                     type_args,
                                     args,
                                 },
-                            };
+                                self.merge_spans(expr_span, end_span),
+                            );
                             continue;
                         }
 
@@ -233,22 +234,21 @@ impl Parser {
                                     | "error"
                                     | "any"
                             );
-                        let followed_by_dot = matches!(self.peek(), Some(Token::Dot));
 
-                        if !type_args.is_empty()
-                            && matches!(expr.kind, ExprKind::Field { .. })
-                            && !looks_like_index
-                            && !followed_by_dot
-                        {
+                        // If bracket contents look like types (not an index expression),
+                        // treat as type instantiation. Type system will verify later.
+                        let is_type_instantiation = !type_args.is_empty() && !looks_like_index;
+                        if is_type_instantiation {
                             // This is a type instantiation: expr[types] -> treat as call with no args
-                            expr = Expr {
-                                span: self.merge_spans(expr.span, bracket_end_span),
-                                kind: ExprKind::Call {
+                            let expr_span = expr.span;
+                            expr = Expr::new(
+                                ExprKind::Call {
                                     func: Box::new(expr),
                                     type_args,
                                     args: vec![],
                                 },
-                            };
+                                self.merge_spans(expr_span, bracket_end_span),
+                            );
                             continue;
                         }
 
@@ -285,26 +285,28 @@ impl Parser {
 
                         let end_span = self.expect(Token::RBracket)?;
 
-                        expr = Expr {
-                            span: self.merge_spans(expr.span, end_span),
-                            kind: ExprKind::Slice {
+                        let expr_span = expr.span;
+                        expr = Expr::new(
+                            ExprKind::Slice {
                                 expr: Box::new(expr),
                                 low,
                                 high,
                                 cap,
                             },
-                        };
+                            self.merge_spans(expr_span, end_span),
+                        );
                     } else {
                         // Regular index expression
                         let end_span = self.expect(Token::RBracket)?;
 
-                        expr = Expr {
-                            span: self.merge_spans(expr.span, end_span),
-                            kind: ExprKind::Index {
+                        let expr_span = expr.span;
+                        expr = Expr::new(
+                            ExprKind::Index {
                                 expr: Box::new(expr),
                                 index: low.expect("index expression must have a value"),
                             },
-                        };
+                            self.merge_spans(expr_span, end_span),
+                        );
                     }
                 }
 
@@ -314,14 +316,15 @@ impl Parser {
                     let args = self.parse_argument_list()?;
                     let end_span = self.expect(Token::RParen)?;
 
-                    expr = Expr {
-                        span: self.merge_spans(expr.span, end_span),
-                        kind: ExprKind::Call {
+                    let expr_span = expr.span;
+                    expr = Expr::new(
+                        ExprKind::Call {
                             func: Box::new(expr),
                             type_args: vec![],
                             args,
                         },
-                    };
+                        self.merge_spans(expr_span, end_span),
+                    );
                 }
 
                 // Field access: expr.field or type assertion: expr.(Type) or nil assertion: expr.(!nil)
@@ -353,12 +356,13 @@ impl Parser {
                             }
                             let end_span = self.expect(Token::RParen)?;
 
-                            expr = Expr {
-                                span: self.merge_spans(expr.span, end_span),
-                                kind: ExprKind::NilAssert {
+                            let expr_span = expr.span;
+                            expr = Expr::new(
+                                ExprKind::NilAssert {
                                     expr: Box::new(expr),
                                 },
-                            };
+                                self.merge_spans(expr_span, end_span),
+                            );
                             continue;
                         }
 
@@ -366,49 +370,53 @@ impl Parser {
                         let ty = self.parse_type()?;
                         let end_span = self.expect(Token::RParen)?;
 
-                        expr = Expr {
-                            span: self.merge_spans(expr.span, end_span),
-                            kind: ExprKind::TypeAssert {
+                        let expr_span = expr.span;
+                        expr = Expr::new(
+                            ExprKind::TypeAssert {
                                 expr: Box::new(expr),
                                 ty,
+                                known_match: std::cell::Cell::new(false),
                             },
-                        };
+                            self.merge_spans(expr_span, end_span),
+                        );
                         continue;
                     }
 
                     let (field, field_span) = self.parse_identifier("field")?;
 
-                    expr = Expr {
-                        span: self.merge_spans(expr.span, field_span),
-                        kind: ExprKind::Field {
+                    let expr_span = expr.span;
+                    expr = Expr::new(
+                        ExprKind::Field {
                             expr: Box::new(expr),
                             field,
                             field_span,
                         },
-                    };
+                        self.merge_spans(expr_span, field_span),
+                    );
                 }
 
                 // Struct literal: Type{field: value, ...} or Type.Variant{field: value, ...}
                 Some(Token::LBrace) => {
-                    // Extract type name from identifier or field access chain
-                    let type_name = match &expr.kind {
-                        ExprKind::Ident(name) => Some(name.clone()),
-                        ExprKind::Field { .. } => {
-                            // Convert field access chain to dotted type name (e.g., Shape.Circle)
-                            fn extract_type_path(e: &Expr) -> Option<String> {
-                                match &e.kind {
-                                    ExprKind::Ident(name) => Some(name.clone()),
-                                    ExprKind::Field { expr, field, .. } => extract_type_path(expr)
-                                        .map(|base| format!("{}.{}", base, field)),
-                                    _ => None,
-                                }
+                    // Extract type name and type args from identifier, field access, or type instantiation
+                    fn extract_type_info(e: &Expr) -> Option<(String, Vec<TypeAnnotation>)> {
+                        match &e.kind {
+                            ExprKind::Ident(name) => Some((name.clone(), Vec::new())),
+                            ExprKind::Field { expr, field, .. } => extract_type_info(expr)
+                                .map(|(base, args)| (format!("{}.{}", base, field), args)),
+                            // Type instantiation: Option[int] -> ("Option", [int])
+                            ExprKind::Call {
+                                func,
+                                args,
+                                type_args,
+                            } if args.is_empty() && !type_args.is_empty() => {
+                                extract_type_info(func).map(|(name, _)| (name, type_args.clone()))
                             }
-                            extract_type_path(&expr)
+                            _ => None,
                         }
-                        _ => None,
-                    };
+                    }
+                    let type_info = extract_type_info(&expr);
 
-                    if let Some(type_name) = type_name {
+                    if let Some((type_name, type_args)) = type_info {
                         // Peek ahead to see if this looks like a struct literal
                         // Struct literals have pattern: { ident: expr, ... }
                         // Blocks have pattern: { stmt; ... }
@@ -482,18 +490,18 @@ impl Parser {
 
                         let end_span = self.expect(Token::RBrace)?;
 
-                        expr = Expr {
-                            span: self.merge_spans(expr.span, end_span),
-                            kind: ExprKind::StructLit {
+                        expr = Expr::new(
+                            ExprKind::StructLit {
                                 ty: Some(TypeAnnotation {
                                     name: type_name,
-                                    args: Vec::new(),
+                                    args: type_args,
                                     span: expr.span,
                                     nullable: false,
                                 }),
                                 fields,
                             },
-                        };
+                            self.merge_spans(expr.span, end_span),
+                        );
                     } else {
                         break;
                     }
@@ -521,20 +529,11 @@ impl Parser {
             Token::Not => self.parse_unary(UnaryOp::Not, span, true),
             Token::Arrow => self.parse_unary(UnaryOp::Recv, span, false),
 
-            Token::Integer(lit) => Ok(Expr {
-                kind: ExprKind::Integer(lit.value, lit.format),
-                span,
-            }),
+            Token::Integer(lit) => Ok(Expr::new(ExprKind::Integer(lit.value, lit.format), span)),
 
-            Token::Float(f) => Ok(Expr {
-                kind: ExprKind::Float(f),
-                span,
-            }),
+            Token::Float(f) => Ok(Expr::new(ExprKind::Float(f), span)),
 
-            Token::Rune(r) => Ok(Expr {
-                kind: ExprKind::Rune(r),
-                span,
-            }),
+            Token::Rune(r) => Ok(Expr::new(ExprKind::Rune(r), span)),
 
             Token::String(s) => {
                 // Check if string contains interpolation markers
@@ -543,44 +542,23 @@ impl Parser {
                     if parts.len() == 1 {
                         // Single literal part - just a plain string
                         if let StringPart::Literal(lit) = &parts[0] {
-                            return Ok(Expr {
-                                kind: ExprKind::String(lit.clone()),
-                                span,
-                            });
+                            return Ok(Expr::new(ExprKind::String(lit.clone()), span));
                         }
                     }
-                    Ok(Expr {
-                        kind: ExprKind::StringInterpolation(parts),
-                        span,
-                    })
+                    Ok(Expr::new(ExprKind::StringInterpolation(parts), span))
                 } else {
-                    Ok(Expr {
-                        kind: ExprKind::String(s),
-                        span,
-                    })
+                    Ok(Expr::new(ExprKind::String(s), span))
                 }
             }
 
             // Raw string literals (backtick strings) - no interpolation support
-            Token::RawString(s) => Ok(Expr {
-                kind: ExprKind::RawString(s),
-                span,
-            }),
+            Token::RawString(s) => Ok(Expr::new(ExprKind::RawString(s), span)),
 
-            Token::True => Ok(Expr {
-                kind: ExprKind::Bool(true),
-                span,
-            }),
+            Token::True => Ok(Expr::new(ExprKind::Bool(true), span)),
 
-            Token::False => Ok(Expr {
-                kind: ExprKind::Bool(false),
-                span,
-            }),
+            Token::False => Ok(Expr::new(ExprKind::Bool(false), span)),
 
-            Token::Nil => Ok(Expr {
-                kind: ExprKind::Nil,
-                span,
-            }),
+            Token::Nil => Ok(Expr::new(ExprKind::Nil, span)),
 
             Token::Ident(name) if name == "map" => {
                 // Map literal: map[K]V{key: val, ...}
@@ -618,13 +596,13 @@ impl Parser {
 
                 let end_span = self.expect(Token::RBrace)?;
 
-                Ok(Expr {
-                    kind: ExprKind::MapLit {
+                Ok(Expr::new(
+                    ExprKind::MapLit {
                         ty: map_ty,
                         entries,
                     },
-                    span: self.merge_spans(span, end_span),
-                })
+                    self.merge_spans(span, end_span),
+                ))
             }
 
             Token::Ident(name) if name == "make" => {
@@ -644,17 +622,14 @@ impl Parser {
 
                 // Generate as a call to make with type as first "argument" (special handling in codegen)
                 // We'll encode the type in the call expression using a special type argument
-                Ok(Expr {
-                    kind: ExprKind::Call {
-                        func: Box::new(Expr {
-                            kind: ExprKind::Ident("make".to_string()),
-                            span,
-                        }),
+                Ok(Expr::new(
+                    ExprKind::Call {
+                        func: Box::new(Expr::new(ExprKind::Ident("make".to_string()), span)),
                         type_args: vec![ty],
                         args,
                     },
-                    span: self.merge_spans(span, end_span),
-                })
+                    self.merge_spans(span, end_span),
+                ))
             }
 
             Token::Ident(name) if name == "new" => {
@@ -663,36 +638,27 @@ impl Parser {
                 let ty = self.parse_type()?;
                 let end_span = self.expect(Token::RParen)?;
 
-                Ok(Expr {
-                    kind: ExprKind::Call {
-                        func: Box::new(Expr {
-                            kind: ExprKind::Ident("new".to_string()),
-                            span,
-                        }),
+                Ok(Expr::new(
+                    ExprKind::Call {
+                        func: Box::new(Expr::new(ExprKind::Ident("new".to_string()), span)),
                         type_args: vec![ty],
                         args: vec![], // new has no runtime args
                     },
-                    span: self.merge_spans(span, end_span),
-                })
+                    self.merge_spans(span, end_span),
+                ))
             }
 
-            Token::Ident(name) => Ok(Expr {
-                kind: ExprKind::Ident(name),
-                span,
-            }),
+            Token::Ident(name) => Ok(Expr::new(ExprKind::Ident(name), span)),
 
-            Token::Underscore => Ok(Expr {
-                kind: ExprKind::Ident("_".to_string()),
-                span,
-            }),
+            Token::Underscore => Ok(Expr::new(ExprKind::Ident("_".to_string()), span)),
 
             Token::LParen => {
                 let inner = self.parse_expr()?;
                 let end_span = self.expect(Token::RParen)?;
-                Ok(Expr {
-                    kind: ExprKind::Paren(Box::new(inner)),
-                    span: self.merge_spans(span, end_span),
-                })
+                Ok(Expr::new(
+                    ExprKind::Paren(Box::new(inner)),
+                    self.merge_spans(span, end_span),
+                ))
             }
 
             Token::LBracket => {
@@ -727,13 +693,13 @@ impl Parser {
 
                     let end_span = self.expect(Token::RBrace)?;
 
-                    Ok(Expr {
-                        kind: ExprKind::ArrayLit {
+                    Ok(Expr::new(
+                        ExprKind::ArrayLit {
                             ty: Some(slice_ty),
                             elements,
                         },
-                        span: self.merge_spans(span, end_span),
-                    })
+                        self.merge_spans(span, end_span),
+                    ))
                 } else {
                     // [size]type{elements} - array literal
                     // Consume the size (we don't validate it)
@@ -760,13 +726,13 @@ impl Parser {
 
                     let end_span = self.expect(Token::RBrace)?;
 
-                    Ok(Expr {
-                        kind: ExprKind::ArrayLit {
+                    Ok(Expr::new(
+                        ExprKind::ArrayLit {
                             ty: Some(ty),
                             elements,
                         },
-                        span: self.merge_spans(span, end_span),
-                    })
+                        self.merge_spans(span, end_span),
+                    ))
                 }
             }
 
@@ -835,10 +801,10 @@ impl Parser {
 
                 let end_span = self.expect(Token::RBrace)?;
 
-                Ok(Expr {
-                    kind: ExprKind::AnonStructLit { field_defs, fields },
-                    span: self.merge_spans(span, end_span),
-                })
+                Ok(Expr::new(
+                    ExprKind::AnonStructLit { field_defs, fields },
+                    self.merge_spans(span, end_span),
+                ))
             }
 
             Token::Func => {
@@ -870,14 +836,14 @@ impl Parser {
                 // Parse body
                 let body = self.parse_block()?;
 
-                Ok(Expr {
-                    kind: ExprKind::FuncLit {
+                Ok(Expr::new(
+                    ExprKind::FuncLit {
                         params,
                         returns,
                         body: body.clone(),
                     },
-                    span: self.merge_spans(span, body.span),
-                })
+                    self.merge_spans(span, body.span),
+                ))
             }
 
             // Implicit composite literal: {expr, expr, ...} or {Field: value, ...}
@@ -938,13 +904,13 @@ impl Parser {
 
                     let end_span = self.expect(Token::RBrace)?;
 
-                    Ok(Expr {
-                        kind: ExprKind::StructLit {
+                    Ok(Expr::new(
+                        ExprKind::StructLit {
                             ty: None, // Type inferred from context
                             fields,
                         },
-                        span: self.merge_spans(span, end_span),
-                    })
+                        self.merge_spans(span, end_span),
+                    ))
                 } else {
                     // Parse as implicit array literal: {expr, expr, ...}
                     let mut elements = Vec::new();
@@ -963,13 +929,13 @@ impl Parser {
 
                     let end_span = self.expect(Token::RBrace)?;
 
-                    Ok(Expr {
-                        kind: ExprKind::ArrayLit {
+                    Ok(Expr::new(
+                        ExprKind::ArrayLit {
                             ty: None, // Type inferred from context
                             elements,
                         },
-                        span: self.merge_spans(span, end_span),
-                    })
+                        self.merge_spans(span, end_span),
+                    ))
                 }
             }
 

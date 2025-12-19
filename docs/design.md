@@ -116,44 +116,29 @@ default:
 
 All variants must be handled (exhaustiveness checking for enums).
 
-When you only care about one variant, full `match` is verbose. Combining `if` with a type assertion provides a concise way to check and destructure a single variant:
+When you only care about one variant, full `match` is verbose. Type assertions provide a concise way to check and destructure a single variant:
 
 ```go
-// Instead of:
-match opt {
-case Option.Some(x):
-	use(x)
-case Option.None:
-	// nothing
-}
+shape := Shape.Circle{radius: 5.0}
 
-// Write:
-if x := opt.(Option.Some) {
-	use(x)
-}
+// When the compiler knows the variant, direct assertion works:
+circle := shape.(Shape.Circle)
+area := 3.14 * circle.radius * circle.radius
 
-// With else block:
-if x := opt.(Option.Some) {
-	use(x)
-} else {
-	handleNone()
-}
-
-// For struct variants, binding gets the full struct:
-if c := shape.(Shape.Circle) {
+// When the variant is unknown, use comma-ok form:
+if c, ok := unknownShape.(Shape.Circle); ok {
 	area = 3.14 * c.radius * c.radius
 }
 
-// Unit variants work too (binding is the zero struct):
-if _ := colour.(Colour.Red) {
-	stop()
+// The comma-ok form also works in if statements:
+if rect, ok := shape.(Shape.Rectangle); ok {
+	area = rect.width * rect.height
+} else {
+	// Not a rectangle
 }
 ```
 
-Uses Go's type assertion syntax `.(Type)` but the block only executes if the variant matches. The binding receives the variant's data (inner value for single-value variants, full struct for struct variants).
-
-> [!NOTE]
-> Type assertions behave differently for Soppo enums vs Go interfaces. Enum variant assertions (e.g., `opt.(Option.Some)`) return a nilable pointer for the if-init pattern above. Go interface assertions (e.g., `iface.(int)`) return the actual type, matching standard Go semantics.
+The compiler tracks which variant a variable holds. If you assign `shape := Shape.Circle{...}`, then `shape.(Shape.Circle)` is allowed without comma-ok. If the variant is unknown (e.g., received as a parameter), you must use the comma-ok form.
 
 ## Error Handling (`?` operator)
 

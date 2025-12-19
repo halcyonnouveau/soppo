@@ -344,9 +344,9 @@ pub enum StmtKind {
         error_name: Option<String>,
         handler: Option<Block>,
         try_span: Span,
-        /// Number of non-error return values to discard (set by type checker)
-        /// For `f() ?` where f returns `(T, error)`, this is 1
-        /// For `f() ?` where f returns just `error`, this is 0
+        // Number of non-error return values to discard (set by type checker)
+        // For `f() ?` where f returns `(T, error)`, this is 1
+        // For `f() ?` where f returns just `error`, this is 0
         discard_count: Cell<usize>,
     },
     // type Name struct { ... } or type Name = ExistingType (local type declaration)
@@ -354,10 +354,28 @@ pub enum StmtKind {
 }
 
 /// Expression
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
+    /// Inferred type arguments for generic enum variants (set during type inference)
+    pub inferred_type_args: std::cell::RefCell<Option<Vec<String>>>,
+}
+
+impl Expr {
+    pub fn new(kind: ExprKind, span: Span) -> Self {
+        Self {
+            kind,
+            span,
+            inferred_type_args: std::cell::RefCell::new(None),
+        }
+    }
+}
+
+impl PartialEq for Expr {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.span == other.span
+    }
 }
 
 /// Part of an interpolated string
@@ -429,6 +447,8 @@ pub enum ExprKind {
     TypeAssert {
         expr: Box<Expr>,
         ty: TypeAnnotation,
+        /// Set by type inference if narrowing proves this assertion always succeeds
+        known_match: Cell<bool>,
     },
     /// Nil assertion: x.(!nil) - asserts pointer is non-nil
     NilAssert {
@@ -555,6 +575,8 @@ pub enum SelectCaseKind {
 pub struct Pattern {
     pub kind: PatternKind,
     pub span: Span,
+    /// Type args inferred from context (e.g., scrutinee type in match)
+    pub inferred_type_args: std::cell::RefCell<Option<Vec<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -564,14 +586,23 @@ pub enum PatternKind {
     /// Unit variant with no data: Colour.Red or Go constant like tar.TypeDir
     /// The Cell<bool> indicates if this is a soppo enum (true) or Go constant (false)
     /// Parser defaults to true; type inference sets to false for Go constants
-    Variant(String, Cell<bool>),
+    Variant {
+        name: String,
+        type_args: Vec<TypeAnnotation>,
+        is_soppo_enum: Cell<bool>,
+    },
     /// Literal value: 42, "hello", true
     Literal(Literal),
     /// Variant with data extraction: Result.Ok(value)
-    Destructor { name: String, binding: Ident },
+    Destructor {
+        name: String,
+        type_args: Vec<TypeAnnotation>,
+        binding: Ident,
+    },
     /// Struct destructuring: Shape.Circle{radius: r, ...} or Point{x: 0, y}
     StructDestructor {
-        name: String,                        // e.g., "Shape.Circle" or "Point"
+        name: String, // e.g., "Shape.Circle" or "Point"
+        type_args: Vec<TypeAnnotation>,
         fields: Vec<(String, FieldPattern)>, // (field_name, pattern) pairs
         rest: bool,                          // true if `...` was used to ignore remaining fields
     },
@@ -583,30 +614,45 @@ impl PartialEq for PatternKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (PatternKind::Default, PatternKind::Default) => true,
-            (PatternKind::Variant(a, _), PatternKind::Variant(b, _)) => a == b,
+            (
+                PatternKind::Variant {
+                    name: n1,
+                    type_args: t1,
+                    ..
+                },
+                PatternKind::Variant {
+                    name: n2,
+                    type_args: t2,
+                    ..
+                },
+            ) => n1 == n2 && t1 == t2,
             (PatternKind::Literal(a), PatternKind::Literal(b)) => a == b,
             (
                 PatternKind::Destructor {
                     name: n1,
+                    type_args: t1,
                     binding: b1,
                 },
                 PatternKind::Destructor {
                     name: n2,
+                    type_args: t2,
                     binding: b2,
                 },
-            ) => n1 == n2 && b1 == b2,
+            ) => n1 == n2 && t1 == t2 && b1 == b2,
             (
                 PatternKind::StructDestructor {
                     name: n1,
+                    type_args: t1,
                     fields: f1,
                     rest: r1,
                 },
                 PatternKind::StructDestructor {
                     name: n2,
+                    type_args: t2,
                     fields: f2,
                     rest: r2,
                 },
-            ) => n1 == n2 && f1 == f2 && r1 == r2,
+            ) => n1 == n2 && t1 == t2 && f1 == f2 && r1 == r2,
             (PatternKind::Guard(a), PatternKind::Guard(b)) => a == b,
             _ => false,
         }

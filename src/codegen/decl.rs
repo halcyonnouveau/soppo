@@ -525,13 +525,20 @@ impl Codegen {
 
     /// Generate a pattern for match arms
     pub(crate) fn gen_pattern(&mut self, pattern: &Pattern) {
+        // Get inferred type args if explicit ones are empty
+        let inferred_args = pattern.inferred_type_args.borrow();
+
         match &pattern.kind {
-            PatternKind::Variant(name, is_soppo_enum) => {
+            PatternKind::Variant {
+                name,
+                type_args,
+                is_soppo_enum,
+            } => {
                 if is_soppo_enum.get() {
                     // Soppo enum: convert qualified name to Go type name
                     // Colour.Red → Colour_Red
                     // pkg.Status.Active → pkg.Status_Active
-                    self.emit(Self::convert_enum_pattern(name));
+                    self.emit(self.convert_enum_pattern(name, type_args, inferred_args.as_ref()));
                 } else {
                     // Go constant: keep as-is (e.g., tar.TypeDir)
                     self.emit(name);
@@ -548,13 +555,17 @@ impl Codegen {
                 Literal::Bool(b) => self.emit(b.to_string()),
                 Literal::Nil => self.emit("nil"),
             },
-            PatternKind::Destructor { name, .. } => {
+            PatternKind::Destructor {
+                name, type_args, ..
+            } => {
                 // Convert qualified name to Go type name
-                self.emit(Self::convert_enum_pattern(name));
+                self.emit(self.convert_enum_pattern(name, type_args, inferred_args.as_ref()));
             }
-            PatternKind::StructDestructor { name, .. } => {
+            PatternKind::StructDestructor {
+                name, type_args, ..
+            } => {
                 // Convert qualified name to Go type name
-                self.emit(Self::convert_enum_pattern(name));
+                self.emit(self.convert_enum_pattern(name, type_args, inferred_args.as_ref()));
             }
             PatternKind::Guard(expr) => {
                 // For expression-less match, emit the boolean expression
@@ -569,33 +580,70 @@ impl Codegen {
 
     /// Convert a qualified enum pattern name to Go type name
     /// - `Colour.Red` → `Colour_Red` (soppo enum)
+    /// - `Option.Some` with type_args=[int] → `Option_Some[int]` (generic soppo enum)
     /// - `pkg.Status.Active` → `pkg.Status_Active` (soppo enum in package)
     /// - `tar.TypeDir` → `tar.TypeDir` (Go constant, unchanged)
-    fn convert_enum_pattern(name: &str) -> String {
+    fn convert_enum_pattern(
+        &self,
+        name: &str,
+        type_args: &[crate::syntax::TypeAnnotation],
+        inferred_type_args: Option<&Vec<String>>,
+    ) -> String {
+        // Format type args if present (prefer explicit, fall back to inferred)
+        let type_params_str = if !type_args.is_empty() {
+            let args: Vec<String> = type_args
+                .iter()
+                .map(|ta| self.go_type_from_ast(ta).to_string())
+                .collect();
+            format!("[{}]", args.join(", "))
+        } else if let Some(inferred) = inferred_type_args {
+            if inferred.is_empty() {
+                String::new()
+            } else {
+                let args: Vec<String> = inferred
+                    .iter()
+                    .map(|s| self.go_type(s).to_string())
+                    .collect();
+                format!("[{}]", args.join(", "))
+            }
+        } else {
+            String::new()
+        };
+
         let parts: Vec<&str> = name.split('.').collect();
         match parts.len() {
             0 => name.to_string(),
             1 => name.to_string(),
             2 => {
-                // Check if first part is a Go package (lowercase) or soppo type (PascalCase)
-                // Go packages start with lowercase, soppo types start with uppercase
-                let first_char = parts[0].chars().next().unwrap_or('a');
-                if first_char.is_lowercase() {
+                let base_type = parts[0];
+                let variant = parts[1];
+
+                // Use the type system to check if it's an enum
+                if self.global_state.is_enum(base_type) {
+                    // Soppo enum like Result.Ok → Result_Ok
+                    // or Option.Some with type_args → Option_Some[int]
+                    format!("{}_{}{}", base_type, variant, type_params_str)
+                } else {
                     // Go constant like tar.TypeDir - keep as-is
                     name.to_string()
-                } else {
-                    // Soppo enum like Result.Ok → Result_Ok
-                    format!("{}_{}", parts[0], parts[1])
                 }
             }
             _ => {
                 // pkg.Type.Variant or pkg.subpkg.Type.Variant
-                // Keep all but last two as package prefix with dots
-                // Join last two with underscore
                 let prefix = parts[..parts.len() - 2].join(".");
                 let type_name = parts[parts.len() - 2];
                 let variant = parts[parts.len() - 1];
-                format!("{}.{}_{}", prefix, type_name, variant)
+
+                // For cross-package enums, check using soppo_enum detection
+                if parts.len() == 3 {
+                    let pkg = parts[0];
+                    if self.global_state.is_soppo_enum(pkg, type_name) {
+                        return format!("{}.{}_{}{}", pkg, type_name, variant, type_params_str);
+                    }
+                }
+
+                // Default: assume enum variant pattern
+                format!("{}.{}_{}{}", prefix, type_name, variant, type_params_str)
             }
         }
     }
@@ -641,35 +689,5 @@ mod tests {
         assert!(output.contains("package main"));
         assert!(output.contains("func add(x int, y int) int"));
         assert!(output.contains("func main() int"));
-    }
-
-    #[test]
-    fn test_convert_enum_pattern() {
-        // Simple Type.Variant
-        assert_eq!(Codegen::convert_enum_pattern("Colour.Red"), "Colour_Red");
-        assert_eq!(
-            Codegen::convert_enum_pattern("Status.Active"),
-            "Status_Active"
-        );
-
-        // Package-qualified pkg.Type.Variant
-        assert_eq!(
-            Codegen::convert_enum_pattern("types.Status.Pending"),
-            "types.Status_Pending"
-        );
-        assert_eq!(
-            Codegen::convert_enum_pattern("pkg.MyEnum.Variant"),
-            "pkg.MyEnum_Variant"
-        );
-
-        // Nested package pkg.subpkg.Type.Variant
-        assert_eq!(
-            Codegen::convert_enum_pattern("foo.bar.Status.Active"),
-            "foo.bar.Status_Active"
-        );
-
-        // Edge cases
-        assert_eq!(Codegen::convert_enum_pattern("Single"), "Single");
-        assert_eq!(Codegen::convert_enum_pattern(""), "");
     }
 }

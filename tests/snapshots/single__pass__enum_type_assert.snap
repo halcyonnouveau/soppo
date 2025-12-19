@@ -1,0 +1,50 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+/*soppo:enum
+Shape {
+    Circle {
+        radius float64
+    }
+    Rectangle {
+        width float64
+        height float64
+    }
+}
+*/
+type Shape interface {
+    isShape()
+}
+
+type Shape_Circle struct {
+    radius float64
+}
+func (Shape_Circle) isShape() {}
+
+type Shape_Rectangle struct {
+    width float64
+    height float64
+}
+func (Shape_Rectangle) isShape() {}
+
+
+func main() {
+    var shape Shape = Shape_Circle{radius: 5.0}
+
+    // Type assertion on enum variant - returns the struct data directly
+    circle := shape.(Shape_Circle)
+    fmt.Println("Radius:", circle.radius)
+
+    // Safe assertion with ok check
+    if rect, ok := shape.(Shape_Rectangle); ok {
+        fmt.Println("Width:", rect.width)
+    } else {
+        fmt.Println("Not a rectangle")
+    }
+}

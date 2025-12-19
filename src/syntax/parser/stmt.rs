@@ -541,10 +541,7 @@ impl Parser {
                 // A block statement evaluates to its last expression
                 Ok(Stmt {
                     span: block.span,
-                    kind: StmtKind::Expr(Expr {
-                        kind: ExprKind::Block(block.clone()),
-                        span: block.span,
-                    }),
+                    kind: StmtKind::Expr(Expr::new(ExprKind::Block(block.clone()), block.span)),
                 })
             }
 
@@ -758,20 +755,14 @@ impl Parser {
                             // Implicit condition: x != nil
                             // Use the first name as the variable to check
                             let name = names[0].name.clone();
-                            Expr {
-                                kind: ExprKind::Binary {
+                            Expr::new(
+                                ExprKind::Binary {
                                     op: crate::syntax::BinOp::Ne,
-                                    left: Box::new(Expr {
-                                        kind: ExprKind::Ident(name),
-                                        span: init_end_span,
-                                    }),
-                                    right: Box::new(Expr {
-                                        kind: ExprKind::Nil,
-                                        span: init_end_span,
-                                    }),
+                                    left: Box::new(Expr::new(ExprKind::Ident(name), init_end_span)),
+                                    right: Box::new(Expr::new(ExprKind::Nil, init_end_span)),
                                 },
-                                span: init_end_span,
-                            }
+                                init_end_span,
+                            )
                         };
 
                         let init_stmt = Stmt {

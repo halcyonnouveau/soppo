@@ -1,0 +1,28 @@
+package main
+
+import "fmt"
+
+type Shape enum {
+	Circle struct {
+		radius float64
+	}
+	Rectangle struct {
+		width  float64
+		height float64
+	}
+}
+
+func main() {
+	shape := Shape.Circle{radius: 5.0}
+
+	// Type assertion on enum variant - returns the struct data directly
+	circle := shape.(Shape.Circle)
+	fmt.Println("Radius:", circle.radius)
+
+	// Safe assertion with ok check
+	if rect, ok := shape.(Shape.Rectangle); ok {
+		fmt.Println("Width:", rect.width)
+	} else {
+		fmt.Println("Not a rectangle")
+	}
+}

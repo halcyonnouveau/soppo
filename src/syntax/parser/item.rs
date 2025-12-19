@@ -745,10 +745,7 @@ impl Parser {
         ) {
             // Implicit iota continuation (NAME on its own line)
             // Generate an iota expression - Go will handle the incrementing
-            let iota_expr = Expr {
-                kind: ExprKind::Ident("iota".to_string()),
-                span: name_span,
-            };
+            let iota_expr = Expr::new(ExprKind::Ident("iota".to_string()), name_span);
             (None, iota_expr)
         } else {
             return Err(SoppoError::Parse {

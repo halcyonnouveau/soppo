@@ -1,7 +1,7 @@
 use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
-    Arm, Block, FieldPattern, Ident, Literal, Pattern, PatternKind, Stmt, StmtKind,
+    Arm, Block, FieldPattern, Ident, Literal, Pattern, PatternKind, Stmt, StmtKind, TypeAnnotation,
 };
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
@@ -48,6 +48,7 @@ impl Parser {
                 vec![Pattern {
                     kind: PatternKind::Default,
                     span,
+                    inferred_type_args: std::cell::RefCell::new(None),
                 }]
             } else {
                 self.expect(Token::Case)?;
@@ -118,6 +119,7 @@ impl Parser {
             Ok(Pattern {
                 kind: PatternKind::Guard(Box::new(expr)),
                 span,
+                inferred_type_args: std::cell::RefCell::new(None),
             })
         } else {
             self.parse_pattern()
@@ -135,6 +137,7 @@ impl Parser {
             Token::Underscore => Ok(Pattern {
                 kind: PatternKind::Default,
                 span,
+                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             // Literal patterns
@@ -143,30 +146,51 @@ impl Parser {
                     lit.value, lit.format,
                 )),
                 span,
+                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::String(s) => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::String(s)),
                 span,
+                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::True => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::Bool(true)),
                 span,
+                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::False => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::Bool(false)),
                 span,
+                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::Nil => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::Nil),
                 span,
+                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::Ident(mut name) => {
                 let mut current_span = span;
+                let mut type_args: Vec<TypeAnnotation> = Vec::new();
+
+                // Check for generic type parameters: Option[int]
+                if self.consume(&Token::LBracket) {
+                    // Parse comma-separated type arguments
+                    loop {
+                        let type_param = self.parse_type()?;
+                        type_args.push(type_param);
+
+                        if !self.consume(&Token::Comma) {
+                            break;
+                        }
+                    }
+                    let bracket_span = self.expect(Token::RBracket)?;
+                    current_span = self.merge_spans(current_span, bracket_span);
+                }
 
                 // Check for field access: Type.Variant
                 while self.consume(&Token::Dot) {
@@ -185,9 +209,11 @@ impl Parser {
                     Ok(Pattern {
                         kind: PatternKind::Destructor {
                             name,
+                            type_args,
                             binding: Ident::new(binding_name, binding_span),
                         },
                         span: self.merge_spans(current_span, end_span),
+                        inferred_type_args: std::cell::RefCell::new(None),
                     })
                 }
                 // Check if it's a struct destructor pattern: Shape.Circle{radius: r, ...}
@@ -272,15 +298,26 @@ impl Parser {
                     let end_span = self.expect(Token::RBrace)?;
 
                     Ok(Pattern {
-                        kind: PatternKind::StructDestructor { name, fields, rest },
+                        kind: PatternKind::StructDestructor {
+                            name,
+                            type_args,
+                            fields,
+                            rest,
+                        },
                         span: self.merge_spans(current_span, end_span),
+                        inferred_type_args: std::cell::RefCell::new(None),
                     })
                 }
                 // Just a variant name
                 else {
                     Ok(Pattern {
-                        kind: PatternKind::Variant(name, std::cell::Cell::new(true)),
+                        kind: PatternKind::Variant {
+                            name,
+                            type_args,
+                            is_soppo_enum: std::cell::Cell::new(true),
+                        },
                         span: current_span,
+                        inferred_type_args: std::cell::RefCell::new(None),
                     })
                 }
             }
@@ -319,8 +356,13 @@ mod tests {
                 // First arm: Ok(value) -> result = value
                 assert_eq!(arms[0].patterns.len(), 1);
                 match &arms[0].patterns[0].kind {
-                    PatternKind::Destructor { name, binding } => {
+                    PatternKind::Destructor {
+                        name,
+                        type_args,
+                        binding,
+                    } => {
                         assert_eq!(name, "Ok");
+                        assert!(type_args.is_empty());
                         assert_eq!(binding, "value");
                     }
                     _ => panic!("Expected destructor pattern"),
@@ -331,8 +373,13 @@ mod tests {
                 // Second arm: Err(msg) -> result = 0
                 assert_eq!(arms[1].patterns.len(), 1);
                 match &arms[1].patterns[0].kind {
-                    PatternKind::Destructor { name, binding } => {
+                    PatternKind::Destructor {
+                        name,
+                        type_args,
+                        binding,
+                    } => {
                         assert_eq!(name, "Err");
+                        assert!(type_args.is_empty());
                         assert_eq!(binding, "msg");
                     }
                     _ => panic!("Expected destructor pattern"),
@@ -364,6 +411,95 @@ mod tests {
                 match &arms[0].patterns[0].kind {
                     PatternKind::Literal(crate::syntax::ast::Literal::Nil) => {}
                     _ => panic!("Expected nil pattern"),
+                }
+            }
+            _ => panic!("Expected match statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_generic_enum_pattern() {
+        let source = r#"match result {
+            case Option[int].Some{value: v}:
+                fmt.Println(v)
+            case Option[int].None:
+                fmt.Println("none")
+        }"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let stmt = parser.parse_stmt().unwrap();
+
+        match stmt.kind {
+            StmtKind::Match { scrutinee, arms } => {
+                let scrutinee = scrutinee.unwrap();
+                assert!(matches!(scrutinee.kind, ExprKind::Ident(s) if s == "result"));
+                assert_eq!(arms.len(), 2);
+
+                // First arm: Option[int].Some{value: v}
+                assert_eq!(arms[0].patterns.len(), 1);
+                match &arms[0].patterns[0].kind {
+                    PatternKind::StructDestructor {
+                        name,
+                        type_args,
+                        fields,
+                        ..
+                    } => {
+                        assert_eq!(name, "Option.Some");
+                        assert_eq!(type_args.len(), 1);
+                        assert_eq!(type_args[0].name, "int");
+                        assert_eq!(fields.len(), 1);
+                        assert_eq!(fields[0].0, "value");
+                    }
+                    _ => panic!("Expected struct destructor pattern"),
+                }
+
+                // Second arm: Option[int].None
+                assert_eq!(arms[1].patterns.len(), 1);
+                match &arms[1].patterns[0].kind {
+                    PatternKind::Variant {
+                        name, type_args, ..
+                    } => {
+                        assert_eq!(name, "Option.None");
+                        assert_eq!(type_args.len(), 1);
+                        assert_eq!(type_args[0].name, "int");
+                    }
+                    _ => panic!("Expected variant pattern"),
+                }
+            }
+            _ => panic!("Expected match statement"),
+        }
+    }
+
+    #[test]
+    fn test_parse_generic_enum_pattern_with_nested_type() {
+        // Test that dots inside type args don't break pattern parsing
+        let source = r#"match result {
+            case Option[pkg.Type].Some{value: v}:
+                fmt.Println(v)
+        }"#;
+        let mut parser = Parser::new(source, FileId(0));
+        let stmt = parser.parse_stmt().unwrap();
+
+        match stmt.kind {
+            StmtKind::Match { scrutinee, arms } => {
+                let scrutinee = scrutinee.unwrap();
+                assert!(matches!(scrutinee.kind, ExprKind::Ident(s) if s == "result"));
+                assert_eq!(arms.len(), 1);
+
+                // First arm: Option[pkg.Type].Some{value: v}
+                match &arms[0].patterns[0].kind {
+                    PatternKind::StructDestructor {
+                        name,
+                        type_args,
+                        fields,
+                        ..
+                    } => {
+                        assert_eq!(name, "Option.Some");
+                        assert_eq!(type_args.len(), 1);
+                        assert_eq!(type_args[0].name, "pkg.Type");
+                        assert_eq!(fields.len(), 1);
+                        assert_eq!(fields[0].0, "value");
+                    }
+                    _ => panic!("Expected struct destructor pattern"),
                 }
             }
             _ => panic!("Expected match statement"),

@@ -251,8 +251,8 @@ func main() {
     fmt.Printf("unwrapOrElse(some, 0) = %d\n", unwrapOrElse(some, 0))
     fmt.Printf("unwrapOrElse(none, 99) = %d\n", unwrapOrElse(none, 99))
 
-    circle := Shape_Circle{radius: 5.0}
-    rect := Shape_Rectangle{width: 3.0, height: 4.0}
+    var circle Shape = Shape_Circle{radius: 5.0}
+    var rect Shape = Shape_Rectangle{width: 3.0, height: 4.0}
 
     fmt.Printf("getRadius(circle) = %f\n", getRadius(circle))
     fmt.Printf("getRadius(rect) = %f\n", getRadius(rect))

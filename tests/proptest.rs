@@ -82,32 +82,16 @@ fn arb_type_annotation() -> impl Strategy<Value = TypeAnnotation> {
 /// Generate a simple expression (no recursion)
 fn arb_simple_expr() -> impl Strategy<Value = Expr> {
     prop_oneof![
-        any::<i64>().prop_map(|n| Expr {
-            kind: ExprKind::Integer(n, IntFormat::Decimal),
-            span: Span::dummy()
-        }),
+        any::<i64>()
+            .prop_map(|n| Expr::new(ExprKind::Integer(n, IntFormat::Decimal), Span::dummy())),
         any::<f64>()
             .prop_filter("finite floats only", |f| f.is_finite())
-            .prop_map(|n| Expr {
-                kind: ExprKind::Float(n),
-                span: Span::dummy()
-            }),
-        "[a-zA-Z0-9 ]{0,20}".prop_map(|s| Expr {
-            kind: ExprKind::String(s.to_string()),
-            span: Span::dummy()
-        }),
-        any::<bool>().prop_map(|b| Expr {
-            kind: ExprKind::Bool(b),
-            span: Span::dummy()
-        }),
-        Just(Expr {
-            kind: ExprKind::Nil,
-            span: Span::dummy()
-        }),
-        arb_ident_name().prop_map(|s| Expr {
-            kind: ExprKind::Ident(s),
-            span: Span::dummy()
-        }),
+            .prop_map(|n| Expr::new(ExprKind::Float(n), Span::dummy())),
+        "[a-zA-Z0-9 ]{0,20}"
+            .prop_map(|s| Expr::new(ExprKind::String(s.to_string()), Span::dummy())),
+        any::<bool>().prop_map(|b| Expr::new(ExprKind::Bool(b), Span::dummy())),
+        Just(Expr::new(ExprKind::Nil, Span::dummy())),
+        arb_ident_name().prop_map(|s| Expr::new(ExprKind::Ident(s), Span::dummy())),
     ]
 }
 
@@ -120,38 +104,46 @@ fn arb_expr() -> impl Strategy<Value = Expr> {
         |inner| {
             prop_oneof![
                 // Binary expression
-                (arb_binop(), inner.clone(), inner.clone()).prop_map(|(op, left, right)| Expr {
-                    kind: ExprKind::Binary {
-                        op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span: Span::dummy(),
+                (arb_binop(), inner.clone(), inner.clone()).prop_map(|(op, left, right)| {
+                    Expr::new(
+                        ExprKind::Binary {
+                            op,
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        Span::dummy(),
+                    )
                 }),
                 // Unary expression
-                (arb_unaryop(), inner.clone()).prop_map(|(op, operand)| Expr {
-                    kind: ExprKind::Unary {
-                        op,
-                        operand: Box::new(operand),
-                    },
-                    span: Span::dummy(),
+                (arb_unaryop(), inner.clone()).prop_map(|(op, operand)| {
+                    Expr::new(
+                        ExprKind::Unary {
+                            op,
+                            operand: Box::new(operand),
+                        },
+                        Span::dummy(),
+                    )
                 }),
                 // Field access
-                (inner.clone(), arb_ident_name()).prop_map(|(expr, field)| Expr {
-                    kind: ExprKind::Field {
-                        expr: Box::new(expr),
-                        field,
-                        field_span: Span::dummy(),
-                    },
-                    span: Span::dummy(),
+                (inner.clone(), arb_ident_name()).prop_map(|(expr, field)| {
+                    Expr::new(
+                        ExprKind::Field {
+                            expr: Box::new(expr),
+                            field,
+                            field_span: Span::dummy(),
+                        },
+                        Span::dummy(),
+                    )
                 }),
                 // Index expression
-                (inner.clone(), inner.clone()).prop_map(|(expr, index)| Expr {
-                    kind: ExprKind::Index {
-                        expr: Box::new(expr),
-                        index: Box::new(index),
-                    },
-                    span: Span::dummy(),
+                (inner.clone(), inner.clone()).prop_map(|(expr, index)| {
+                    Expr::new(
+                        ExprKind::Index {
+                            expr: Box::new(expr),
+                            index: Box::new(index),
+                        },
+                        Span::dummy(),
+                    )
                 }),
             ]
         },
@@ -163,22 +155,34 @@ fn arb_pattern() -> impl Strategy<Value = Pattern> {
         // Default pattern
         Just(Pattern {
             kind: PatternKind::Default,
-            span: Span::dummy()
+            span: Span::dummy(),
+            inferred_type_args: std::cell::RefCell::new(None),
         }),
         // Variant pattern
         arb_type_name().prop_map(|name| Pattern {
-            kind: PatternKind::Variant(name, std::cell::Cell::new(true)),
-            span: Span::dummy()
+            kind: PatternKind::Variant {
+                name,
+                type_args: Vec::new(),
+                is_soppo_enum: std::cell::Cell::new(true),
+            },
+            span: Span::dummy(),
+            inferred_type_args: std::cell::RefCell::new(None),
         }),
         // Literal pattern
         arb_literal().prop_map(|lit| Pattern {
             kind: PatternKind::Literal(lit),
-            span: Span::dummy()
+            span: Span::dummy(),
+            inferred_type_args: std::cell::RefCell::new(None),
         }),
         // Destructor pattern
         (arb_type_name(), arb_ident()).prop_map(|(name, binding)| Pattern {
-            kind: PatternKind::Destructor { name, binding },
-            span: Span::dummy()
+            kind: PatternKind::Destructor {
+                name,
+                type_args: Vec::new(),
+                binding,
+            },
+            span: Span::dummy(),
+            inferred_type_args: std::cell::RefCell::new(None),
         }),
     ]
 }
@@ -376,10 +380,7 @@ mod compiler_properties {
     /// it should produce a consistent type when run again
     #[test]
     fn type_inference_is_deterministic() {
-        let expr = Expr {
-            kind: ExprKind::Integer(42, IntFormat::Decimal),
-            span: Span::dummy(),
-        };
+        let expr = Expr::new(ExprKind::Integer(42, IntFormat::Decimal), Span::dummy());
 
         let mut infer1 = Infer::new().unwrap();
         let mut infer2 = Infer::new().unwrap();

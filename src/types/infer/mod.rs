@@ -148,6 +148,10 @@ pub struct Infer {
     /// Each scope maps variable names to their current nullability state
     pub(super) nil_state: Vec<HashMap<String, Nullability>>,
 
+    /// Variant state tracking for enum variables (scoped like variable bindings)
+    /// Each scope maps variable names to their known variant (e.g., "Shape.Circle")
+    pub(super) variant_state: Vec<HashMap<String, String>>,
+
     /// Error companion tracking: maps error variable names to their companion variables.
     /// When `x, err := f()` is declared, error_companions["err"] = ["x"].
     /// This allows narrowing x to non-nil after `if err != nil { return }`.
@@ -172,6 +176,7 @@ impl Infer {
             project,
             imports: HashMap::new(),
             nil_state: vec![HashMap::new()],
+            variant_state: vec![HashMap::new()],
             error_companions: HashMap::new(),
             symbols: SymbolTable::new(),
         }
@@ -1510,26 +1515,30 @@ impl Infer {
         }
     }
 
-    /// Push a new scope (for both variables and nil state)
+    /// Push a new scope (for variables, nil state, and variant state)
     pub(super) fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
         self.nil_state.push(HashMap::new());
+        self.variant_state.push(HashMap::new());
     }
 
-    /// Pop the current scope (for both variables and nil state)
+    /// Pop the current scope (for variables, nil state, and variant state)
     pub(super) fn pop_scope(&mut self) {
         self.scopes.pop();
         self.nil_state.pop();
+        self.variant_state.pop();
     }
 
-    /// Push only a nil state scope (for narrowing in if branches without new variable scope)
+    /// Push only a nil/variant state scope (for narrowing in if branches without new variable scope)
     pub(super) fn push_nil_scope(&mut self) {
         self.nil_state.push(HashMap::new());
+        self.variant_state.push(HashMap::new());
     }
 
-    /// Pop only a nil state scope
+    /// Pop only a nil/variant state scope
     pub(super) fn pop_nil_scope(&mut self) {
         self.nil_state.pop();
+        self.variant_state.pop();
     }
 
     /// Check for unused variables in the current scope
@@ -1716,6 +1725,31 @@ impl Infer {
     pub(super) fn set_nil_state(&mut self, name: String, state: Nullability) {
         if let Some(scope) = self.nil_state.last_mut() {
             scope.insert(name, state);
+        }
+    }
+
+    /// Get the known variant for an enum variable (from innermost to outermost scope)
+    /// Returns None if the variant is not known
+    pub(super) fn get_variant_state(&self, name: &str) -> Option<&String> {
+        for scope in self.variant_state.iter().rev() {
+            if let Some(variant) = scope.get(name) {
+                return Some(variant);
+            }
+        }
+        None
+    }
+
+    /// Set the known variant for an enum variable in the current scope
+    pub(super) fn set_variant_state(&mut self, name: String, variant: String) {
+        if let Some(scope) = self.variant_state.last_mut() {
+            scope.insert(name, variant);
+        }
+    }
+
+    /// Clear the known variant for a variable (when reassigned to unknown value)
+    pub(super) fn clear_variant_state(&mut self, name: &str) {
+        if let Some(scope) = self.variant_state.last_mut() {
+            scope.remove(name);
         }
     }
 
@@ -1954,6 +1988,21 @@ impl Infer {
         }
     }
 
+    /// Update variant state for a variable after assignment
+    /// Tracks the known variant when an enum struct literal is assigned
+    pub(super) fn update_variant_state_for_assignment(&mut self, name: &str, value: &Expr) {
+        // Check if the value is an enum variant struct literal
+        if let ExprKind::StructLit { ty: Some(ty), .. } = &value.kind {
+            // Enum variants have names like "Shape.Circle"
+            if ty.name.contains('.') {
+                self.set_variant_state(name.to_string(), ty.name.clone());
+                return;
+            }
+        }
+        // For other assignments, clear the variant state (we don't know the variant)
+        self.clear_variant_state(name);
+    }
+
     /// Check if a type is the `error` type
     pub(super) fn is_error_type(&self, ty: &Type) -> bool {
         match ty {
@@ -2050,7 +2099,9 @@ impl Infer {
 
         match &expr.kind {
             // Type assertion: x.(T) -> (T, bool)
-            ExprKind::TypeAssert { expr: inner, ty } => {
+            ExprKind::TypeAssert {
+                expr: inner, ty, ..
+            } => {
                 // Infer the inner expression to mark variables as used
                 self.infer_expr(inner)?;
                 let asserted_ty = self.resolve_type(ty);
@@ -2112,6 +2163,148 @@ impl Infer {
 
             _ => Ok(None),
         }
+    }
+
+    /// Set inferred type args on an expression using the expected type.
+    /// This is needed for codegen to know the concrete type args for generic enum variants.
+    pub(super) fn set_inferred_type_args(&mut self, expr: &Expr, expected_type: &Type) {
+        // Extract type args from the expected type
+        let type_args = if let Type::Con { args, .. } = expected_type {
+            if args.is_empty() {
+                return;
+            }
+            args.iter()
+                .map(|t| self.type_to_string(t))
+                .collect::<Vec<_>>()
+        } else {
+            return;
+        };
+
+        match &expr.kind {
+            // Struct literals like Option.Some{Value: ...}
+            ExprKind::StructLit { ty: Some(ty), .. } => {
+                // Only set if no explicit type args were provided
+                if ty.args.is_empty() && ty.name.contains('.') {
+                    let parts: Vec<&str> = ty.name.split('.').collect();
+                    if !parts.is_empty() {
+                        let base_type = parts[0];
+                        // Check if this is a generic type
+                        if let Some(type_def) = self.global_state.lookup_type(base_type)
+                            && !type_def.generics.is_empty()
+                        {
+                            *expr.inferred_type_args.borrow_mut() = Some(type_args);
+                        }
+                    }
+                }
+            }
+            // Field access like Option.None (unit variant)
+            ExprKind::Field {
+                expr: base_expr, ..
+            } => {
+                // Check if this is accessing a variant on a generic type
+                if let ExprKind::Ident(type_name) = &base_expr.kind
+                    && let Some(type_def) = self.global_state.lookup_type(type_name)
+                    && !type_def.generics.is_empty()
+                {
+                    *expr.inferred_type_args.borrow_mut() = Some(type_args);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Convert a type to its string representation for codegen
+    fn type_to_string(&self, ty: &Type) -> String {
+        match ty {
+            Type::Con {
+                sym,
+                args,
+                nullable,
+            } => {
+                // For local types, just use the name. For external, include module.
+                let mut s = if sym.module.0.is_empty() {
+                    sym.name.clone()
+                } else {
+                    format!("{}.{}", sym.module.0, sym.name)
+                };
+                if !args.is_empty() {
+                    s.push('[');
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            s.push_str(", ");
+                        }
+                        s.push_str(&self.type_to_string(arg));
+                    }
+                    s.push(']');
+                }
+                if *nullable { format!("?{}", s) } else { s }
+            }
+            Type::Var(v) => {
+                // Try to resolve the variable
+                let resolved = self.substitute(Type::Var(*v));
+                if let Type::Var(_) = resolved {
+                    // Still unresolved
+                    format!("T{}", v)
+                } else {
+                    self.type_to_string(&resolved)
+                }
+            }
+            Type::Func { .. } => "func".to_string(),
+            Type::Never => "never".to_string(),
+        }
+    }
+
+    /// Check if an expression is a generic enum variant that needs type args.
+    /// Returns an error if the expression uses a generic enum variant without
+    /// explicit type args and there's no context to infer them from.
+    pub(super) fn check_generic_enum_needs_type_args(&self, expr: &Expr) -> Result<()> {
+        use crate::types::ctx::TypeDefKind;
+
+        match &expr.kind {
+            // Field access like Option.None (unit variant)
+            ExprKind::Field {
+                expr: base_expr,
+                field,
+                ..
+            } => {
+                if let ExprKind::Ident(type_name) = &base_expr.kind
+                    && let Some(type_def) = self.global_state.lookup_type(type_name)
+                    && let TypeDefKind::Enum { .. } = &type_def.kind
+                    && !type_def.generics.is_empty()
+                    && expr.inferred_type_args.borrow().is_none()
+                {
+                    return Err(SoppoError::GenericUnitVariant {
+                        enum_name: type_name.clone(),
+                        variant_name: field.clone(),
+                        span: expr.span,
+                    });
+                }
+            }
+            // Struct literals like Option.Some{Value: ...}
+            ExprKind::StructLit { ty: Some(ty), .. } => {
+                // Check if the type name is an enum variant (Type.Variant)
+                if ty.name.contains('.') && ty.args.is_empty() {
+                    let parts: Vec<&str> = ty.name.split('.').collect();
+                    if parts.len() >= 2 {
+                        let enum_name = parts[0];
+                        if let Some(type_def) = self.global_state.lookup_type(enum_name)
+                            && let TypeDefKind::Enum { .. } = &type_def.kind
+                            && !type_def.generics.is_empty()
+                            && expr.inferred_type_args.borrow().is_none()
+                        {
+                            return Err(SoppoError::GenericUnitVariant {
+                                enum_name: enum_name.to_string(),
+                                variant_name: parts[1..].join("."),
+                                span: expr.span,
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
 

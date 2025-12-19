@@ -1050,13 +1050,68 @@ impl Formatter {
     fn format_pattern(&self, pat: &Pattern) -> String {
         match &pat.kind {
             PatternKind::Default => "default".to_string(),
-            PatternKind::Variant(name, _) => name.clone(),
-            PatternKind::Literal(lit) => self.format_literal(lit),
-            PatternKind::Destructor { name, binding } => {
-                format!("{}({})", name, binding.name)
+            PatternKind::Variant {
+                name, type_args, ..
+            } => {
+                if type_args.is_empty() {
+                    name.clone()
+                } else {
+                    // Format: BaseType[type_args].Variant
+                    let parts: Vec<&str> = name.split('.').collect();
+                    if parts.len() >= 2 {
+                        let base = parts[0];
+                        let rest = parts[1..].join(".");
+                        let args: Vec<String> =
+                            type_args.iter().map(|ta| ta.name.clone()).collect();
+                        format!("{}[{}].{}", base, args.join(", "), rest)
+                    } else {
+                        name.clone()
+                    }
+                }
             }
-            PatternKind::StructDestructor { name, fields, rest } => {
-                let mut result = format!("{}{{", name);
+            PatternKind::Literal(lit) => self.format_literal(lit),
+            PatternKind::Destructor {
+                name,
+                type_args,
+                binding,
+            } => {
+                let formatted_name = if type_args.is_empty() {
+                    name.clone()
+                } else {
+                    let parts: Vec<&str> = name.split('.').collect();
+                    if parts.len() >= 2 {
+                        let base = parts[0];
+                        let rest = parts[1..].join(".");
+                        let args: Vec<String> =
+                            type_args.iter().map(|ta| ta.name.clone()).collect();
+                        format!("{}[{}].{}", base, args.join(", "), rest)
+                    } else {
+                        name.clone()
+                    }
+                };
+                format!("{}({})", formatted_name, binding.name)
+            }
+            PatternKind::StructDestructor {
+                name,
+                type_args,
+                fields,
+                rest,
+            } => {
+                let formatted_name = if type_args.is_empty() {
+                    name.clone()
+                } else {
+                    let parts: Vec<&str> = name.split('.').collect();
+                    if parts.len() >= 2 {
+                        let base = parts[0];
+                        let rest = parts[1..].join(".");
+                        let args: Vec<String> =
+                            type_args.iter().map(|ta| ta.name.clone()).collect();
+                        format!("{}[{}].{}", base, args.join(", "), rest)
+                    } else {
+                        name.clone()
+                    }
+                };
+                let mut result = format!("{}{{", formatted_name);
                 let field_strs: Vec<_> = fields
                     .iter()
                     .map(|(fname, fpat)| match fpat {
@@ -1243,7 +1298,7 @@ impl Formatter {
                 result.push(']');
                 result
             }
-            ExprKind::TypeAssert { expr, ty } => {
+            ExprKind::TypeAssert { expr, ty, .. } => {
                 format!(
                     "{}.({})",
                     self.format_expr(expr),

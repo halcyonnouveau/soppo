@@ -139,13 +139,52 @@ impl Codegen {
                 self.emit(")");
             }
 
-            ExprKind::Field { expr, field, .. } => {
+            ExprKind::Field {
+                expr: base_expr,
+                field,
+                ..
+            } => {
+                // Check if this is a generic enum variant like Option[int].None
+                if let ExprKind::Call {
+                    func,
+                    type_args,
+                    args,
+                } = &base_expr.kind
+                    && let ExprKind::Ident(type_name) = &func.kind
+                    && !type_args.is_empty()
+                    && args.is_empty()
+                    && self.global_state.is_local_enum(type_name)
+                {
+                    // Generic enum unit variant: Option[int].None → Option_None[int]{}
+                    self.emit(format!("{}_{}", type_name, field));
+                    self.emit("[");
+                    for (i, ty) in type_args.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(self.go_type(&ty.name));
+                    }
+                    self.emit("]{}");
+                    return;
+                }
+
                 // Check if this is an enum constructor like Colour.Red or pkg.Status.Active
-                if let ExprKind::Ident(type_name) = &expr.kind {
+                if let ExprKind::Ident(type_name) = &base_expr.kind {
                     // Check if it's a registered local enum type
                     if self.global_state.is_local_enum(type_name) {
                         // Enum values: Colour.Red → ColourRed (var or function)
                         self.emit(format!("{}{}", type_name, field));
+                        // Check for inferred type args (from type inference)
+                        if let Some(inferred_args) = expr.inferred_type_args.borrow().as_ref() {
+                            self.emit("[");
+                            for (i, arg) in inferred_args.iter().enumerate() {
+                                if i > 0 {
+                                    self.emit(", ");
+                                }
+                                self.emit(self.go_type(arg));
+                            }
+                            self.emit("]()");
+                        }
                     } else {
                         // Regular field access (like fmt.Printf)
                         self.emit(type_name);
@@ -156,7 +195,7 @@ impl Codegen {
                     expr: inner_expr,
                     field: type_name,
                     ..
-                } = &expr.kind
+                } = &base_expr.kind
                 {
                     // Check for cross-package enum: pkg.Type.Variant
                     if let ExprKind::Ident(pkg_name) = &inner_expr.kind {
@@ -165,19 +204,19 @@ impl Codegen {
                             self.emit(format!("{}.{}{}", pkg_name, type_name, field));
                         } else {
                             // Regular nested field access
-                            self.gen_expr(expr);
+                            self.gen_expr(base_expr);
                             self.emit(".");
                             self.emit(field);
                         }
                     } else {
                         // Regular nested field access
-                        self.gen_expr(expr);
+                        self.gen_expr(base_expr);
                         self.emit(".");
                         self.emit(field);
                     }
                 } else {
                     // Regular field access on expression
-                    self.gen_expr(expr);
+                    self.gen_expr(base_expr);
                     self.emit(".");
                     self.emit(field);
                 }
@@ -212,28 +251,14 @@ impl Codegen {
                 self.emit("]");
             }
 
-            ExprKind::TypeAssert { expr, ty } => {
+            ExprKind::TypeAssert { expr, ty, .. } => {
+                // Always generate the type assertion - needed to convert
+                // from interface type to concrete struct type
                 let type_name = ty.name.replace('.', "_");
-                let is_enum_variant = ty.name.contains('.');
-
-                if is_enum_variant {
-                    // Soppo enum variant: return pointer for nil-check pattern
-                    // Generate: func() *Type { if _v, _ok := expr.(Type); _ok { return &_v }; return nil }()
-                    self.emit("func() *");
-                    self.emit(&type_name);
-                    self.emit(" { if _v, _ok := ");
-                    self.gen_expr(expr);
-                    self.emit(".(");
-                    self.emit(&type_name);
-                    self.emit("); _ok { return &_v }; return nil }()");
-                } else {
-                    // Go interface assertion: generate native Go syntax
-                    // Panics at runtime if assertion fails (matches Go semantics)
-                    self.gen_expr(expr);
-                    self.emit(".(");
-                    self.emit(&type_name);
-                    self.emit(")");
-                }
+                self.gen_expr(expr);
+                self.emit(".(");
+                self.emit(&type_name);
+                self.emit(")");
             }
 
             ExprKind::NilAssert { expr } => {
@@ -277,8 +302,30 @@ impl Codegen {
                 // For cross-package types like types.User, keep as types.User
                 // For cross-package enum variants like pkg.Type.Variant, convert to pkg.Type_Variant
                 if let Some(ty) = ty {
-                    let type_name = convert_struct_type_name(&ty.name);
+                    let type_name = self.convert_struct_type_name(&ty.name);
                     self.emit(self.go_type(&type_name));
+                    // For generic enum variants like Option[int].Some, emit type args
+                    // Check explicit type args first, then inferred type args
+                    if !ty.args.is_empty() {
+                        self.emit("[");
+                        for (i, arg) in ty.args.iter().enumerate() {
+                            if i > 0 {
+                                self.emit(", ");
+                            }
+                            self.emit(self.go_type(&arg.name));
+                        }
+                        self.emit("]");
+                    } else if let Some(inferred_args) = expr.inferred_type_args.borrow().as_ref() {
+                        // Use inferred type args from type inference
+                        self.emit("[");
+                        for (i, arg) in inferred_args.iter().enumerate() {
+                            if i > 0 {
+                                self.emit(", ");
+                            }
+                            self.emit(self.go_type(arg));
+                        }
+                        self.emit("]");
+                    }
                 }
                 self.emit("{");
                 for (i, (field_name, value)) in fields.iter().enumerate() {
@@ -495,7 +542,9 @@ impl Codegen {
     pub(crate) fn gen_comma_ok_expr(&mut self, expr: &Expr) -> Option<String> {
         match &expr.kind {
             // Type assertion: x.(T) -> native Go comma-ok
-            ExprKind::TypeAssert { expr: inner, ty } => {
+            ExprKind::TypeAssert {
+                expr: inner, ty, ..
+            } => {
                 let mut code = String::new();
                 let mut temp = Codegen::new();
                 temp.gen_expr(inner);
@@ -527,38 +576,48 @@ impl Codegen {
     }
 }
 
-/// Convert a struct type name for codegen:
-/// - `Type` → `Type` (simple type)
-/// - `pkg.Type` → `pkg.Type` (cross-package type)
-/// - `Type.Variant` → `Type_Variant` (enum variant)
-/// - `pkg.Type.Variant` → `pkg.Type_Variant` (cross-package enum variant)
-fn convert_struct_type_name(name: &str) -> String {
-    let parts: Vec<&str> = name.split('.').collect();
-    match parts.len() {
-        0 | 1 => name.to_string(), // Simple type
-        2 => {
-            // Could be pkg.Type or Type.Variant
-            // If first char of first part is lowercase, assume package
-            // If first char is uppercase, assume enum variant
-            let first_char = parts[0].chars().next().unwrap_or('a');
-            if first_char.is_lowercase() {
-                // pkg.Type - keep as is
-                name.to_string()
-            } else {
-                // Type.Variant - convert to Type_Variant
-                format!("{}_{}", parts[0], parts[1])
+impl Codegen {
+    /// Convert a struct type name for codegen:
+    /// - `Type` → `Type` (simple type)
+    /// - `pkg.Type` → `pkg.Type` (cross-package type)
+    /// - `Type.Variant` → `Type_Variant` (enum variant)
+    /// - `pkg.Type.Variant` → `pkg.Type_Variant` (cross-package enum variant)
+    pub(crate) fn convert_struct_type_name(&self, name: &str) -> String {
+        let parts: Vec<&str> = name.split('.').collect();
+        match parts.len() {
+            0 | 1 => name.to_string(), // Simple type
+            2 => {
+                // Could be pkg.Type or Type.Variant
+                // Use the type system to check if it's an enum
+                if self.global_state.is_enum(parts[0]) {
+                    // Enum variant - convert to Type_Variant
+                    format!("{}_{}", parts[0], parts[1])
+                } else {
+                    // pkg.Type - keep as is
+                    name.to_string()
+                }
             }
-        }
-        _ => {
-            // pkg.Type.Variant or deeper - join all but last two with dots,
-            // then underscore the last dot
-            let prefix = parts[..parts.len() - 2].join(".");
-            let type_name = parts[parts.len() - 2];
-            let variant = parts[parts.len() - 1];
-            if prefix.is_empty() {
-                format!("{}_{}", type_name, variant)
-            } else {
-                format!("{}.{}_{}", prefix, type_name, variant)
+            _ => {
+                // pkg.Type.Variant or deeper
+                // Check if the second-to-last part is an enum in the package context
+                let prefix = parts[..parts.len() - 2].join(".");
+                let type_name = parts[parts.len() - 2];
+                let variant = parts[parts.len() - 1];
+
+                // For cross-package enums, check using soppo_enum detection
+                if parts.len() == 3 {
+                    let pkg = parts[0];
+                    if self.global_state.is_soppo_enum(pkg, type_name) {
+                        return format!("{}.{}_{}", pkg, type_name, variant);
+                    }
+                }
+
+                // Default: assume enum variant pattern
+                if prefix.is_empty() {
+                    format!("{}_{}", type_name, variant)
+                } else {
+                    format!("{}.{}_{}", prefix, type_name, variant)
+                }
             }
         }
     }
