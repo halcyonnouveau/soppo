@@ -31,8 +31,11 @@ impl Infer {
         }
     }
 
-    /// Unify two types (solve constraint)
-    pub fn unify(&mut self, t1: &Type, t2: &Type, span: &Span) -> Result<()> {
+    /// Unify two types (internal version that returns Result).
+    ///
+    /// **Prefer `unify`** which emits errors and returns bool on failure.
+    /// This version should only be used when you need to explicitly check if unification failed.
+    pub fn unify_inner(&mut self, t1: &Type, t2: &Type, span: &Span) -> Result<()> {
         let t1 = self.resolve_alias(self.substitute(t1.clone()));
         let t2 = self.resolve_alias(self.substitute(t2.clone()));
 
@@ -66,6 +69,9 @@ impl Infer {
         }
 
         match (&t1, &t2) {
+            // Error type unifies with anything (suppresses cascading errors)
+            (Type::Error, _) | (_, Type::Error) => Ok(()),
+
             // Never type unifies with anything (it's bottom type)
             (Type::Never, _) | (_, Type::Never) => Ok(()),
 
@@ -185,7 +191,7 @@ impl Infer {
                 // Unify the underlying types via args if both have them
                 if !a1.is_empty() && !a2.is_empty() {
                     for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                        self.unify(arg1, arg2, span)?;
+                        self.unify_inner(arg1, arg2, span)?;
                     }
                 }
                 Ok(())
@@ -213,7 +219,7 @@ impl Infer {
                 }
                 if !a1.is_empty() && !a2.is_empty() {
                     for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                        self.unify(arg1, arg2, span)?;
+                        self.unify_inner(arg1, arg2, span)?;
                     }
                 }
                 Ok(())
@@ -244,7 +250,7 @@ impl Infer {
                 }
                 if !a1.is_empty() && !a2.is_empty() {
                     for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                        self.unify(arg1, arg2, span)?;
+                        self.unify_inner(arg1, arg2, span)?;
                     }
                 }
                 Ok(())
@@ -289,7 +295,7 @@ impl Infer {
                     });
                 }
                 for (arg1, arg2) in a1.iter().zip(a2.iter()) {
-                    self.unify(arg1, arg2, span)?;
+                    self.unify_inner(arg1, arg2, span)?;
                 }
                 Ok(())
             }
@@ -346,7 +352,7 @@ impl Infer {
 
                     // Unify fixed params (ignoring names)
                     for ((_, ty1), (_, ty2)) in fixed_params.iter().zip(a2.iter()) {
-                        self.unify(ty1, ty2, span)?;
+                        self.unify_inner(ty1, ty2, span)?;
                     }
 
                     // Unify remaining args against variadic element type
@@ -357,7 +363,7 @@ impl Infer {
                             _ => false,
                         };
                         if !is_any {
-                            self.unify(&variadic_elem, ty2, span)?;
+                            self.unify_inner(&variadic_elem, ty2, span)?;
                         }
                     }
                 } else {
@@ -374,10 +380,10 @@ impl Infer {
                     }
                     // Unify types, ignoring parameter names
                     for ((_, ty1), (_, ty2)) in a1.iter().zip(a2.iter()) {
-                        self.unify(ty1, ty2, span)?;
+                        self.unify_inner(ty1, ty2, span)?;
                     }
                 }
-                self.unify(r1, r2, span)?;
+                self.unify_inner(r1, r2, span)?;
                 Ok(())
             }
 
@@ -387,6 +393,25 @@ impl Infer {
                 found: Box::new(t2.clone()),
                 span: *span,
             }),
+        }
+    }
+
+    /// Unify two types, emitting error if they don't match.
+    ///
+    /// This is the default unification method that collects errors. Returns true if
+    /// unification succeeded, false if an error was emitted. If either type is
+    /// `Type::Error`, returns true without emitting errors (to prevent cascading).
+    pub fn unify(&mut self, t1: &Type, t2: &Type, span: &Span) -> bool {
+        // If either type is already an error, don't emit more errors
+        if t1.is_error() || t2.is_error() {
+            return true;
+        }
+        match self.unify_inner(t1, t2, span) {
+            Ok(()) => true,
+            Err(e) => {
+                self.emit_error(e);
+                false
+            }
         }
     }
 
@@ -423,6 +448,7 @@ impl Infer {
                 nullable,
             },
             Type::Never => Type::Never,
+            Type::Error => Type::Error,
         }
     }
 }
@@ -469,6 +495,7 @@ pub fn occurs(var: i32, ty: &Type) -> bool {
             args.iter().any(|(_, arg_ty)| occurs(var, arg_ty)) || occurs(var, ret)
         }
         Type::Never => false,
+        Type::Error => false,
     }
 }
 
@@ -483,10 +510,10 @@ mod tests {
 
         let t1 = Type::simple("int");
         let t2 = Type::simple("int");
-        assert!(infer.unify(&t1, &t2, &Span::dummy()).is_ok());
+        assert!(infer.unify_inner(&t1, &t2, &Span::dummy()).is_ok());
 
         let t3 = Type::simple("string");
-        assert!(infer.unify(&t1, &t3, &Span::dummy()).is_err());
+        assert!(infer.unify_inner(&t1, &t3, &Span::dummy()).is_err());
     }
 
     #[test]

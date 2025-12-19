@@ -13,3 +13,27 @@ Error: soppo::nil_to_non_nilable
  10 │ }
     ╰────
   help: use `?*User` for a nilable type
+
+Error: soppo::nil_pointer
+
+  × Potential nil pointer dereference
+    ╭─[nil_deref_no_check.sop:15:13]
+ 14 │     // ERROR: user may be nil - need to check before accessing
+ 15 │     name := user.name
+    ·             ──┬─
+    ·               ╰── this pointer may be nil
+ 16 │ }
+    ╰────
+  help: check for nil first, or use `.(!nil)` to assert non-nil
+
+Error: soppo::unused_variable
+
+  × Variable `name` is declared but not used
+    ╭─[nil_deref_no_check.sop:15:5]
+ 14 │     // ERROR: user may be nil - need to check before accessing
+ 15 │     name := user.name
+    ·     ──┬─
+    ·       ╰── unused variable
+ 16 │ }
+    ╰────
+  help: remove the variable, or use `_ = name` to suppress this error

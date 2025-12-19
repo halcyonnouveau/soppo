@@ -160,6 +160,9 @@ pub struct Infer {
     /// Symbol table for LSP features (hover, go-to-definition)
     /// Maps spans to symbol information
     pub(super) symbols: SymbolTable,
+
+    /// Collected errors (for multi-error reporting)
+    errors: Vec<SoppoError>,
 }
 
 impl Infer {
@@ -179,6 +182,7 @@ impl Infer {
             variant_state: vec![HashMap::new()],
             error_companions: HashMap::new(),
             symbols: SymbolTable::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -226,6 +230,48 @@ impl Infer {
             }
         }
         self.symbols
+    }
+
+    /// Emit a non-fatal error and continue type checking
+    pub fn emit_error(&mut self, error: SoppoError) {
+        self.errors.push(error);
+    }
+
+    /// Check if any errors have been collected
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    /// Take the collected errors, leaving an empty vector
+    pub fn take_errors(&mut self) -> Vec<SoppoError> {
+        std::mem::take(&mut self.errors)
+    }
+
+    /// Get reference to collected errors
+    pub fn errors(&self) -> &[SoppoError] {
+        &self.errors
+    }
+
+    /// Infer expression type, emitting error and returning Type::Error on failure.
+    pub fn infer_expr(&mut self, expr: &crate::syntax::Expr) -> Type {
+        match self.infer_expr_inner(expr) {
+            Ok(ty) => ty,
+            Err(e) => {
+                self.emit_error(e);
+                Type::error()
+            }
+        }
+    }
+
+    /// Infer statement type, emitting error and returning Type::Error on failure.
+    pub fn infer_stmt(&mut self, stmt: &crate::syntax::Stmt) -> Type {
+        match self.infer_stmt_inner(stmt) {
+            Ok(ty) => ty,
+            Err(e) => {
+                self.emit_error(e);
+                Type::error()
+            }
+        }
     }
 
     /// Get a reference to the symbol table
@@ -1549,7 +1595,7 @@ impl Infer {
                     nullable: *nullable,
                 }
             }
-            Type::Var(_) | Type::Never => ty.clone(),
+            Type::Var(_) | Type::Never | Type::Error => ty.clone(),
         }
     }
 
@@ -1580,19 +1626,21 @@ impl Infer {
     }
 
     /// Check for unused variables in the current scope
-    /// Returns an error for the first unused variable found
+    /// Returns an error for the first unused variable (by source position)
     pub(super) fn check_unused_vars_in_scope(&self) -> Result<()> {
         if let Some(scope) = self.scopes.last() {
-            for (name, (_, span, used)) in scope {
-                if !used
-                    && name != "_"
-                    && let Some(span) = span
-                {
-                    return Err(SoppoError::UnusedVariable {
-                        name: name.clone(),
-                        span: *span,
-                    });
-                }
+            // Collect unused variables and sort by span for deterministic order
+            let mut unused: Vec<_> = scope
+                .iter()
+                .filter(|(name, (_, span, used))| !used && *name != "_" && span.is_some())
+                .map(|(name, (_, span, _))| (name.clone(), span.unwrap()))
+                .collect();
+
+            // Sort by source position (byte offset)
+            unused.sort_by_key(|(_, span)| span.byte_start);
+
+            if let Some((name, span)) = unused.into_iter().next() {
+                return Err(SoppoError::UnusedVariable { name, span });
             }
         }
         Ok(())
@@ -1747,6 +1795,17 @@ impl Infer {
             if let Some((ty, span, used)) = scope.get_mut(name) {
                 *used = true;
                 return Some((ty.clone(), *span));
+            }
+        }
+        None
+    }
+
+    /// Lookup a variable's type without marking it as used.
+    /// Use this for internal type checking that shouldn't count as a reference.
+    pub(super) fn lookup_var_type(&self, name: &str) -> Option<Type> {
+        for scope in self.scopes.iter().rev() {
+            if let Some((ty, _, _)) = scope.get(name) {
+                return Some(ty.clone());
             }
         }
         None
@@ -2014,18 +2073,22 @@ impl Infer {
         }
     }
 
-    /// Infer an expression's type with nil-state narrowing applied.
+    /// Infer expression type with nil-state narrowing applied (error-collecting).
     /// If the expression is known to be non-nil (from flow analysis), a nullable type
     /// will be converted to non-nullable.
-    pub(super) fn infer_expr_narrowed(&mut self, expr: &Expr) -> crate::error::Result<Type> {
-        let ty = self.infer_expr(expr)?;
+    /// Always returns a Type (using Type::error() for failures).
+    pub(super) fn infer_expr_narrowed(&mut self, expr: &Expr) -> Type {
+        let ty = self.infer_expr(expr);
+        if ty.is_error() {
+            return ty;
+        }
 
         // Check if this expression is known to be non-nil
         let nullability = self.get_expr_nullability(expr, &ty);
         if nullability == Nullability::NonNull && ty.is_nullable() {
-            Ok(ty.as_non_nullable())
+            ty.as_non_nullable()
         } else {
-            Ok(ty)
+            ty
         }
     }
 
@@ -2139,16 +2202,20 @@ impl Infer {
         }
     }
 
-    /// Check if an expression supports the comma-ok idiom and return the types
-    /// Returns None if the expression doesn't support comma-ok
-    /// Returns Some((value_type, bool_type)) for:
+    /// Check if an expression supports the comma-ok idiom and return the types.
+    ///
+    /// Returns `None` if the expression doesn't support comma-ok.
+    /// Returns `Some((value_type, bool_type))` for:
     /// - Type assertions: x.(T) -> (T, bool)
     /// - Map index: m[k] -> (V, bool) when m is a map
     /// - Channel receive: <-ch -> (T, bool)
+    ///
+    /// If a sub-expression fails to type-check, returns `Some((Type::Error, Type::simple("bool")))`
+    /// to indicate this is a comma-ok expression but inference failed.
     pub(super) fn infer_comma_ok_expr(
         &mut self,
         expr: &crate::syntax::Expr,
-    ) -> crate::error::Result<Option<(Type, Type)>> {
+    ) -> Option<(Type, Type)> {
         use crate::syntax::UnaryOp;
 
         match &expr.kind {
@@ -2157,9 +2224,12 @@ impl Infer {
                 expr: inner, ty, ..
             } => {
                 // Infer the inner expression to mark variables as used
-                self.infer_expr(inner)?;
+                let inner_ty = self.infer_expr(inner);
+                if inner_ty.is_error() {
+                    return Some((Type::error(), Type::simple("bool")));
+                }
                 let asserted_ty = self.resolve_type(ty);
-                Ok(Some((asserted_ty, Type::simple("bool"))))
+                Some((asserted_ty, Type::simple("bool")))
             }
 
             // Map index: m[k] -> (V, bool) when m is a map type
@@ -2167,9 +2237,16 @@ impl Infer {
                 expr: map_expr,
                 index,
             } => {
-                let map_ty = self.infer_expr(map_expr)?;
+                let map_ty = self.infer_expr(map_expr);
                 // Also infer the index to mark variables as used
-                self.infer_expr(index)?;
+                let index_ty = self.infer_expr(index);
+
+                if map_ty.is_error() || index_ty.is_error() {
+                    // We don't know if this is a map, so can't say it's comma-ok
+                    // Return None to let normal handling proceed
+                    return None;
+                }
+
                 let map_ty = self.substitute(map_ty);
 
                 // Check if this is a map type
@@ -2181,10 +2258,10 @@ impl Infer {
                 {
                     // args[0] is key type, args[1] is value type
                     let value_ty = args[1].clone();
-                    return Ok(Some((value_ty, Type::simple("bool"))));
+                    return Some((value_ty, Type::simple("bool")));
                 }
                 // Not a map, could be slice/array index - no comma-ok
-                Ok(None)
+                None
             }
 
             // Channel receive: <-ch -> (T, bool)
@@ -2192,7 +2269,13 @@ impl Infer {
                 op: UnaryOp::Recv,
                 operand,
             } => {
-                let chan_ty = self.infer_expr(operand)?;
+                let chan_ty = self.infer_expr(operand);
+
+                if chan_ty.is_error() {
+                    // We don't know if this is a channel, so can't say it's comma-ok
+                    return None;
+                }
+
                 let chan_ty = self.substitute(chan_ty);
 
                 // Extract element type from channel
@@ -2203,19 +2286,19 @@ impl Infer {
                     && args.len() == 1
                 {
                     let elem_ty = args[0].clone();
-                    return Ok(Some((elem_ty, Type::simple("bool"))));
+                    return Some((elem_ty, Type::simple("bool")));
                 }
                 // Fallback: try to extract from name
                 if let Type::Con { sym: name, .. } = &chan_ty
                     && let Some(elem) = name.name.strip_prefix("chan ")
                 {
                     let elem_ty = Type::simple(elem);
-                    return Ok(Some((elem_ty, Type::simple("bool"))));
+                    return Some((elem_ty, Type::simple("bool")));
                 }
-                Ok(None)
+                None
             }
 
-            _ => Ok(None),
+            _ => None,
         }
     }
 
@@ -2305,6 +2388,7 @@ impl Infer {
             }
             Type::Func { .. } => "func".to_string(),
             Type::Never => "never".to_string(),
+            Type::Error => "<error>".to_string(),
         }
     }
 

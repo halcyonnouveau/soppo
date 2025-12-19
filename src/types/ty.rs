@@ -34,6 +34,10 @@ pub enum Type {
 
     /// Never type (diverging, like return/break/continue)
     Never,
+
+    /// Error type (poison) - used when type checking fails
+    /// This prevents cascading errors: any operation involving Error produces Error
+    Error,
 }
 
 impl Type {
@@ -76,6 +80,16 @@ impl Type {
     /// Never type (diverging)
     pub fn never() -> Self {
         Type::Never
+    }
+
+    /// Error/poison type
+    pub fn error() -> Self {
+        Type::Error
+    }
+
+    /// Check if this type is the error/poison type
+    pub fn is_error(&self) -> bool {
+        matches!(self, Type::Error)
     }
 
     /// Create a type variable
@@ -262,6 +276,7 @@ impl Type {
             Type::Func { nullable, .. } => *nullable,
             Type::Var(_) => false, // Type variables are not inherently nullable
             Type::Never => false,
+            Type::Error => false,
         }
     }
 
@@ -332,6 +347,7 @@ impl Type {
             Type::Func { .. } => true, // function types can be nil
             Type::Var(_) => false,
             Type::Never => false,
+            Type::Error => false,
         }
     }
 
@@ -413,6 +429,7 @@ impl fmt::Display for Type {
             }
             Type::Var(v) => write!(f, "?{}", v),
             Type::Never => write!(f, "!"),
+            Type::Error => write!(f, "<error>"),
         }
     }
 }

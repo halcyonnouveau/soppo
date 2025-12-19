@@ -13,3 +13,15 @@ Error: soppo::nil_to_non_nilable
  16 │ }
     ╰────
   help: use `?*User` for a nilable type
+
+Error: soppo::nil_pointer
+
+  × Potential nil pointer dereference
+    ╭─[nil_nested_no_check.sop:23:21]
+ 22 │     if user != nil {
+ 23 │         fmt.Println(user.profile.bio)  // ERROR: profile may be nil
+    ·                     ──────┬─────
+    ·                           ╰── this pointer may be nil
+ 24 │     }
+    ╰────
+  help: check for nil first, or use `.(!nil)` to assert non-nil

@@ -1,5 +1,5 @@
 ---
-source: tests/fail.rs
+source: tests/single.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::type_mismatch

@@ -1,5 +1,5 @@
 ---
-source: tests/fail.rs
+source: tests/single.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::non_nilable_no_init
@@ -13,3 +13,15 @@ Error: soppo::non_nilable_no_init
  11 │ }
     ╰────
   help: provide an initial value, or use `?*User` for a nilable type
+
+Error: soppo::unused_variable
+
+  × Variable `user` is declared but not used
+    ╭─[nullable_no_init.sop:10:9]
+  9 │     // (zero value would be nil, violating non-nullable constraint)
+ 10 │     var user *User
+    ·         ──┬─
+    ·           ╰── unused variable
+ 11 │ }
+    ╰────
+  help: remove the variable, or use `_ = user` to suppress this error

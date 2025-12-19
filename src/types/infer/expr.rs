@@ -9,8 +9,11 @@ use crate::types::symbols::{SymbolInfo, SymbolKind};
 use crate::types::ty::Nullability;
 
 impl Infer {
-    /// Infer the type of an expression
-    pub fn infer_expr(&mut self, expr: &Expr) -> Result<Type> {
+    /// Infer the type of an expression (internal version that returns Result).
+    ///
+    /// **Prefer `infer_expr`** which collects errors and returns `Type::Error` on failure.
+    /// This version should only be used when you need to explicitly check if inference failed.
+    pub fn infer_expr_inner(&mut self, expr: &Expr) -> Result<Type> {
         match &expr.kind {
             ExprKind::Integer(_, _) => Ok(Type::simple("int")),
 
@@ -24,11 +27,18 @@ impl Infer {
 
             ExprKind::StringInterpolation(parts) => {
                 // Type check each interpolated expression
+                let mut had_error = false;
                 for part in parts {
                     if let crate::syntax::StringPart::Expr(expr) = part {
                         // Any type can be interpolated - it will be converted to string
-                        self.infer_expr(expr)?;
+                        let ty = self.infer_expr(expr);
+                        if ty.is_error() {
+                            had_error = true;
+                        }
                     }
+                }
+                if had_error {
+                    return Ok(Type::error());
                 }
                 Ok(Type::simple("string"))
             }
@@ -143,8 +153,15 @@ impl Infer {
                 // In `x != nil && f(x)`, x is known non-nil when evaluating f(x)
                 // Left was TRUE, so apply narrowing as-is
                 if matches!(op, BinOp::And) {
-                    let left_ty = self.infer_expr(left)?;
-                    self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
+                    let left_ty = self.infer_expr(left);
+                    if left_ty.is_error() {
+                        // Still infer right for more error collection
+                        self.push_nil_scope();
+                        self.infer_expr(right);
+                        self.pop_nil_scope();
+                        return Ok(Type::error());
+                    }
+                    self.unify(&left_ty, &Type::simple("bool"), &left.span);
 
                     // Extract nil checks from left side and apply narrowing for right side
                     let nil_checks = super::stmt::extract_nil_checks(left);
@@ -154,9 +171,12 @@ impl Infer {
                             self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
                         }
                     }
-                    let right_ty = self.infer_expr(right)?;
+                    let right_ty = self.infer_expr(right);
                     self.pop_nil_scope();
-                    self.unify(&right_ty, &Type::simple("bool"), &right.span)?;
+                    if right_ty.is_error() {
+                        return Ok(Type::error());
+                    }
+                    self.unify(&right_ty, &Type::simple("bool"), &right.span);
 
                     return Ok(Type::simple("bool"));
                 }
@@ -165,8 +185,15 @@ impl Infer {
                 // In `x == nil || f(x)`, x is known non-nil when evaluating f(x)
                 // Left was FALSE, so apply the opposite narrowing
                 if matches!(op, BinOp::Or) {
-                    let left_ty = self.infer_expr(left)?;
-                    self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
+                    let left_ty = self.infer_expr(left);
+                    if left_ty.is_error() {
+                        // Still infer right for more error collection
+                        self.push_nil_scope();
+                        self.infer_expr(right);
+                        self.pop_nil_scope();
+                        return Ok(Type::error());
+                    }
+                    self.unify(&left_ty, &Type::simple("bool"), &left.span);
 
                     // Extract nil checks from left side and apply OPPOSITE narrowing
                     let nil_checks = super::stmt::extract_nil_checks(left);
@@ -178,21 +205,29 @@ impl Infer {
                             self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
                         }
                     }
-                    let right_ty = self.infer_expr(right)?;
+                    let right_ty = self.infer_expr(right);
                     self.pop_nil_scope();
-                    self.unify(&right_ty, &Type::simple("bool"), &right.span)?;
+                    if right_ty.is_error() {
+                        return Ok(Type::error());
+                    }
+                    self.unify(&right_ty, &Type::simple("bool"), &right.span);
 
                     return Ok(Type::simple("bool"));
                 }
 
-                let left_ty = self.infer_expr(left)?;
-                let right_ty = self.infer_expr(right)?;
+                let left_ty = self.infer_expr(left);
+                let right_ty = self.infer_expr(right);
+
+                // If either operand failed, return error
+                if left_ty.is_error() || right_ty.is_error() {
+                    return Ok(Type::error());
+                }
 
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                         // Arithmetic: try normal unification first
                         // Point error at right operand since left is typically the "expected" type
-                        if self.unify(&left_ty, &right_ty, &right.span).is_ok() {
+                        if self.unify_inner(&left_ty, &right_ty, &right.span).is_ok() {
                             return Ok(self.substitute(left_ty));
                         }
 
@@ -210,20 +245,19 @@ impl Infer {
                             return Ok(result_ty);
                         }
 
-                        // Neither worked - return the original unification error
-                        // Point to right operand as the "found" type
-                        self.unify(&left_ty, &right_ty, &right.span)?;
-                        Ok(self.substitute(left_ty))
+                        // Neither worked - emit the unification error and return error type
+                        self.unify(&left_ty, &right_ty, &right.span);
+                        Ok(Type::error())
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                         // Comparison: both must be same type, result is bool
-                        self.unify(&left_ty, &right_ty, &expr.span)?;
+                        self.unify(&left_ty, &right_ty, &expr.span);
                         Ok(Type::simple("bool"))
                     }
                     BinOp::And | BinOp::Or => {
-                        // Logical: both must be bool, result is bool
-                        self.unify(&left_ty, &Type::simple("bool"), &left.span)?;
-                        self.unify(&right_ty, &Type::simple("bool"), &right.span)?;
+                        // Logical: both must be bool, result is bool (handled above for narrowing)
+                        self.unify(&left_ty, &Type::simple("bool"), &left.span);
+                        self.unify(&right_ty, &Type::simple("bool"), &right.span);
                         Ok(Type::simple("bool"))
                     }
                     BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
@@ -235,7 +269,7 @@ impl Infer {
                             Ok(self.substitute(left_ty))
                         } else {
                             // Bitwise AND/OR/XOR: operands must be same type
-                            self.unify(&left_ty, &right_ty, &right.span)?;
+                            self.unify(&left_ty, &right_ty, &right.span);
                             Ok(self.substitute(left_ty))
                         }
                     }
@@ -255,38 +289,44 @@ impl Infer {
             } => self.infer_field(field_expr, field, field_span),
 
             ExprKind::Index { expr, index } => {
-                let container_ty = self.infer_expr(expr)?;
+                let container_ty = self.infer_expr(expr);
+                let index_ty = self.infer_expr(index);
+
+                // If either failed, return error
+                if container_ty.is_error() || index_ty.is_error() {
+                    return Ok(Type::error());
+                }
+
                 let container_ty = self.substitute(container_ty);
-                let index_ty = self.infer_expr(index)?;
 
                 // Map indexing: map[K]V - index is K, result is V
                 if let Some((key_ty, val_ty)) = Self::extract_map_elements(&container_ty) {
-                    self.unify(&index_ty, &key_ty, &index.span)?;
+                    self.unify(&index_ty, &key_ty, &index.span);
                     return Ok(val_ty);
                 }
 
                 // Slice indexing: []T - index is int, result is T
                 if let Some(elem_ty) = Self::extract_slice_element(&container_ty) {
-                    self.unify(&index_ty, &Type::simple("int"), &index.span)?;
+                    self.unify(&index_ty, &Type::simple("int"), &index.span);
                     return Ok(elem_ty);
                 }
 
                 if let Type::Con { sym, args, .. } = &container_ty {
                     // Array indexing: array or [N]T - index is int
                     if sym.name == "array" && args.len() == 1 {
-                        self.unify(&index_ty, &Type::simple("int"), &index.span)?;
+                        self.unify(&index_ty, &Type::simple("int"), &index.span);
                         return Ok(args[0].clone());
                     }
 
                     // String indexing - index is int, result is byte
                     if sym.name == "string" {
-                        self.unify(&index_ty, &Type::simple("int"), &index.span)?;
+                        self.unify(&index_ty, &Type::simple("int"), &index.span);
                         return Ok(Type::simple("byte"));
                     }
                 }
 
                 // Default: assume int index
-                self.unify(&index_ty, &Type::simple("int"), &index.span)?;
+                self.unify(&index_ty, &Type::simple("int"), &index.span);
                 Ok(self.fresh_ty_var())
             }
 
@@ -312,10 +352,20 @@ impl Infer {
                         (Type::simple(&ty.name), None, None)
                     }
                 } else if !elements.is_empty() {
-                    (self.infer_expr(&elements[0])?, None, None)
+                    let first_ty = self.infer_expr(&elements[0]);
+                    if first_ty.is_error() {
+                        // Still check remaining elements for more errors
+                        for elem in elements.iter().skip(1) {
+                            self.infer_expr(elem);
+                        }
+                        return Ok(Type::error());
+                    }
+                    (first_ty, None, None)
                 } else {
                     (self.fresh_ty_var(), None, None)
                 };
+
+                let mut had_error = false;
 
                 // All elements must have the same type
                 for elem in elements {
@@ -323,7 +373,9 @@ impl Infer {
                     if matches!(elem.kind, ExprKind::Nil)
                         && let Some(err) = Self::check_nil_to_non_nilable(&elem_ty, elem.span)
                     {
-                        return Err(err);
+                        self.emit_error(err);
+                        had_error = true;
+                        continue;
                     }
 
                     // Special handling for implicit StructLit with positional fields
@@ -338,28 +390,40 @@ impl Infer {
                     {
                         // Check positional fields against struct field definitions
                         for (i, (field_name, value)) in struct_fields.iter().enumerate() {
-                            let value_ty = self.infer_expr(value)?;
+                            let value_ty = self.infer_expr(value);
+                            if value_ty.is_error() {
+                                had_error = true;
+                                continue;
+                            }
                             match field_name {
                                 Some(name) => {
                                     // Named field - look up by name
                                     if let Some((_, expected_ty)) =
                                         field_defs.iter().find(|(n, _)| n == name)
                                     {
-                                        self.unify(expected_ty, &value_ty, &value.span)?;
+                                        self.unify(expected_ty, &value_ty, &value.span);
                                     }
                                 }
                                 None => {
                                     // Positional field - look up by index
                                     if let Some((_, expected_ty)) = field_defs.get(i) {
-                                        self.unify(expected_ty, &value_ty, &value.span)?;
+                                        self.unify(expected_ty, &value_ty, &value.span);
                                     }
                                 }
                             }
                         }
                     } else {
-                        let elem_ty_actual = self.infer_expr(elem)?;
-                        self.unify(&elem_ty, &elem_ty_actual, &elem.span)?;
+                        let elem_ty_actual = self.infer_expr(elem);
+                        if !elem_ty_actual.is_error() {
+                            self.unify(&elem_ty, &elem_ty_actual, &elem.span);
+                        } else {
+                            had_error = true;
+                        }
                     }
+                }
+
+                if had_error {
+                    return Ok(Type::error());
                 }
 
                 // Return proper slice/array type
@@ -380,8 +444,15 @@ impl Infer {
                 let Some(ty) = ty else {
                     // Just type check field values, return a fresh type variable
                     // The type will be unified with the expected type from context
+                    let mut had_error = false;
                     for (_field_name, value) in fields {
-                        self.infer_expr(value)?;
+                        let value_ty = self.infer_expr(value);
+                        if value_ty.is_error() {
+                            had_error = true;
+                        }
+                    }
+                    if had_error {
+                        return Ok(Type::error());
                     }
                     return Ok(self.fresh_ty_var());
                 };
@@ -409,6 +480,8 @@ impl Infer {
                             .map(|(name, ty)| (name.as_str(), ty.clone()))
                             .collect();
 
+                        let mut had_error = false;
+
                         // Type check each field
                         for (field_name, value) in fields {
                             if let Some(name) = field_name
@@ -419,17 +492,33 @@ impl Infer {
                                     && let Some(err) =
                                         Self::check_nil_to_non_nilable(field_ty, value.span)
                                 {
-                                    return Err(err);
+                                    self.emit_error(err);
+                                    had_error = true;
+                                    continue;
                                 }
                             }
                             // TODO: Handle positional fields (field_name = None)
-                            self.infer_expr(value)?;
+                            let value_ty = self.infer_expr(value);
+                            if value_ty.is_error() {
+                                had_error = true;
+                            }
+                        }
+
+                        if had_error {
+                            return Ok(Type::error());
                         }
                     }
                 } else {
                     // Fallback: just type check values without nil check
+                    let mut had_error = false;
                     for (_field_name, value) in fields {
-                        self.infer_expr(value)?;
+                        let value_ty = self.infer_expr(value);
+                        if value_ty.is_error() {
+                            had_error = true;
+                        }
+                    }
+                    if had_error {
+                        return Ok(Type::error());
                     }
                 }
 
@@ -504,11 +593,23 @@ impl Infer {
                 } else {
                     // Fallback: infer from first entry
                     if let Some((k, v)) = entries.first() {
-                        (self.infer_expr(k)?, self.infer_expr(v)?)
+                        let k_ty = self.infer_expr(k);
+                        let v_ty = self.infer_expr(v);
+                        if k_ty.is_error() || v_ty.is_error() {
+                            // Still check remaining entries for more errors
+                            for (key, value) in entries.iter().skip(1) {
+                                self.infer_expr(key);
+                                self.infer_expr(value);
+                            }
+                            return Ok(Type::error());
+                        }
+                        (k_ty, v_ty)
                     } else {
                         (self.fresh_ty_var(), self.fresh_ty_var())
                     }
                 };
+
+                let mut had_error = false;
 
                 // Type check all entries
                 for (key, value) in entries {
@@ -516,12 +617,28 @@ impl Infer {
                     if matches!(value.kind, ExprKind::Nil)
                         && let Some(err) = Self::check_nil_to_non_nilable(&val_ty, value.span)
                     {
-                        return Err(err);
+                        self.emit_error(err);
+                        had_error = true;
+                        // Still infer the key
+                        self.infer_expr(key);
+                        continue;
                     }
-                    let k_ty = self.infer_expr(key)?;
-                    let v_ty = self.infer_expr(value)?;
-                    self.unify(&key_ty, &k_ty, &key.span)?;
-                    self.unify(&val_ty, &v_ty, &value.span)?;
+                    let k_ty = self.infer_expr(key);
+                    let v_ty = self.infer_expr(value);
+                    if !k_ty.is_error() {
+                        self.unify(&key_ty, &k_ty, &key.span);
+                    } else {
+                        had_error = true;
+                    }
+                    if !v_ty.is_error() {
+                        self.unify(&val_ty, &v_ty, &value.span);
+                    } else {
+                        had_error = true;
+                    }
+                }
+
+                if had_error {
+                    return Ok(Type::error());
                 }
 
                 // Return map[K]V type with proper Go format in name
@@ -545,7 +662,11 @@ impl Infer {
                 // Add parameters to scope - use resolve_type for proper qualified type handling
                 for param in params {
                     let param_ty = self.resolve_type(&param.ty);
-                    self.insert_var(param.ident.name.clone(), param_ty, Some(param.ident.span))?;
+                    if let Err(e) =
+                        self.insert_var(param.ident.name.clone(), param_ty, Some(param.ident.span))
+                    {
+                        self.emit_error(e);
+                    }
                 }
 
                 // Set expected return types for this function
@@ -556,7 +677,7 @@ impl Infer {
                 }
 
                 // Infer body
-                self.infer_block(body)?;
+                self.infer_block(body);
 
                 self.pop_scope();
 
@@ -593,38 +714,50 @@ impl Infer {
                     .map(|f| self.resolve_type(&f.ty))
                     .collect();
 
+                let mut had_error = false;
+
                 // Type check each field value against its declared type
                 for (i, (field_name, value)) in fields.iter().enumerate() {
-                    let value_ty = self.infer_expr(value)?;
+                    let value_ty = self.infer_expr(value);
+                    if value_ty.is_error() {
+                        had_error = true;
+                        continue;
+                    }
                     match field_name {
                         Some(name) => {
                             if let Some(expected_ty) = field_types.get(name) {
-                                self.unify(expected_ty, &value_ty, &value.span)?;
+                                self.unify(expected_ty, &value_ty, &value.span);
                             } else {
-                                return Err(SoppoError::Type {
+                                self.emit_error(SoppoError::Type {
                                     message: format!(
                                         "Anonymous struct has no field named `{}`",
                                         name
                                     ),
                                     span: value.span,
                                 });
+                                had_error = true;
                             }
                         }
                         None => {
                             // Positional field - match by index
                             if let Some(expected_ty) = field_types_ordered.get(i) {
-                                self.unify(expected_ty, &value_ty, &value.span)?;
+                                self.unify(expected_ty, &value_ty, &value.span);
                             } else {
-                                return Err(SoppoError::Type {
+                                self.emit_error(SoppoError::Type {
                                     message: format!(
                                         "Too many fields in anonymous struct literal (expected {})",
                                         field_defs.len()
                                     ),
                                     span: value.span,
                                 });
+                                had_error = true;
                             }
                         }
                     }
+                }
+
+                if had_error {
+                    return Ok(Type::error());
                 }
 
                 // Build a unique type name for this anonymous struct
@@ -638,7 +771,7 @@ impl Infer {
                 Ok(Type::anon_struct(field_type_list))
             }
 
-            ExprKind::Block(block) => self.infer_block(block),
+            ExprKind::Block(block) => Ok(self.infer_block(block)),
 
             ExprKind::Slice {
                 expr,
@@ -647,20 +780,38 @@ impl Infer {
                 cap,
             } => {
                 // Slicing returns the same type as the sliced expression
-                let expr_ty = self.infer_expr(expr)?;
+                let expr_ty = self.infer_expr(expr);
+
+                let mut had_error = expr_ty.is_error();
 
                 // Check that indices are integers
                 if let Some(l) = low {
-                    let l_ty = self.infer_expr(l)?;
-                    self.unify(&l_ty, &Type::simple("int"), &l.span)?;
+                    let l_ty = self.infer_expr(l);
+                    if !l_ty.is_error() {
+                        self.unify(&l_ty, &Type::simple("int"), &l.span);
+                    } else {
+                        had_error = true;
+                    }
                 }
                 if let Some(h) = high {
-                    let h_ty = self.infer_expr(h)?;
-                    self.unify(&h_ty, &Type::simple("int"), &h.span)?;
+                    let h_ty = self.infer_expr(h);
+                    if !h_ty.is_error() {
+                        self.unify(&h_ty, &Type::simple("int"), &h.span);
+                    } else {
+                        had_error = true;
+                    }
                 }
                 if let Some(c) = cap {
-                    let c_ty = self.infer_expr(c)?;
-                    self.unify(&c_ty, &Type::simple("int"), &c.span)?;
+                    let c_ty = self.infer_expr(c);
+                    if !c_ty.is_error() {
+                        self.unify(&c_ty, &Type::simple("int"), &c.span);
+                    } else {
+                        had_error = true;
+                    }
+                }
+
+                if had_error {
+                    return Ok(Type::error());
                 }
 
                 Ok(expr_ty)
@@ -677,7 +828,10 @@ impl Infer {
                 //
                 // For enum variants: panics if wrong variant (use comma-ok for safe check)
                 // For Go interfaces: panics if wrong type (use comma-ok for safe check)
-                self.infer_expr(expr)?;
+                let inner_ty = self.infer_expr(expr);
+                if inner_ty.is_error() {
+                    return Ok(Type::error());
+                }
 
                 let is_enum_variant = ty.name.contains('.');
 
@@ -701,7 +855,7 @@ impl Infer {
 
             ExprKind::NilAssert { expr } => {
                 // Nil assertion: x.(!nil) - assert the expression is non-nil
-                let ty = self.infer_expr(expr)?;
+                let ty = self.infer_expr_inner(expr)?;
                 let ty = self.substitute(ty);
 
                 // If this is a nilable type with an identifier, mark it as non-nil
@@ -718,7 +872,7 @@ impl Infer {
 
             ExprKind::Paren(inner) => {
                 // Parenthesised expression has the type of its inner expression
-                self.infer_expr(inner)
+                self.infer_expr_inner(inner)
             }
         }
     }
@@ -1025,7 +1179,10 @@ impl Infer {
         }
 
         // Otherwise it's a regular field access
-        let expr_ty = self.infer_expr(field_expr)?;
+        let expr_ty = self.infer_expr(field_expr);
+        if expr_ty.is_error() {
+            return Ok(Type::error());
+        }
         let expr_ty = self.substitute(expr_ty);
 
         // Check for nil dereference on field access
@@ -1044,7 +1201,7 @@ impl Infer {
 
             if is_nullable {
                 let name_for_error = expr_key.unwrap_or_else(|| "expression".to_string());
-                return Err(SoppoError::NilPointer {
+                self.emit_error(SoppoError::NilPointer {
                     name: name_for_error,
                     span: field_expr.span,
                 });
@@ -1295,16 +1452,20 @@ impl Infer {
         if let ExprKind::Ident(name) = &func.kind {
             // close(channel) - closes a channel, returns unit
             if name == "close" && args.len() == 1 {
-                let channel_ty = self.infer_expr(&args[0].1)?;
+                let channel_ty = self.infer_expr(&args[0].1);
+                if channel_ty.is_error() {
+                    return Ok(Type::error());
+                }
                 let channel_ty = self.substitute(channel_ty);
                 // Verify it's a channel type
                 if let Type::Con { sym, .. } = &channel_ty
                     && !sym.name.starts_with("chan ")
                 {
-                    return Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!("close requires a channel argument, got {}", channel_ty),
                         span: args[0].1.span,
                     });
+                    return Ok(Type::error());
                 }
                 return Ok(Type::unit());
             }
@@ -1312,13 +1473,24 @@ impl Infer {
             if name == "make" && !type_args.is_empty() {
                 // make(type, ...) - returns the type
                 // Validate additional arguments are integers (size, capacity)
+                let mut had_error = false;
                 for (_, arg, _) in args {
-                    let arg_ty = self.infer_expr(arg)?;
-                    self.unify(&arg_ty, &Type::simple("int"), &arg.span)?;
+                    let arg_ty = self.infer_expr(arg);
+                    if arg_ty.is_error() {
+                        had_error = true;
+                        continue;
+                    }
+                    self.unify(&arg_ty, &Type::simple("int"), &arg.span);
                 }
                 // Return the type being made (properly resolving type args)
                 let ty = &type_args[0];
-                self.validate_type_arg(ty)?;
+                if let Err(e) = self.validate_type_arg(ty) {
+                    self.emit_error(e);
+                    return Ok(Type::error());
+                }
+                if had_error {
+                    return Ok(Type::error());
+                }
                 return Ok(self.resolve_type(ty));
             }
 
@@ -1326,7 +1498,10 @@ impl Infer {
                 // new(type) - returns *type
                 // Return a pointer to the type
                 let ty = &type_args[0];
-                self.validate_type_arg(ty)?;
+                if let Err(e) = self.validate_type_arg(ty) {
+                    self.emit_error(e);
+                    return Ok(Type::error());
+                }
                 let inner_ty = self.resolve_type(ty);
                 // Use *{type} naming pattern consistent with UnaryOp::Ref
                 let ptr_name = format!("*{}", inner_ty);
@@ -1335,7 +1510,10 @@ impl Infer {
 
             // len(v) - returns length of array, slice, string, map, channel, or variadic
             if name == "len" && args.len() == 1 {
-                let arg_ty = self.infer_expr(&args[0].1)?;
+                let arg_ty = self.infer_expr(&args[0].1);
+                if arg_ty.is_error() {
+                    return Ok(Type::error());
+                }
                 let arg_ty = self.substitute(arg_ty);
                 // Verify it's a valid type for len
                 // Variadic parameters (variadic[T] or ...T) are slices at runtime
@@ -1349,20 +1527,24 @@ impl Infer {
                         || sym.name == "variadic"
                         || sym.name.starts_with("..."));
                 if !valid {
-                    return Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!(
                             "len requires array, slice, string, map, or channel; got {}",
                             arg_ty
                         ),
                         span: args[0].1.span,
                     });
+                    return Ok(Type::error());
                 }
                 return Ok(Type::simple("int"));
             }
 
             // cap(v) - returns capacity of slice, channel, or variadic
             if name == "cap" && args.len() == 1 {
-                let arg_ty = self.infer_expr(&args[0].1)?;
+                let arg_ty = self.infer_expr(&args[0].1);
+                if arg_ty.is_error() {
+                    return Ok(Type::error());
+                }
                 let arg_ty = self.substitute(arg_ty);
                 // Verify it's a valid type for cap
                 // Variadic parameters (variadic[T] or ...T) are slices at runtime
@@ -1374,51 +1556,78 @@ impl Infer {
                         || sym.name == "variadic"
                         || sym.name.starts_with("..."));
                 if !valid {
-                    return Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!("cap requires array, slice, or channel; got {}", arg_ty),
                         span: args[0].1.span,
                     });
+                    return Ok(Type::error());
                 }
                 return Ok(Type::simple("int"));
             }
 
             // append(slice, elems...) - returns the same slice type
             if name == "append" && !args.is_empty() {
-                let slice_ty = self.infer_expr(&args[0].1)?;
+                let slice_ty = self.infer_expr(&args[0].1);
+                if slice_ty.is_error() {
+                    // Still infer remaining args for error collection
+                    for (_, arg, _) in args.iter().skip(1) {
+                        self.infer_expr(arg);
+                    }
+                    return Ok(Type::error());
+                }
                 let slice_ty = self.substitute(slice_ty);
                 // Verify first arg is a slice and extract element type
                 let elem_ty = match Self::extract_slice_element(&slice_ty) {
                     Some(elem) => elem,
                     None => {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!(
                                 "first argument to append must be a slice; got {}",
                                 slice_ty
                             ),
                             span: args[0].1.span,
                         });
+                        // Still infer remaining args for error collection
+                        for (_, arg, _) in args.iter().skip(1) {
+                            self.infer_expr(arg);
+                        }
+                        return Ok(Type::error());
                     }
                 };
                 // Type check remaining arguments against element type
                 // Handle spread: append(a, b...) where b is a slice
+                let mut had_error = false;
                 for (_, arg, is_spread) in args.iter().skip(1) {
-                    let arg_ty = self.infer_expr(arg)?;
+                    let arg_ty = self.infer_expr(arg);
+                    if arg_ty.is_error() {
+                        had_error = true;
+                        continue;
+                    }
                     if *is_spread {
                         // Spread arg: extract element type from slice and unify
                         let spread_elem = Self::extract_slice_element(&arg_ty).unwrap_or(arg_ty);
-                        self.unify(&elem_ty, &spread_elem, &arg.span)?;
+                        self.unify(&elem_ty, &spread_elem, &arg.span);
                     } else {
-                        self.unify(&elem_ty, &arg_ty, &arg.span)?;
+                        self.unify(&elem_ty, &arg_ty, &arg.span);
                     }
+                }
+                if had_error {
+                    return Ok(Type::error());
                 }
                 return Ok(slice_ty);
             }
 
             // copy(dst, src) - returns int (number of elements copied)
             if name == "copy" && args.len() == 2 {
-                let dst_ty = self.infer_expr(&args[0].1)?;
+                let dst_ty = self.infer_expr(&args[0].1);
+                let src_ty = self.infer_expr(&args[1].1);
+
+                // If either arg has error, return error
+                if dst_ty.is_error() || src_ty.is_error() {
+                    return Ok(Type::error());
+                }
+
                 let dst_ty = self.substitute(dst_ty);
-                let src_ty = self.infer_expr(&args[1].1)?;
                 let src_ty = self.substitute(src_ty);
                 // Both must be slices (or src can be string for []byte)
                 let dst_is_slice = Self::is_slice_type(&dst_ty);
@@ -1426,62 +1635,77 @@ impl Infer {
                 let src_is_string =
                     matches!(&src_ty, Type::Con { sym, .. } if sym.name == "string");
 
+                let mut had_error = false;
                 if !dst_is_slice {
-                    return Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!("first argument to copy must be a slice; got {}", dst_ty),
                         span: args[0].1.span,
                     });
+                    had_error = true;
                 }
                 if !src_is_slice && !src_is_string {
-                    return Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!(
                             "second argument to copy must be a slice or string; got {}",
                             src_ty
                         ),
                         span: args[1].1.span,
                     });
+                    had_error = true;
                 }
                 // For string source, dst must be []byte
-                if src_is_string
+                if !had_error
+                    && src_is_string
                     && let Type::Con { sym, .. } = &dst_ty
                     && sym.name != "[]byte"
                     && sym.name != "[]uint8"
                 {
-                    return Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!("cannot copy string to {}; need []byte", dst_ty),
                         span: args[0].1.span,
                     });
+                    had_error = true;
+                }
+                if had_error {
+                    return Ok(Type::error());
                 }
                 return Ok(Type::simple("int"));
             }
 
             // delete(map, key) - deletes key from map, returns unit
             if name == "delete" && args.len() == 2 {
-                let map_ty = self.infer_expr(&args[0].1)?;
+                let map_ty = self.infer_expr(&args[0].1);
+                let arg_key_ty = self.infer_expr(&args[1].1);
+
+                // If either arg has error, return error
+                if map_ty.is_error() || arg_key_ty.is_error() {
+                    return Ok(Type::error());
+                }
+
                 let map_ty = self.substitute(map_ty);
                 // Verify first arg is a map and extract key type
                 let key_ty = match Self::extract_map_elements(&map_ty) {
                     Some((k, _)) => k,
                     None => {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!(
                                 "first argument to delete must be a map; got {}",
                                 map_ty
                             ),
                             span: args[0].1.span,
                         });
+                        return Ok(Type::error());
                     }
                 };
                 // Type check key argument
-                let arg_key_ty = self.infer_expr(&args[1].1)?;
-                self.unify(&key_ty, &arg_key_ty, &args[1].1.span)?;
+                self.unify(&key_ty, &arg_key_ty, &args[1].1.span);
                 return Ok(Type::unit());
             }
 
             // panic(v) - panics with value, returns never (diverges)
             if name == "panic" && args.len() == 1 {
                 // panic accepts any type
-                self.infer_expr(&args[0].1)?;
+                self.infer_expr(&args[0].1);
                 return Ok(Type::never());
             }
 
@@ -1493,23 +1717,29 @@ impl Infer {
             // print and println - variadic, accept any types, return unit
             if name == "print" || name == "println" {
                 for (_, arg, _) in args {
-                    self.infer_expr(arg)?;
+                    self.infer_expr(arg);
                 }
                 return Ok(Type::unit());
             }
 
             // complex(r, i) - creates complex number from two float64
             if name == "complex" && args.len() == 2 {
-                let r_ty = self.infer_expr(&args[0].1)?;
-                let i_ty = self.infer_expr(&args[1].1)?;
-                self.unify(&r_ty, &Type::simple("float64"), &args[0].1.span)?;
-                self.unify(&i_ty, &Type::simple("float64"), &args[1].1.span)?;
+                let r_ty = self.infer_expr(&args[0].1);
+                let i_ty = self.infer_expr(&args[1].1);
+                if r_ty.is_error() || i_ty.is_error() {
+                    return Ok(Type::error());
+                }
+                self.unify(&r_ty, &Type::simple("float64"), &args[0].1.span);
+                self.unify(&i_ty, &Type::simple("float64"), &args[1].1.span);
                 return Ok(Type::simple("complex128"));
             }
 
             // real(c) - extracts real part of complex number
             if name == "real" && args.len() == 1 {
-                let c_ty = self.infer_expr(&args[0].1)?;
+                let c_ty = self.infer_expr(&args[0].1);
+                if c_ty.is_error() {
+                    return Ok(Type::error());
+                }
                 let c_ty = self.substitute(c_ty);
                 match &c_ty {
                     Type::Con { sym, .. }
@@ -1523,17 +1753,21 @@ impl Infer {
                         return Ok(Type::simple(result));
                     }
                     _ => {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!("real requires complex argument; got {}", c_ty),
                             span: args[0].1.span,
                         });
+                        return Ok(Type::error());
                     }
                 }
             }
 
             // imag(c) - extracts imaginary part of complex number
             if name == "imag" && args.len() == 1 {
-                let c_ty = self.infer_expr(&args[0].1)?;
+                let c_ty = self.infer_expr(&args[0].1);
+                if c_ty.is_error() {
+                    return Ok(Type::error());
+                }
                 let c_ty = self.substitute(c_ty);
                 match &c_ty {
                     Type::Con { sym, .. }
@@ -1547,10 +1781,11 @@ impl Infer {
                         return Ok(Type::simple(result));
                     }
                     _ => {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!("imag requires complex argument; got {}", c_ty),
                             span: args[0].1.span,
                         });
+                        return Ok(Type::error());
                     }
                 }
             }
@@ -1563,17 +1798,18 @@ impl Infer {
             // This is a type conversion, not a function call
             // Type conversions take exactly one argument
             if args.len() != 1 {
-                return Err(SoppoError::Type {
+                self.emit_error(SoppoError::Type {
                     message: format!(
                         "Type conversion requires exactly 1 argument, but got {}",
                         args.len()
                     ),
                     span: *expr_span,
                 });
+                return Ok(Type::error());
             }
 
             // Infer the argument type (we don't need to use it, just check it's valid)
-            self.infer_expr(&args[0].1)?;
+            self.infer_expr(&args[0].1);
 
             // Return the target type
             return Ok(Type::simple(type_name));
@@ -1611,9 +1847,14 @@ impl Infer {
                     );
 
                     // Found the function - infer args and check against signature
-                    let mut arg_tys = Vec::new();
+                    let mut arg_tys: Vec<(Option<Type>, Span)> = Vec::new();
                     for (_, arg, _) in args {
-                        arg_tys.push((self.infer_expr_narrowed(arg)?, arg.span));
+                        let ty = self.infer_expr(arg);
+                        if ty.is_error() {
+                            arg_tys.push((None, arg.span));
+                        } else {
+                            arg_tys.push((Some(ty), arg.span));
+                        }
                     }
 
                     // Extract param types and return type from func_ty
@@ -1625,7 +1866,7 @@ impl Infer {
                     {
                         // Check argument count
                         if arg_tys.len() != param_tys.len() {
-                            return Err(SoppoError::Type {
+                            self.emit_error(SoppoError::Type {
                                 message: format!(
                                     "Function `{}` has {} arguments, but expected {}",
                                     name,
@@ -1634,13 +1875,16 @@ impl Infer {
                                 ),
                                 span: func.span,
                             });
+                            return Ok(Type::error());
                         }
 
-                        // Check each argument type
+                        // Check each argument type (skip those that had errors)
                         for ((_, param_ty), (arg_ty, arg_span)) in
                             param_tys.iter().zip(arg_tys.iter())
                         {
-                            self.unify(param_ty, arg_ty, arg_span)?;
+                            if let Some(arg_ty) = arg_ty {
+                                self.unify(param_ty, arg_ty, arg_span);
+                            }
                         }
 
                         return Ok(self.substitute(ret.as_ref().clone()));
@@ -1666,23 +1910,25 @@ impl Infer {
                     );
 
                     if args.len() != 1 {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!(
                                 "Type conversion requires exactly 1 argument, but got {}",
                                 args.len()
                             ),
                             span: *expr_span,
                         });
+                        return Ok(Type::error());
                     }
-                    self.infer_expr(&args[0].1)?;
+                    self.infer_expr(&args[0].1);
                     return Ok(ty);
                 }
 
                 // Not found in Soppo module
-                return Err(SoppoError::Type {
+                self.emit_error(SoppoError::Type {
                     message: format!("`{}` not found in Soppo module `{}`", name, pkg_name),
                     span: func.span,
                 });
+                return Ok(Type::error());
             }
 
             // Look up the type from a Go package
@@ -1703,17 +1949,18 @@ impl Infer {
 
                 // This is a type conversion
                 if args.len() != 1 {
-                    return Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!(
                             "Type conversion requires exactly 1 argument, but got {}",
                             args.len()
                         ),
                         span: *expr_span,
                     });
+                    return Ok(Type::error());
                 }
 
                 // Infer the argument type (we don't need to use it, just check it's valid)
-                self.infer_expr(&args[0].1)?;
+                self.infer_expr(&args[0].1);
 
                 // Return the target type
                 return Ok(ty);
@@ -1721,7 +1968,14 @@ impl Infer {
         }
 
         // Regular function call
-        let func_ty = self.infer_expr(func)?;
+        let func_ty = self.infer_expr(func);
+        if func_ty.is_error() {
+            // Still infer all arguments for error collection
+            for (_, arg, _) in args {
+                self.infer_expr(arg);
+            }
+            return Ok(Type::error());
+        }
         let func_ty = self.substitute(func_ty);
 
         // If this is a generic function call, instantiate it
@@ -1736,22 +1990,29 @@ impl Infer {
                 if !generics.is_empty() {
                     // Build substitution map: generic param name -> type
                     let mut subst = std::collections::HashMap::new();
+                    let mut had_error = false;
                     if !type_args.is_empty() {
                         // Explicit type args provided: validate constraints and use them
                         for (generic_param, type_arg) in generics.iter().zip(type_args.iter()) {
                             // Validate the type argument is a real type
-                            self.validate_type_arg(type_arg)?;
+                            if let Err(e) = self.validate_type_arg(type_arg) {
+                                self.emit_error(e);
+                                had_error = true;
+                                continue;
+                            }
 
                             let concrete_ty = self.resolve_type(type_arg);
 
                             // Validate constraint
                             if !generic_param.satisfies(&concrete_ty) {
-                                return Err(SoppoError::ConstraintNotSatisfied {
+                                self.emit_error(SoppoError::ConstraintNotSatisfied {
                                     ty: concrete_ty.to_string(),
                                     constraint: generic_param.constraint.clone(),
                                     hint: Self::constraint_hint(&generic_param.constraint),
                                     span: type_arg.span,
                                 });
+                                had_error = true;
+                                continue;
                             }
 
                             subst.insert(generic_param.name.clone(), concrete_ty);
@@ -1762,6 +2023,13 @@ impl Infer {
                             let ty_var = self.fresh_ty_var();
                             subst.insert(generic_param.name.clone(), ty_var);
                         }
+                    }
+                    if had_error {
+                        // Still infer all arguments for error collection
+                        for (_, arg, _) in args {
+                            self.infer_expr(arg);
+                        }
+                        return Ok(Type::error());
                     }
                     // Instantiate the function type
                     Self::instantiate_generic_type(&func_ty, &subst)
@@ -1896,11 +2164,16 @@ impl Infer {
         };
 
         // Infer argument types with their spans, nil check, and spread flag
-        // Use infer_expr_narrowed to apply nil-state narrowing
-        let mut arg_tys = Vec::new();
+        // Use infer_expr_narrowed for nil-state narrowing with error-collecting
+        let mut arg_tys: Vec<(Option<Type>, Span, bool, bool)> = Vec::new();
         for (arg, span, is_spread) in &ordered_args {
             let is_nil = matches!(arg.kind, ExprKind::Nil);
-            arg_tys.push((self.infer_expr_narrowed(arg)?, *span, is_nil, *is_spread));
+            let ty = self.infer_expr_narrowed(arg);
+            if ty.is_error() {
+                arg_tys.push((None, *span, is_nil, *is_spread));
+            } else {
+                arg_tys.push((Some(ty), *span, is_nil, *is_spread));
+            }
         }
 
         // Check function call with detailed error spans
@@ -1910,15 +2183,6 @@ impl Infer {
                 ret,
                 ..
             } => {
-                // Helper to check nil arg against param type
-                let check_nil_arg = |param_ty: &Type, arg_span: Span, is_nil: bool| -> Result<()> {
-                    if is_nil && let Some(err) = Self::check_nil_to_non_nilable(param_ty, arg_span)
-                    {
-                        return Err(err);
-                    }
-                    Ok(())
-                };
-
                 // Check if last param is variadic
                 let has_variadic = param_tys.last().is_some_and(|(_, last_ty)| {
                     matches!(last_ty, Type::Con { sym, .. } if sym.name == "variadic" || sym.name.starts_with("..."))
@@ -1935,7 +2199,7 @@ impl Infer {
 
                     // Check we have at least the fixed params
                     if arg_tys.len() < fixed_params.len() {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!(
                                 "Function has {} arguments, but expected at least {}",
                                 arg_tys.len(),
@@ -1943,45 +2207,64 @@ impl Infer {
                             ),
                             span: func.span,
                         });
+                        return Ok(Type::error());
                     }
 
-                    // Check fixed params
+                    // Check fixed params (skip those with inference errors)
                     for ((_, param_ty), (arg_ty, arg_span, is_nil, _is_spread)) in
                         fixed_params.iter().zip(arg_tys.iter())
                     {
-                        check_nil_arg(param_ty, *arg_span, *is_nil)?;
-                        self.unify(param_ty, arg_ty, arg_span)?;
+                        if let Some(arg_ty) = arg_ty {
+                            // Check nil assignment
+                            if *is_nil
+                                && let Some(err) =
+                                    Self::check_nil_to_non_nilable(param_ty, *arg_span)
+                            {
+                                self.emit_error(err);
+                            }
+                            self.unify(param_ty, arg_ty, arg_span);
+                        }
                     }
 
-                    // Check variadic args
+                    // Check variadic args (skip those with inference errors)
                     for (arg_ty, arg_span, is_nil, is_spread) in
                         arg_tys.iter().skip(fixed_params.len())
                     {
-                        // For "any" type (or nullable any), any argument is valid
-                        let is_any = match &variadic_elem {
-                            Type::Con { sym, .. } => sym.name == "any",
-                            _ => false,
-                        };
-                        if !is_any {
-                            if *is_spread {
-                                // Spread arg: extract element type from slice
-                                // arg_ty should be []T or ?[]T, extract T
-                                let elem_ty =
-                                    Self::extract_slice_element(arg_ty).unwrap_or_else(|| {
-                                        // If not a slice, unify directly (will fail with good error)
-                                        arg_ty.clone()
-                                    });
-                                self.unify(&variadic_elem, &elem_ty, arg_span)?;
-                            } else {
-                                check_nil_arg(&variadic_elem, *arg_span, *is_nil)?;
-                                self.unify(&variadic_elem, arg_ty, arg_span)?;
+                        if let Some(arg_ty) = arg_ty {
+                            // For "any" type (or nullable any), any argument is valid
+                            let is_any = match &variadic_elem {
+                                Type::Con { sym, .. } => sym.name == "any",
+                                _ => false,
+                            };
+                            if !is_any {
+                                if *is_spread {
+                                    // Spread arg: extract element type from slice
+                                    // arg_ty should be []T or ?[]T, extract T
+                                    let elem_ty = Self::extract_slice_element(arg_ty)
+                                        .unwrap_or_else(|| {
+                                            // If not a slice, unify directly (will fail with good error)
+                                            arg_ty.clone()
+                                        });
+                                    self.unify(&variadic_elem, &elem_ty, arg_span);
+                                } else {
+                                    // Check nil assignment
+                                    if *is_nil
+                                        && let Some(err) = Self::check_nil_to_non_nilable(
+                                            &variadic_elem,
+                                            *arg_span,
+                                        )
+                                    {
+                                        self.emit_error(err);
+                                    }
+                                    self.unify(&variadic_elem, arg_ty, arg_span);
+                                }
                             }
                         }
                     }
                 } else {
                     // Non-variadic: exact arg count required
                     if arg_tys.len() != param_tys.len() {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!(
                                 "Function has {} arguments, but expected {}",
                                 arg_tys.len(),
@@ -1989,14 +2272,23 @@ impl Infer {
                             ),
                             span: func.span,
                         });
+                        return Ok(Type::error());
                     }
 
-                    // Check each argument type
+                    // Check each argument type (skip those with inference errors)
                     for ((_, param_ty), (arg_ty, arg_span, is_nil, _is_spread)) in
                         param_tys.iter().zip(arg_tys.iter())
                     {
-                        check_nil_arg(param_ty, *arg_span, *is_nil)?;
-                        self.unify(param_ty, arg_ty, arg_span)?;
+                        if let Some(arg_ty) = arg_ty {
+                            // Check nil assignment
+                            if *is_nil
+                                && let Some(err) =
+                                    Self::check_nil_to_non_nilable(param_ty, *arg_span)
+                            {
+                                self.emit_error(err);
+                            }
+                            self.unify(param_ty, arg_ty, arg_span);
+                        }
                     }
                 }
 
@@ -2004,22 +2296,30 @@ impl Infer {
             }
             Type::Var(_) => {
                 // Function type is unknown, use standard unification
+                // Filter out arguments that had inference errors
                 let result_ty = self.fresh_ty_var();
-                let arg_types: Vec<Type> = arg_tys.into_iter().map(|(ty, _, _, _)| ty).collect();
+                let arg_types: Vec<Type> =
+                    arg_tys.into_iter().filter_map(|(ty, _, _, _)| ty).collect();
                 let expected_func_ty = Type::fun(arg_types, result_ty.clone());
-                self.unify(&func_ty, &expected_func_ty, expr_span)?;
+                self.unify(&func_ty, &expected_func_ty, expr_span);
                 Ok(self.substitute(result_ty))
             }
-            _ => Err(SoppoError::Type {
-                message: format!("Cannot call non-function type `{}`", func_ty),
-                span: func.span,
-            }),
+            _ => {
+                self.emit_error(SoppoError::Type {
+                    message: format!("Cannot call non-function type `{}`", func_ty),
+                    span: func.span,
+                });
+                Ok(Type::error())
+            }
         }
     }
 
     /// Infer the type of a unary expression
     fn infer_unary(&mut self, op: &UnaryOp, operand: &Expr) -> Result<Type> {
-        let operand_ty = self.infer_expr(operand)?;
+        let operand_ty = self.infer_expr(operand);
+        if operand_ty.is_error() {
+            return Ok(Type::error());
+        }
 
         match op {
             UnaryOp::Neg => {
@@ -2028,7 +2328,7 @@ impl Infer {
             }
             UnaryOp::Not => {
                 // !x: operand must be bool, result is bool
-                self.unify(&operand_ty, &Type::simple("bool"), &operand.span)?;
+                self.unify(&operand_ty, &Type::simple("bool"), &operand.span);
                 Ok(Type::simple("bool"))
             }
             UnaryOp::Ref => {
@@ -2054,7 +2354,7 @@ impl Infer {
 
                     if is_nullable {
                         let name_for_error = expr_key.unwrap_or_else(|| "expression".to_string());
-                        return Err(SoppoError::NilPointer {
+                        self.emit_error(SoppoError::NilPointer {
                             name: name_for_error,
                             span: operand.span,
                         });
@@ -2120,7 +2420,7 @@ mod tests {
         let mut parser = Parser::new(source, FileId(0));
         let expr = parser.parse_expr()?;
         let mut infer = Infer::new().expect("Failed to create Infer");
-        let ty = infer.infer_expr(&expr)?;
+        let ty = infer.infer_expr_inner(&expr)?;
         Ok(infer.substitute(ty))
     }
 
@@ -2162,8 +2462,12 @@ mod tests {
 
     #[test]
     fn test_type_error_arithmetic() {
-        let result = infer_expr_helper(r#"1 + "hello""#);
-        assert!(result.is_err());
+        let mut parser = Parser::new(r#"1 + "hello""#, FileId(0));
+        let expr = parser.parse_expr().unwrap();
+        let mut infer = Infer::new().expect("Failed to create Infer");
+        let ty = infer.infer_expr_inner(&expr).unwrap();
+        // With error-collecting, we get Type::error() and errors are collected
+        assert!(ty.is_error() || infer.has_errors());
     }
 
     #[test]
@@ -2174,7 +2478,7 @@ mod tests {
         let expr = parser.parse_expr().unwrap();
 
         let mut infer = Infer::new().expect("Failed to create Infer");
-        let ty = infer.infer_expr(&expr).unwrap();
+        let ty = infer.infer_expr_inner(&expr).unwrap();
 
         // Should be array[int]
         if let Type::Con { sym, args, .. } = ty {

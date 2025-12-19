@@ -301,20 +301,70 @@ fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Resul
 
     // Pass 1: Register all type definitions and function signatures
     for decl in &file.decls {
-        register_decl(infer, decl, source, filename)?;
+        if let Err(e) = register_decl_inner(infer, decl) {
+            infer.emit_error(e);
+        }
     }
 
     // Pass 2: Infer and check function bodies
     for decl in &file.decls {
-        infer_decl(infer, decl, source, filename)?;
+        if let Err(e) = infer_decl_inner(infer, decl) {
+            infer.emit_error(e);
+        }
     }
 
     // Check for unused imports
-    infer.check_unused_imports().map_err(|e| {
-        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
-    })?;
+    if let Err(e) = infer.check_unused_imports() {
+        infer.emit_error(e);
+    }
+
+    if infer.has_errors() {
+        let mut errors = infer.take_errors();
+        let source_code = NamedSource::new(filename, source.to_string());
+
+        if errors.len() == 1 {
+            return Err(miette::Report::from(errors.remove(0)).with_source_code(source_code));
+        } else if let Some(multi_err) = crate::error::MultiError::new(errors) {
+            return Err(miette::Report::from(multi_err).with_source_code(source_code));
+        }
+    }
 
     Ok(file)
+}
+
+/// Register a declaration (pass 1) - returns SoppoError for collection
+fn register_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::Result<()> {
+    match decl {
+        Decl::Const(const_decl) => {
+            infer.infer_const_decl(const_decl)?;
+        }
+        Decl::ConstBlock(consts) => {
+            for const_decl in consts {
+                infer.infer_const_decl(const_decl)?;
+            }
+        }
+        Decl::Type(type_decl) => {
+            infer.infer_type_decl(type_decl)?;
+        }
+        Decl::Var(var_decl) => {
+            infer.infer_var_decl(var_decl)?;
+        }
+        Decl::Func(func) => {
+            infer.register_func_signature(func)?;
+        }
+    }
+    Ok(())
+}
+
+/// Infer a declaration body (pass 2) - returns SoppoError for collection
+fn infer_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::Result<()> {
+    match decl {
+        Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) | Decl::Type(_) => {}
+        Decl::Func(func) => {
+            infer.infer_func_decl(func)?;
+        }
+    }
+    Ok(())
 }
 
 fn register_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {

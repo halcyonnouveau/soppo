@@ -148,6 +148,7 @@ impl GenericParam {
             Type::Func { .. } => false, // Functions are not comparable
             Type::Var(_) => true,       // Type variables are assumed comparable
             Type::Never => true,
+            Type::Error => true, // Error types are assumed comparable (suppress cascading errors)
         }
     }
 }

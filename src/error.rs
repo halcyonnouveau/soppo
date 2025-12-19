@@ -239,3 +239,67 @@ fn format_cycle(cycle: &[(String, String)]) -> String {
 }
 
 pub type Result<T> = std::result::Result<T, SoppoError>;
+
+/// Multiple errors collected during type checking.
+#[derive(Debug)]
+pub struct MultiError {
+    first: SoppoError,
+    rest: Vec<SoppoError>,
+}
+
+impl std::fmt::Display for MultiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Display as the first error's message
+        write!(f, "{}", self.first)
+    }
+}
+
+impl std::error::Error for MultiError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl Diagnostic for MultiError {
+    fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        // Use the first error's code
+        self.first.code()
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        self.first.labels()
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        self.first.help()
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        if self.rest.is_empty() {
+            None
+        } else {
+            Some(Box::new(self.rest.iter().map(|e| e as &dyn Diagnostic)))
+        }
+    }
+}
+
+impl MultiError {
+    pub fn new(mut errors: Vec<SoppoError>) -> Option<Self> {
+        if errors.is_empty() {
+            return None;
+        }
+        let first = errors.remove(0);
+        Some(MultiError {
+            first,
+            rest: errors,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        1 + self.rest.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        false // MultiError always has at least one error
+    }
+}

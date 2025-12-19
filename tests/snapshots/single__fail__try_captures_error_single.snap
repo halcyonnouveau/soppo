@@ -14,3 +14,15 @@ Error: soppo::try_captures_error
     ╰────
   help: the `?` operator handles errors automatically; use `result, err :=
         expr` without `?` to capture the error
+
+Error: soppo::unused_variable
+
+  × Variable `err` is declared but not used
+    ╭─[try_captures_error_single.sop:9:2]
+  8 │     // This should fail: trying to assign error-only return with ?
+  9 │     err := bar() ?
+    ·     ─┬─
+    ·      ╰── unused variable
+ 10 │ }
+    ╰────
+  help: remove the variable, or use `_ = err` to suppress this error

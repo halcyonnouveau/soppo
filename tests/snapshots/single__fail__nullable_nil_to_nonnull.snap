@@ -1,5 +1,5 @@
 ---
-source: tests/fail.rs
+source: tests/single.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::nil_to_non_nilable
@@ -13,3 +13,15 @@ Error: soppo::nil_to_non_nilable
  10 │ }
     ╰────
   help: use `?*User` for a nilable type
+
+Error: soppo::unused_variable
+
+  × Variable `user` is declared but not used
+    ╭─[nullable_nil_to_nonnull.sop:9:9]
+  8 │     // ERROR: Cannot assign nil to non-nullable pointer type
+  9 │     var user *User = nil
+    ·         ──┬─
+    ·           ╰── unused variable
+ 10 │ }
+    ╰────
+  help: remove the variable, or use `_ = user` to suppress this error

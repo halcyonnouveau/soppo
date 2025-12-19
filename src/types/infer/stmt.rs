@@ -95,18 +95,32 @@ pub(super) fn extract_nil_checks(expr: &Expr) -> Vec<NilCheck> {
 }
 
 impl Infer {
-    /// Infer the type of a statement
-    /// Returns the type of the statement (unit for most, or the type of the expression)
-    pub fn infer_stmt(&mut self, stmt: &Stmt) -> Result<Type> {
+    /// Infer the type of a statement (internal version that returns Result).
+    ///
+    /// **Prefer `infer_stmt`** which collects errors and returns `Type::Error` on failure.
+    /// This version should only be used when you need to explicitly check if inference failed.
+    ///
+    /// Returns the type of the statement (unit for most, or the type of the expression).
+    pub fn infer_stmt_inner(&mut self, stmt: &Stmt) -> Result<Type> {
         match &stmt.kind {
             StmtKind::Decl { ident, value } => {
-                let value_ty = self.infer_expr(value)?;
+                // Use infer_expr_or_error to collect errors and continue with Type::Error
+                let value_ty = self.infer_expr(value);
                 let value_ty_sub = self.substitute(value_ty.clone());
 
-                // Check for generic enum variants without type args (can't infer from context)
-                self.check_generic_enum_needs_type_args(value)?;
+                // Check for generic enum variants without type args (skip if already error)
+                if !value_ty.is_error()
+                    && let Err(e) = self.check_generic_enum_needs_type_args(value)
+                {
+                    self.emit_error(e);
+                }
 
-                self.insert_var(ident.name.clone(), value_ty.clone(), Some(ident.span))?;
+                // Insert variable even if value_ty is Error to prevent cascading errors
+                if let Err(e) =
+                    self.insert_var(ident.name.clone(), value_ty.clone(), Some(ident.span))
+                {
+                    self.emit_error(e);
+                }
 
                 // Record variable definition for LSP
                 self.record_symbol(
@@ -122,10 +136,12 @@ impl Infer {
                     },
                 );
 
-                // Track nil state for pointer types
-                self.update_nil_state_for_assignment(&ident.name, value, &value_ty_sub);
-                // Track variant state for enum types
-                self.update_variant_state_for_assignment(&ident.name, value);
+                // Track nil state for pointer types (only if not error type)
+                if !value_ty_sub.is_error() {
+                    self.update_nil_state_for_assignment(&ident.name, value, &value_ty_sub);
+                    // Track variant state for enum types
+                    self.update_variant_state_for_assignment(&ident.name, value);
+                }
                 Ok(Type::unit())
             }
 
@@ -140,18 +156,46 @@ impl Infer {
                     // Check for comma-ok idiom: v, ok := expr
                     // Applies to: type assertions, map access, channel receive
                     if names.len() == 2
-                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)?
+                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)
                     {
-                        // Use Go's short decl semantics - at least one var must be new
+                        // Check if sub-expression inference failed
+                        if value_ty.is_error() {
+                            for ident in names {
+                                if let Err(e) = self.insert_var(
+                                    ident.name.clone(),
+                                    Type::error(),
+                                    Some(ident.span),
+                                ) {
+                                    self.emit_error(e);
+                                }
+                            }
+                            return Ok(Type::unit());
+                        }
                         let vars = vec![
                             (names[0].name.clone(), value_ty, Some(names[0].span)),
                             (names[1].name.clone(), ok_ty, Some(names[1].span)),
                         ];
-                        self.insert_short_decl_vars(&vars)?;
+                        if let Err(e) = self.insert_short_decl_vars(&vars) {
+                            self.emit_error(e);
+                        }
+                        return Ok(Type::unit());
+                    }
+                    // None = not a comma-ok expression, continue to tuple handling
+
+                    let value_ty = self.infer_expr(value);
+
+                    // If expression failed, insert vars with Error type to prevent cascading
+                    if value_ty.is_error() {
+                        for ident in names {
+                            if let Err(e) =
+                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
+                            {
+                                self.emit_error(e);
+                            }
+                        }
                         return Ok(Type::unit());
                     }
 
-                    let value_ty = self.infer_expr(value)?;
                     let value_ty = self.substitute(value_ty);
 
                     // The value should be a tuple type with matching arity
@@ -169,7 +213,9 @@ impl Infer {
                             .zip(args.iter())
                             .map(|(ident, ty)| (ident.name.clone(), ty.clone(), Some(ident.span)))
                             .collect();
-                        self.insert_short_decl_vars(&vars)?;
+                        if let Err(e) = self.insert_short_decl_vars(&vars) {
+                            self.emit_error(e);
+                        }
 
                         // Track error companions: if last return is error, other returns are companions
                         // This enables narrowing like: `resp, err := f(); if err != nil { return }`
@@ -189,23 +235,33 @@ impl Infer {
                         return Ok(Type::unit());
                     }
 
-                    // Not a tuple type or wrong arity
-                    Err(SoppoError::Type {
+                    // Not a tuple type or wrong arity - emit error but still define vars
+                    self.emit_error(SoppoError::Type {
                         message: format!(
                             "Cannot unpack {} values from type `{}`",
                             names.len(),
                             value_ty
                         ),
                         span: value.span,
-                    })
+                    });
+                    for ident in names {
+                        if let Err(e) =
+                            self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
+                        {
+                            self.emit_error(e);
+                        }
+                    }
+                    Ok(Type::unit())
                 } else {
                     // a, b := expr1, expr2 (one value per name)
                     let mut vars = Vec::with_capacity(names.len());
                     for (ident, value) in names.iter().zip(values.iter()) {
-                        let value_ty = self.infer_expr(value)?;
+                        let value_ty = self.infer_expr(value);
                         vars.push((ident.name.clone(), value_ty, Some(ident.span)));
                     }
-                    self.insert_short_decl_vars(&vars)?;
+                    if let Err(e) = self.insert_short_decl_vars(&vars) {
+                        self.emit_error(e);
+                    }
                     Ok(Type::unit())
                 }
             }
@@ -225,12 +281,15 @@ impl Infer {
                         if matches!(expr.kind, ExprKind::Nil)
                             && let Some(err) = Self::check_nil_to_non_nilable(&declared_ty, t.span)
                         {
-                            return Err(err);
+                            self.emit_error(err);
+                            (Type::error(), Some(expr))
+                        } else {
+                            let value_ty = self.infer_expr(expr);
+                            if !value_ty.is_error() {
+                                self.unify(&declared_ty, &value_ty, &expr.span);
+                            }
+                            (declared_ty, Some(expr))
                         }
-
-                        let value_ty = self.infer_expr(expr)?;
-                        self.unify(&declared_ty, &value_ty, &expr.span)?;
-                        (declared_ty, Some(expr))
                     }
                     (Some(t), None) => {
                         // var x type: use declared type (zero value)
@@ -239,31 +298,39 @@ impl Infer {
                         // Check: non-nilable types require initialisation
                         // Zero value for pointer/slice/map/etc is nil, which violates non-nilable
                         if declared_ty.is_nilable_kind() && !declared_ty.is_nullable() {
-                            return Err(SoppoError::NonNilableNoInit {
+                            self.emit_error(SoppoError::NonNilableNoInit {
                                 ty: declared_ty.to_string(),
                                 span: stmt.span,
                             });
+                            (Type::error(), None)
+                        } else {
+                            (declared_ty, None)
                         }
-
-                        (declared_ty, None)
                     }
                     (None, Some(expr)) => {
                         // var x = value: infer from value
-                        let ty = self.infer_expr(expr)?;
+                        let ty = self.infer_expr(expr);
                         (ty, Some(expr))
                     }
                     (None, None) => {
                         // var x: error (should be caught by parser)
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message:
                                 "Variable declaration requires either a type or an initialiser"
                                     .to_string(),
                             span: stmt.span,
                         });
+                        (Type::error(), None)
                     }
                 };
                 let var_ty_sub = self.substitute(var_ty.clone());
-                self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))?;
+
+                // Insert variable even if var_ty is Error to prevent cascading errors
+                if let Err(e) =
+                    self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))
+                {
+                    self.emit_error(e);
+                }
 
                 // Record variable definition for LSP
                 self.record_symbol(
@@ -279,12 +346,17 @@ impl Infer {
                     },
                 );
 
-                // Track nil state for nilable types
-                if let Some(expr) = init_expr {
-                    self.update_nil_state_for_assignment(&ident.name, expr, &var_ty_sub);
-                } else if Self::is_nilable_type(&var_ty_sub) {
-                    // Zero-initialized nilable types are nil
-                    self.set_nil_state(ident.name.clone(), crate::types::ty::Nullability::Nullable);
+                // Track nil state for nilable types (only if not error type)
+                if !var_ty_sub.is_error() {
+                    if let Some(expr) = init_expr {
+                        self.update_nil_state_for_assignment(&ident.name, expr, &var_ty_sub);
+                    } else if Self::is_nilable_type(&var_ty_sub) {
+                        // Zero-initialised nilable types are nil
+                        self.set_nil_state(
+                            ident.name.clone(),
+                            crate::types::ty::Nullability::Nullable,
+                        );
+                    }
                 }
                 Ok(Type::unit())
             }
@@ -301,17 +373,26 @@ impl Infer {
 
                 if values.is_empty() {
                     // var a, b, c type (zero values)
-                    let declared_ty =
-                        ty.as_ref()
-                            .map(Type::from_ast)
-                            .ok_or_else(|| SoppoError::Type {
+                    let declared_ty = match ty.as_ref().map(Type::from_ast) {
+                        Some(t) => t,
+                        None => {
+                            self.emit_error(SoppoError::Type {
                                 message:
                                     "Multi-variable declaration without values requires a type"
                                         .to_string(),
                                 span: stmt.span,
-                            })?;
+                            });
+                            Type::error()
+                        }
+                    };
                     for ident in names {
-                        self.insert_var(ident.name.clone(), declared_ty.clone(), Some(ident.span))?;
+                        if let Err(e) = self.insert_var(
+                            ident.name.clone(),
+                            declared_ty.clone(),
+                            Some(ident.span),
+                        ) {
+                            self.emit_error(e);
+                        }
                     }
                 } else if values.len() == 1 && names.len() > 1 {
                     // var a, b = f() (multi-return unpacking)
@@ -320,23 +401,58 @@ impl Infer {
                     // Check for comma-ok idiom: v, ok := expr
                     // Applies to: type assertions, map access, channel receive
                     if names.len() == 2
-                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)?
+                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)
                     {
+                        // Check if sub-expression inference failed
+                        if value_ty.is_error() {
+                            for ident in names {
+                                if let Err(e) = self.insert_var(
+                                    ident.name.clone(),
+                                    Type::error(),
+                                    Some(ident.span),
+                                ) {
+                                    self.emit_error(e);
+                                }
+                            }
+                            return Ok(Type::unit());
+                        }
                         // First variable gets the value type
                         let var_ty = if let Some(t) = ty {
                             let declared_ty = Type::from_ast(t);
-                            self.unify(&declared_ty, &value_ty, &value.span)?;
+                            self.unify(&declared_ty, &value_ty, &value.span);
                             declared_ty
                         } else {
                             value_ty
                         };
-                        self.insert_var(names[0].name.clone(), var_ty, Some(names[0].span))?;
+                        if let Err(e) =
+                            self.insert_var(names[0].name.clone(), var_ty, Some(names[0].span))
+                        {
+                            self.emit_error(e);
+                        }
                         // Second variable gets the ok type (bool)
-                        self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span))?;
+                        if let Err(e) =
+                            self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span))
+                        {
+                            self.emit_error(e);
+                        }
+                        return Ok(Type::unit());
+                    }
+                    // None = not a comma-ok expression, continue to tuple handling
+
+                    let value_ty = self.infer_expr(value);
+
+                    // If expression failed, insert vars with Error type to prevent cascading
+                    if value_ty.is_error() {
+                        for ident in names {
+                            if let Err(e) =
+                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
+                            {
+                                self.emit_error(e);
+                            }
+                        }
                         return Ok(Type::unit());
                     }
 
-                    let value_ty = self.infer_expr(value)?;
                     let value_ty = self.substitute(value_ty);
 
                     // The value should be a tuple type with matching arity
@@ -351,17 +467,22 @@ impl Infer {
                         for (ident, arg_ty) in names.iter().zip(args.iter()) {
                             let var_ty = if let Some(t) = ty {
                                 let declared_ty = Type::from_ast(t);
-                                self.unify(&declared_ty, arg_ty, &value.span)?;
+                                self.unify(&declared_ty, arg_ty, &value.span);
                                 declared_ty
                             } else {
                                 arg_ty.clone()
                             };
-                            self.insert_var(ident.name.clone(), var_ty, Some(ident.span))?;
+                            if let Err(e) =
+                                self.insert_var(ident.name.clone(), var_ty, Some(ident.span))
+                            {
+                                self.emit_error(e);
+                            }
                         }
                         return Ok(Type::unit());
                     }
 
-                    return Err(SoppoError::Type {
+                    // Not a tuple type or wrong arity - emit error but still define vars
+                    self.emit_error(SoppoError::Type {
                         message: format!(
                             "Cannot unpack {} values from type `{}`",
                             names.len(),
@@ -369,18 +490,31 @@ impl Infer {
                         ),
                         span: value.span,
                     });
+                    for ident in names {
+                        if let Err(e) =
+                            self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
+                        {
+                            self.emit_error(e);
+                        }
+                    }
                 } else {
                     // var a, b = expr1, expr2 or var a, b type = expr1, expr2
                     for (ident, value) in names.iter().zip(values.iter()) {
-                        let value_ty = self.infer_expr(value)?;
-                        let var_ty = if let Some(t) = ty {
+                        let value_ty = self.infer_expr(value);
+                        let var_ty = if value_ty.is_error() {
+                            Type::error()
+                        } else if let Some(t) = ty {
                             let declared_ty = Type::from_ast(t);
-                            self.unify(&declared_ty, &value_ty, &value.span)?;
+                            self.unify(&declared_ty, &value_ty, &value.span);
                             declared_ty
                         } else {
                             value_ty
                         };
-                        self.insert_var(ident.name.clone(), var_ty, Some(ident.span))?;
+                        if let Err(e) =
+                            self.insert_var(ident.name.clone(), var_ty, Some(ident.span))
+                        {
+                            self.emit_error(e);
+                        }
                     }
                 }
                 Ok(Type::unit())
@@ -388,35 +522,44 @@ impl Infer {
 
             StmtKind::ConstDecl { ident, ty, value } => {
                 // Infer the type of the value
-                let value_ty = self.infer_expr(value)?;
+                let value_ty = self.infer_expr(value);
 
                 // Determine the constant's type
-                let const_ty = if let Some(t) = ty {
+                let const_ty = if value_ty.is_error() {
+                    Type::error()
+                } else if let Some(t) = ty {
                     // const x type = value: unify declared with inferred
                     let declared_ty = Type::from_ast(t);
-                    self.unify(&declared_ty, &value_ty, &value.span)?;
+                    self.unify(&declared_ty, &value_ty, &value.span);
                     declared_ty
                 } else {
                     // const x = value: infer from value
                     value_ty
                 };
 
-                self.insert_var(ident.name.clone(), const_ty, Some(ident.span))?;
+                if let Err(e) = self.insert_var(ident.name.clone(), const_ty, Some(ident.span)) {
+                    self.emit_error(e);
+                }
                 Ok(Type::unit())
             }
 
             StmtKind::MultiConstDecl { idents, ty, values } => {
                 // const a, b = expr1, expr2 or const a, b type = expr1, expr2
                 for (ident, value) in idents.iter().zip(values.iter()) {
-                    let value_ty = self.infer_expr(value)?;
-                    let const_ty = if let Some(t) = ty {
+                    let value_ty = self.infer_expr(value);
+                    let const_ty = if value_ty.is_error() {
+                        Type::error()
+                    } else if let Some(t) = ty {
                         let declared_ty = Type::from_ast(t);
-                        self.unify(&declared_ty, &value_ty, &value.span)?;
+                        self.unify(&declared_ty, &value_ty, &value.span);
                         declared_ty
                     } else {
                         value_ty
                     };
-                    self.insert_var(ident.name.clone(), const_ty, Some(ident.span))?;
+                    if let Err(e) = self.insert_var(ident.name.clone(), const_ty, Some(ident.span))
+                    {
+                        self.emit_error(e);
+                    }
                 }
                 Ok(Type::unit())
             }
@@ -427,26 +570,33 @@ impl Infer {
                     && name == "_"
                 {
                     // Just infer the value type, don't unify
-                    self.infer_expr(value)?;
+                    self.infer_expr(value);
                     return Ok(Type::unit());
                 }
-                let target_ty = self.infer_expr(target)?;
+                let target_ty = self.infer_expr(target);
+                if target_ty.is_error() {
+                    self.infer_expr(value);
+                    return Ok(Type::unit());
+                }
                 let target_ty_sub = self.substitute(target_ty.clone());
 
                 // Check: assigning nil to a non-nilable type is an error
                 if matches!(value.kind, ExprKind::Nil)
                     && let Some(err) = Self::check_nil_to_non_nilable(&target_ty_sub, value.span)
                 {
-                    return Err(err);
+                    self.emit_error(err);
+                    return Ok(Type::unit());
                 }
 
-                let value_ty = self.infer_expr(value)?;
-                let value_ty_sub = self.substitute(value_ty.clone());
-                self.unify(&target_ty, &value_ty, &stmt.span)?;
-                // Update nil state and variant state for reassignment
-                if let ExprKind::Ident(name) = &target.kind {
-                    self.update_nil_state_for_assignment(name, value, &value_ty_sub);
-                    self.update_variant_state_for_assignment(name, value);
+                let value_ty = self.infer_expr(value);
+                if !value_ty.is_error() {
+                    let value_ty_sub = self.substitute(value_ty.clone());
+                    self.unify(&target_ty, &value_ty, &stmt.span);
+                    // Update nil state and variant state for reassignment
+                    if let ExprKind::Ident(name) = &target.kind {
+                        self.update_nil_state_for_assignment(name, value, &value_ty_sub);
+                        self.update_variant_state_for_assignment(name, value);
+                    }
                 }
                 Ok(Type::unit())
             }
@@ -455,7 +605,16 @@ impl Infer {
                 if values.len() == 1 && targets.len() > 1 {
                     // a, b = f() (multi-return unpacking)
                     let value = &values[0];
-                    let value_ty = self.infer_expr(value)?;
+                    let value_ty = self.infer_expr(value);
+
+                    if value_ty.is_error() {
+                        // Still infer targets for LSP support
+                        for target in targets {
+                            self.infer_expr(target);
+                        }
+                        return Ok(Type::unit());
+                    }
+
                     let value_ty = self.substitute(value_ty);
 
                     // The value should be a tuple type with matching arity
@@ -474,21 +633,24 @@ impl Infer {
                             {
                                 continue;
                             }
-                            let target_ty = self.infer_expr(target)?;
-                            self.unify(&target_ty, expected_ty, &target.span)?;
+                            let target_ty = self.infer_expr(target);
+                            if !target_ty.is_error() {
+                                self.unify(&target_ty, expected_ty, &target.span);
+                            }
                         }
                         return Ok(Type::unit());
                     }
 
                     // Not a tuple type or wrong arity
-                    Err(SoppoError::Type {
+                    self.emit_error(SoppoError::Type {
                         message: format!(
                             "Cannot unpack {} values from type `{}`",
                             targets.len(),
                             value_ty
                         ),
                         span: value.span,
-                    })
+                    });
+                    Ok(Type::unit())
                 } else {
                     // a, b = expr1, expr2 (one value per target)
                     for (target, value) in targets.iter().zip(values.iter()) {
@@ -496,12 +658,14 @@ impl Infer {
                         if let ExprKind::Ident(name) = &target.kind
                             && name == "_"
                         {
-                            self.infer_expr(value)?;
+                            self.infer_expr(value);
                             continue;
                         }
-                        let target_ty = self.infer_expr(target)?;
-                        let value_ty = self.infer_expr(value)?;
-                        self.unify(&target_ty, &value_ty, &target.span)?;
+                        let target_ty = self.infer_expr(target);
+                        let value_ty = self.infer_expr(value);
+                        if !target_ty.is_error() && !value_ty.is_error() {
+                            self.unify(&target_ty, &value_ty, &target.span);
+                        }
                     }
                     Ok(Type::unit())
                 }
@@ -509,11 +673,13 @@ impl Infer {
 
             StmtKind::For { condition, body } => {
                 // Check condition is bool
-                let cond_ty = self.infer_expr(condition)?;
-                self.unify(&Type::simple("bool"), &cond_ty, &condition.span)?;
+                let cond_ty = self.infer_expr(condition);
+                if !cond_ty.is_error() {
+                    self.unify(&Type::simple("bool"), &cond_ty, &condition.span);
+                }
 
                 // Type check body
-                self.infer_block(body)?;
+                self.infer_block(body);
 
                 Ok(Type::unit())
             }
@@ -529,21 +695,23 @@ impl Infer {
 
                 // Type check init statement if present
                 if let Some(init_stmt) = init {
-                    self.infer_stmt(init_stmt)?;
+                    self.infer_stmt(init_stmt);
                 }
 
                 // Check condition is bool if present
                 if let Some(cond) = condition {
-                    let cond_ty = self.infer_expr(cond)?;
-                    self.unify(&Type::simple("bool"), &cond_ty, &cond.span)?;
+                    let cond_ty = self.infer_expr(cond);
+                    if !cond_ty.is_error() {
+                        self.unify(&Type::simple("bool"), &cond_ty, &cond.span);
+                    }
                 }
 
                 // Type check body
-                self.infer_block(body)?;
+                self.infer_block(body);
 
                 // Type check post statement if present
                 if let Some(post_stmt) = post {
-                    self.infer_stmt(post_stmt)?;
+                    self.infer_stmt(post_stmt);
                 }
 
                 self.pop_scope();
@@ -558,40 +726,47 @@ impl Infer {
                 body,
             } => {
                 // Infer collection type
-                let coll_ty = self.infer_expr(collection)?;
+                let coll_ty = self.infer_expr(collection);
                 let coll_ty = self.substitute(coll_ty);
 
                 // Determine key and value types based on collection type
-                let (key_ty, value_ty) =
-                    if let Some(elem_ty) = Self::extract_slice_element(&coll_ty) {
-                        // Slice: key is int, value is element type
-                        (Type::simple("int"), elem_ty)
-                    } else if let Some((k, v)) = Self::extract_map_elements(&coll_ty) {
-                        // Map: key is key type, value is value type
-                        (k, v)
-                    } else if let Some(elem_ty) = Self::extract_channel_element(&coll_ty) {
-                        // Channel: only one variable (value type)
-                        (elem_ty.clone(), elem_ty)
-                    } else if matches!(&coll_ty, Type::Con { sym, .. } if sym.name == "string") {
-                        // String: key is int (index), value is rune
-                        (Type::simple("int"), Type::simple("rune"))
-                    } else {
-                        (self.fresh_ty_var(), self.fresh_ty_var())
-                    };
+                let (key_ty, value_ty) = if coll_ty.is_error() {
+                    // Collection failed - use error types for loop vars
+                    (Type::error(), Type::error())
+                } else if let Some(elem_ty) = Self::extract_slice_element(&coll_ty) {
+                    // Slice: key is int, value is element type
+                    (Type::simple("int"), elem_ty)
+                } else if let Some((k, v)) = Self::extract_map_elements(&coll_ty) {
+                    // Map: key is key type, value is value type
+                    (k, v)
+                } else if let Some(elem_ty) = Self::extract_channel_element(&coll_ty) {
+                    // Channel: only one variable (value type)
+                    (elem_ty.clone(), elem_ty)
+                } else if matches!(&coll_ty, Type::Con { sym, .. } if sym.name == "string") {
+                    // String: key is int (index), value is rune
+                    (Type::simple("int"), Type::simple("rune"))
+                } else {
+                    (self.fresh_ty_var(), self.fresh_ty_var())
+                };
 
                 // Create a scope for the loop variables (scoped to the for statement)
                 self.push_scope();
 
                 // Bind the key variable
-                self.insert_var(key.name.clone(), key_ty, Some(key.span))?;
+                if let Err(e) = self.insert_var(key.name.clone(), key_ty, Some(key.span)) {
+                    self.emit_error(e);
+                }
 
                 // Bind the value variable if present
-                if let Some(val_ident) = value {
-                    self.insert_var(val_ident.name.clone(), value_ty, Some(val_ident.span))?;
+                if let Some(val_ident) = value
+                    && let Err(e) =
+                        self.insert_var(val_ident.name.clone(), value_ty, Some(val_ident.span))
+                {
+                    self.emit_error(e);
                 }
 
                 // Type check body
-                self.infer_block(body)?;
+                self.infer_block(body);
 
                 self.pop_scope();
 
@@ -613,12 +788,14 @@ impl Infer {
 
                 // Process init statement if present (Go-style: if x := expr; cond { })
                 if let Some(init_stmt) = init {
-                    self.infer_stmt(init_stmt)?;
+                    self.infer_stmt(init_stmt);
                 }
 
                 // Check condition is bool
-                let cond_ty = self.infer_expr(condition)?;
-                self.unify(&Type::simple("bool"), &cond_ty, &condition.span)?;
+                let cond_ty = self.infer_expr(condition);
+                if !cond_ty.is_error() {
+                    self.unify(&Type::simple("bool"), &cond_ty, &condition.span);
+                }
 
                 // Extract nil checks from condition for flow-sensitive narrowing
                 // Handles compound conditions like `x != nil && y != nil`
@@ -635,7 +812,7 @@ impl Infer {
                         self.set_nil_state(check.expr_key.clone(), Nullability::Nullable);
                     }
                 }
-                let then_ty = self.infer_block(then_block)?;
+                let then_ty = self.infer_block(then_block);
                 self.pop_nil_scope();
 
                 // Type check else block with opposite narrowing
@@ -650,7 +827,7 @@ impl Infer {
                             self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
                         }
                     }
-                    let ty = self.infer_block(else_block)?;
+                    let ty = self.infer_block(else_block);
                     self.pop_nil_scope();
                     ty
                 } else {
@@ -699,38 +876,41 @@ impl Infer {
 
             StmtKind::Return { values } => {
                 // Check return values against expected return types
+                // Note: return statements always diverge, even if there are type errors
                 if let Some(expected_types) = self.expected_return_types.clone() {
                     // Handle `return f()` where f() returns a tuple matching expected types
                     // This is the Go idiom: `return someFunc()` when both have same return signature
                     if values.len() == 1 && expected_types.len() > 1 {
-                        let value_ty = self.infer_expr(&values[0])?;
-                        let value_ty = self.substitute(value_ty);
+                        let value_ty = self.infer_expr(&values[0]);
+                        if !value_ty.is_error() {
+                            let value_ty = self.substitute(value_ty);
 
-                        // Check if it's a tuple type with matching arity
-                        if let Type::Con { sym, args, .. } = &value_ty
-                            && sym.name == "tuple"
-                            && args.len() == expected_types.len()
-                        {
-                            // Unify each tuple element with expected type
-                            for (arg_ty, expected) in args.iter().zip(expected_types.iter()) {
-                                self.unify(expected, arg_ty, &values[0].span)?;
+                            // Check if it's a tuple type with matching arity
+                            if let Type::Con { sym, args, .. } = &value_ty
+                                && sym.name == "tuple"
+                                && args.len() == expected_types.len()
+                            {
+                                // Unify each tuple element with expected type
+                                for (arg_ty, expected) in args.iter().zip(expected_types.iter()) {
+                                    self.unify(expected, arg_ty, &values[0].span);
+                                }
+                            } else {
+                                // Not a matching tuple
+                                self.emit_error(SoppoError::Type {
+                                    message: format!(
+                                        "Expected {} return value(s), got {}",
+                                        expected_types.len(),
+                                        values.len()
+                                    ),
+                                    span: stmt.span,
+                                });
                             }
-                            return Ok(Type::never());
                         }
-
-                        // Not a matching tuple - fall through to error
-                        return Err(SoppoError::Type {
-                            message: format!(
-                                "Expected {} return value(s), got {}",
-                                expected_types.len(),
-                                values.len()
-                            ),
-                            span: stmt.span,
-                        });
+                        return Ok(Type::never());
                     }
 
                     if values.len() != expected_types.len() {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: format!(
                                 "Expected {} return value(s), got {}",
                                 expected_types.len(),
@@ -738,25 +918,32 @@ impl Infer {
                             ),
                             span: stmt.span,
                         });
+                        // Still infer expressions for LSP support, etc.
+                        for expr in values {
+                            self.infer_expr(expr);
+                        }
+                        return Ok(Type::never());
                     }
                     for (expr, expected) in values.iter().zip(expected_types.iter()) {
                         // Check: returning nil to a non-nilable type is an error
                         if matches!(expr.kind, ExprKind::Nil)
                             && let Some(err) = Self::check_nil_to_non_nilable(expected, expr.span)
                         {
-                            return Err(err);
+                            self.emit_error(err);
+                            continue;
                         }
 
-                        let value_ty = self.infer_expr(expr)?;
-                        self.unify(expected, &value_ty, &expr.span)?;
-
-                        // After unification, set inferred type args on expressions that need them
-                        self.set_inferred_type_args(expr, expected);
+                        let value_ty = self.infer_expr(expr);
+                        if !value_ty.is_error() {
+                            self.unify(expected, &value_ty, &expr.span);
+                            // After unification, set inferred type args on expressions that need them
+                            self.set_inferred_type_args(expr, expected);
+                        }
                     }
                 } else if !values.is_empty() {
                     // Infer types but no expected types to check against
                     for expr in values {
-                        self.infer_expr(expr)?;
+                        self.infer_expr(expr);
                     }
                 }
                 // Return statements are diverging - they never produce a value
@@ -766,9 +953,13 @@ impl Infer {
             StmtKind::Match { scrutinee, arms } => {
                 // Expression-less match has no scrutinee
                 let (scrutinee_ty, scrutinee_key) = if let Some(scrutinee) = scrutinee {
-                    let ty = self.infer_expr(scrutinee)?;
+                    let ty = self.infer_expr(scrutinee);
                     let key = expr_to_key(scrutinee);
-                    (Some(self.substitute(ty)), key)
+                    if ty.is_error() {
+                        (None, key) // Continue checking arms even if scrutinee failed
+                    } else {
+                        (Some(self.substitute(ty)), key)
+                    }
                 } else {
                     (None, None)
                 };
@@ -922,51 +1113,66 @@ impl Infer {
                         // Handle multiple patterns: validate bindings match across patterns
                         if arm.patterns.len() > 1 {
                             // Collect bindings from first pattern
-                            let first_bindings =
-                                self.collect_pattern_bindings(&arm.patterns[0], scr_ty)?;
+                            match self.collect_pattern_bindings(&arm.patterns[0], scr_ty) {
+                                Ok(first_bindings) => {
+                                    // Validate subsequent patterns have matching bindings
+                                    for pattern in &arm.patterns[1..] {
+                                        match self.collect_pattern_bindings(pattern, scr_ty) {
+                                            Ok(bindings) => {
+                                                // Check binding names match
+                                                let first_keys: HashSet<_> =
+                                                    first_bindings.keys().collect();
+                                                let other_keys: HashSet<_> =
+                                                    bindings.keys().collect();
+                                                if first_keys != other_keys {
+                                                    self.emit_error(SoppoError::Type {
+                                                        message: format!(
+                                                            "Pattern bindings must match: expected {:?}, found {:?}",
+                                                            first_keys, other_keys
+                                                        ),
+                                                        span: pattern.span,
+                                                    });
+                                                } else {
+                                                    // Unify types of matching bindings
+                                                    for (name, ty) in &bindings {
+                                                        if let Some(first_ty) =
+                                                            first_bindings.get(name)
+                                                        {
+                                                            self.unify(first_ty, ty, &pattern.span);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => self.emit_error(e),
+                                        }
+                                    }
 
-                            // Validate subsequent patterns have matching bindings
-                            for pattern in &arm.patterns[1..] {
-                                let bindings = self.collect_pattern_bindings(pattern, scr_ty)?;
-
-                                // Check binding names match
-                                let first_keys: HashSet<_> = first_bindings.keys().collect();
-                                let other_keys: HashSet<_> = bindings.keys().collect();
-                                if first_keys != other_keys {
-                                    return Err(SoppoError::Type {
-                                        message: format!(
-                                            "Pattern bindings must match: expected {:?}, found {:?}",
-                                            first_keys, other_keys
-                                        ),
-                                        span: pattern.span,
-                                    });
-                                }
-
-                                // Unify types of matching bindings
-                                for (name, ty) in &bindings {
-                                    if let Some(first_ty) = first_bindings.get(name) {
-                                        self.unify(first_ty, ty, &pattern.span)?;
+                                    // Add first pattern's bindings to scope
+                                    let pattern_span = arm.patterns.first().map(|p| p.span);
+                                    for (name, ty) in first_bindings {
+                                        if let Err(e) = self.insert_var(name, ty, pattern_span) {
+                                            self.emit_error(e);
+                                        }
                                     }
                                 }
-                            }
-
-                            // Add first pattern's bindings to scope
-                            let pattern_span = arm.patterns.first().map(|p| p.span);
-                            for (name, ty) in first_bindings {
-                                self.insert_var(name, ty, pattern_span)?;
+                                Err(e) => self.emit_error(e),
                             }
                         } else if let Some(pattern) = arm.patterns.first() {
                             // Single pattern
-                            self.add_pattern_bindings(pattern, scr_ty)?;
+                            if let Err(e) = self.add_pattern_bindings(pattern, scr_ty) {
+                                self.emit_error(e);
+                            }
                         }
                     } else {
                         // Expression-less match: patterns must be Guard expressions
                         for pattern in &arm.patterns {
                             if let PatternKind::Guard(expr) = &pattern.kind {
-                                let ty = self.infer_expr(expr)?;
-                                self.unify(&ty, &Type::simple("bool"), &expr.span)?;
+                                let ty = self.infer_expr(expr);
+                                if !ty.is_error() {
+                                    self.unify(&ty, &Type::simple("bool"), &expr.span);
+                                }
                             } else if !matches!(pattern.kind, PatternKind::Default) {
-                                return Err(SoppoError::Type {
+                                self.emit_error(SoppoError::Type {
                                     message:
                                         "Expression-less match requires boolean guard expressions"
                                             .to_string(),
@@ -977,7 +1183,7 @@ impl Infer {
                     }
 
                     // Type check the arm body
-                    let arm_ty = self.infer_block(&arm.body)?;
+                    let arm_ty = self.infer_block(&arm.body);
 
                     // Track if this arm diverges
                     if !matches!(arm_ty, Type::Never) {
@@ -1044,7 +1250,7 @@ impl Infer {
                             .collect();
 
                         if !missing.is_empty() {
-                            return Err(SoppoError::NonExhaustive {
+                            self.emit_error(SoppoError::NonExhaustive {
                                 missing,
                                 span: stmt.span,
                             });
@@ -1062,20 +1268,24 @@ impl Infer {
 
             StmtKind::Send { channel, value } => {
                 // ch <- value: channel must be chan T, value must be T
-                let channel_ty = self.infer_expr(channel)?;
-                let channel_ty = self.substitute(channel_ty);
-                let value_ty = self.infer_expr(value)?;
-                let is_nil = matches!(value.kind, ExprKind::Nil);
+                let channel_ty = self.infer_expr(channel);
+                let value_ty = self.infer_expr(value);
 
-                // Extract element type from channel and check nil safety
-                if let Some(elem_ty) = Self::extract_channel_element(&channel_ty) {
-                    // Check: sending nil to a channel with non-nilable element type is an error
-                    if is_nil
-                        && let Some(err) = Self::check_nil_to_non_nilable(&elem_ty, value.span)
-                    {
-                        return Err(err);
+                if !channel_ty.is_error() && !value_ty.is_error() {
+                    let channel_ty = self.substitute(channel_ty);
+                    let is_nil = matches!(value.kind, ExprKind::Nil);
+
+                    // Extract element type from channel and check nil safety
+                    if let Some(elem_ty) = Self::extract_channel_element(&channel_ty) {
+                        // Check: sending nil to a channel with non-nilable element type is an error
+                        if is_nil
+                            && let Some(err) = Self::check_nil_to_non_nilable(&elem_ty, value.span)
+                        {
+                            self.emit_error(err);
+                        } else {
+                            self.unify(&elem_ty, &value_ty, &value.span);
+                        }
                     }
-                    self.unify(&elem_ty, &value_ty, &value.span)?;
                 }
 
                 Ok(Type::unit())
@@ -1088,18 +1298,24 @@ impl Infer {
                     match &case.kind {
                         SelectCaseKind::Recv { channel } => {
                             // <-ch: just infer the channel type
-                            self.infer_expr(channel)?;
+                            self.infer_expr(channel);
                         }
                         SelectCaseKind::RecvDecl { ident, channel } => {
                             // v := <-ch: infer channel type, declare v with element type
-                            let channel_ty = self.infer_expr(channel)?;
-                            let channel_ty = self.substitute(channel_ty);
+                            let channel_ty = self.infer_expr(channel);
+                            let elem_ty = if channel_ty.is_error() {
+                                Type::error()
+                            } else {
+                                let channel_ty = self.substitute(channel_ty);
+                                Self::extract_channel_element(&channel_ty)
+                                    .unwrap_or_else(|| self.fresh_ty_var())
+                            };
 
-                            // Extract element type from channel
-                            let elem_ty = Self::extract_channel_element(&channel_ty)
-                                .unwrap_or_else(|| self.fresh_ty_var());
-
-                            self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))?;
+                            if let Err(e) =
+                                self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))
+                            {
+                                self.emit_error(e);
+                            }
                         }
                         SelectCaseKind::RecvDeclOk {
                             ident,
@@ -1107,36 +1323,47 @@ impl Infer {
                             channel,
                         } => {
                             // v, ok := <-ch: infer channel type, declare v and ok
-                            let channel_ty = self.infer_expr(channel)?;
-                            let channel_ty = self.substitute(channel_ty);
+                            let channel_ty = self.infer_expr(channel);
+                            let elem_ty = if channel_ty.is_error() {
+                                Type::error()
+                            } else {
+                                let channel_ty = self.substitute(channel_ty);
+                                Self::extract_channel_element(&channel_ty)
+                                    .unwrap_or_else(|| self.fresh_ty_var())
+                            };
 
-                            // Extract element type from channel
-                            let elem_ty = Self::extract_channel_element(&channel_ty)
-                                .unwrap_or_else(|| self.fresh_ty_var());
-
-                            self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))?;
-                            self.insert_var(
+                            if let Err(e) =
+                                self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))
+                            {
+                                self.emit_error(e);
+                            }
+                            if let Err(e) = self.insert_var(
                                 ok_ident.name.clone(),
                                 Type::simple("bool"),
                                 Some(ok_ident.span),
-                            )?;
+                            ) {
+                                self.emit_error(e);
+                            }
                         }
                         SelectCaseKind::Send { channel, value } => {
                             // ch <- value: same as Send statement
-                            let channel_ty = self.infer_expr(channel)?;
-                            let channel_ty = self.substitute(channel_ty);
-                            let value_ty = self.infer_expr(value)?;
+                            let channel_ty = self.infer_expr(channel);
+                            let value_ty = self.infer_expr(value);
                             let is_nil = matches!(value.kind, ExprKind::Nil);
 
-                            if let Some(elem_ty) = Self::extract_channel_element(&channel_ty) {
-                                // Check nil safety
-                                if is_nil
-                                    && let Some(err) =
-                                        Self::check_nil_to_non_nilable(&elem_ty, value.span)
-                                {
-                                    return Err(err);
+                            if !channel_ty.is_error() && !value_ty.is_error() {
+                                let channel_ty = self.substitute(channel_ty);
+                                if let Some(elem_ty) = Self::extract_channel_element(&channel_ty) {
+                                    // Check nil safety
+                                    if is_nil
+                                        && let Some(err) =
+                                            Self::check_nil_to_non_nilable(&elem_ty, value.span)
+                                    {
+                                        self.emit_error(err);
+                                    } else {
+                                        self.unify(&elem_ty, &value_ty, &value.span);
+                                    }
                                 }
-                                self.unify(&elem_ty, &value_ty, &value.span)?;
                             }
                         }
                         SelectCaseKind::Default => {
@@ -1145,7 +1372,7 @@ impl Infer {
                     }
 
                     // Infer body
-                    self.infer_block(&case.body)?;
+                    self.infer_block(&case.body);
 
                     self.pop_scope();
                 }
@@ -1155,13 +1382,13 @@ impl Infer {
 
             StmtKind::Go(expr) => {
                 // go expr: expr should be a function call
-                self.infer_expr(expr)?;
+                self.infer_expr(expr);
                 Ok(Type::unit())
             }
 
             StmtKind::DeferStmt(expr) => {
                 // defer expr: expr should be a function call
-                self.infer_expr(expr)?;
+                self.infer_expr(expr);
                 Ok(Type::unit())
             }
 
@@ -1170,7 +1397,7 @@ impl Infer {
                 Ok(Type::Never)
             }
 
-            StmtKind::Expr(expr) => self.infer_expr(expr),
+            StmtKind::Expr(expr) => Ok(self.infer_expr(expr)),
 
             StmtKind::CompoundAssign {
                 target,
@@ -1179,16 +1406,18 @@ impl Infer {
             } => {
                 // Compound assignment: x += value
                 // Check that target and value types are compatible
-                let target_ty = self.infer_expr(target)?;
-                let value_ty = self.infer_expr(value)?;
-                self.unify(&target_ty, &value_ty, &value.span)?;
+                let target_ty = self.infer_expr(target);
+                let value_ty = self.infer_expr(value);
+                if !target_ty.is_error() && !value_ty.is_error() {
+                    self.unify(&target_ty, &value_ty, &value.span);
+                }
                 Ok(Type::unit())
             }
 
             StmtKind::IncDec { target, is_inc: _ } => {
                 // Increment/decrement: x++ or x--
                 // Just infer the target type (should be numeric)
-                self.infer_expr(target)?;
+                self.infer_expr(target);
                 Ok(Type::unit())
             }
 
@@ -1203,18 +1432,37 @@ impl Infer {
                 // For ? operator, we need to strip the error from tuple types
                 let (expr_ty, expr_span) = match &inner_stmt.kind {
                     StmtKind::Decl { ident, value } => {
-                        let value_ty = self.infer_expr(value)?;
+                        let value_ty = self.infer_expr(value);
+                        if value_ty.is_error() {
+                            // Still define the variable with error type
+                            if let Err(e) =
+                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
+                            {
+                                self.emit_error(e);
+                            }
+                            return Ok(Type::unit());
+                        }
                         let value_ty_sub = self.substitute(value_ty.clone());
 
                         // If expression returns only `error`, can't assign to a variable with `?`
                         // The `?` strips the error, leaving nothing to assign
                         if self.is_error_type(&value_ty_sub) {
-                            return Err(SoppoError::TryCapturesError { span: ident.span });
+                            self.emit_error(SoppoError::TryCapturesError { span: ident.span });
+                            if let Err(e) =
+                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
+                            {
+                                self.emit_error(e);
+                            }
+                            return Ok(Type::unit());
                         }
 
                         // Strip error from tuple type for the variable
                         let var_ty = self.strip_error_from_tuple(&value_ty_sub);
-                        self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))?;
+                        if let Err(e) =
+                            self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))
+                        {
+                            self.emit_error(e);
+                        }
                         self.update_nil_state_for_assignment(&ident.name, value, &var_ty);
 
                         // Record variable definition for LSP
@@ -1237,7 +1485,20 @@ impl Infer {
                         ident: names,
                         values,
                     } if values.len() == 1 => {
-                        let value_ty = self.infer_expr(&values[0])?;
+                        let value_ty = self.infer_expr(&values[0]);
+                        if value_ty.is_error() {
+                            // Still define the variables with error type
+                            for var_ident in names {
+                                if let Err(e) = self.insert_var(
+                                    var_ident.name.clone(),
+                                    Type::error(),
+                                    Some(var_ident.span),
+                                ) {
+                                    self.emit_error(e);
+                                }
+                            }
+                            return Ok(Type::unit());
+                        }
                         let value_ty_sub = self.substitute(value_ty.clone());
 
                         // For multi-return, the type is a tuple
@@ -1254,20 +1515,33 @@ impl Infer {
                             // e.g., `result, err := foo() ?` when foo returns (T, error)
                             // The `?` already handles the error, so capturing it is wrong
                             if names.len() > non_error_count {
-                                return Err(SoppoError::TryCapturesError {
+                                self.emit_error(SoppoError::TryCapturesError {
                                     span: names[non_error_count].span,
                                 });
+                                // Still define all variables with error type
+                                for var_ident in names {
+                                    if let Err(e) = self.insert_var(
+                                        var_ident.name.clone(),
+                                        Type::error(),
+                                        Some(var_ident.span),
+                                    ) {
+                                        self.emit_error(e);
+                                    }
+                                }
+                                return Ok(Type::unit());
                             }
 
                             for (i, var_ident) in names.iter().enumerate() {
                                 if i < non_error_count
                                     && let Some(ty) = args.get(i)
                                 {
-                                    self.insert_var(
+                                    if let Err(e) = self.insert_var(
                                         var_ident.name.clone(),
                                         ty.clone(),
                                         Some(var_ident.span),
-                                    )?;
+                                    ) {
+                                        self.emit_error(e);
+                                    }
 
                                     // Record variable definition for LSP
                                     self.record_symbol(
@@ -1288,17 +1562,24 @@ impl Infer {
                         (value_ty_sub, values[0].span)
                     }
                     StmtKind::Assign { target, value } => {
-                        let value_ty = self.infer_expr(value)?;
-                        let value_ty_sub = self.substitute(value_ty.clone());
+                        let value_ty = self.infer_expr(value);
+                        let target_ty = self.infer_expr(target);
 
+                        if value_ty.is_error() || target_ty.is_error() {
+                            return Ok(Type::unit());
+                        }
+
+                        let value_ty_sub = self.substitute(value_ty.clone());
                         // For assignment, we expect the target to already have the non-error type
-                        let target_ty = self.infer_expr(target)?;
                         let expected_ty = self.strip_error_from_tuple(&value_ty_sub);
-                        self.unify(&target_ty, &expected_ty, &inner_stmt.span)?;
+                        self.unify(&target_ty, &expected_ty, &inner_stmt.span);
                         (value_ty_sub, value.span)
                     }
                     StmtKind::Expr(expr) => {
-                        let expr_ty = self.infer_expr(expr)?;
+                        let expr_ty = self.infer_expr(expr);
+                        if expr_ty.is_error() {
+                            return Ok(Type::unit());
+                        }
                         let expr_ty_sub = self.substitute(expr_ty);
 
                         // Calculate how many non-error values to discard
@@ -1319,10 +1600,11 @@ impl Infer {
                         (expr_ty_sub, expr.span)
                     }
                     _ => {
-                        return Err(SoppoError::Type {
+                        self.emit_error(SoppoError::Type {
                             message: "`?` can only be used with declarations, assignments, or expression statements".to_string(),
                             span: inner_stmt.span,
                         });
+                        return Ok(Type::unit());
                     }
                 };
 
@@ -1330,24 +1612,30 @@ impl Infer {
 
                 // Verify expression returns error
                 if !self.returns_error(&expr_ty_sub) {
-                    return Err(SoppoError::TryExprNoError { span: expr_span });
+                    self.emit_error(SoppoError::TryExprNoError { span: expr_span });
+                    // Continue to check handler if present
                 }
 
                 // If handler present, infer it with error_name in scope
                 if let Some(block) = handler {
                     self.push_scope();
                     if let Some(name) = error_name {
-                        self.insert_var(name.clone(), Type::simple("error"), Some(stmt.span))?;
+                        if let Err(e) =
+                            self.insert_var(name.clone(), Type::simple("error"), Some(stmt.span))
+                        {
+                            self.emit_error(e);
+                        }
                         // Error is known to be non-nil in the handler (handler only runs on error)
                         self.set_nil_state(name.clone(), Nullability::NonNull);
                     }
-                    self.infer_block(block)?;
+                    self.infer_block(block);
                     self.pop_scope();
                 }
 
                 // Mark assigned nilable variables as non-null (success implies valid result)
+                // Use lookup_var_type to avoid marking the variable as "used"
                 if let Some(var_name) = self.get_assigned_var_name(inner_stmt)
-                    && let Some((var_type, _)) = self.lookup_var(&var_name)
+                    && let Some(var_type) = self.lookup_var_type(&var_name)
                 {
                     let var_type_sub = self.substitute(var_type);
                     if Self::is_nilable_type(&var_type_sub) {
@@ -1445,14 +1733,16 @@ mod tests {
 
         for decl in &file.decls {
             if let Decl::Func(func) = decl {
-                // Redeclaration in the same scope is not allowed
-                let result = infer.infer_func_decl(func);
-                assert!(result.is_err());
-                let err = result.unwrap_err().to_string();
+                let _ = infer.infer_func_decl(func);
                 assert!(
-                    err.contains("redeclared"),
-                    "Expected redeclaration error, got: {}",
-                    err
+                    infer.has_errors(),
+                    "Expected redeclaration error to be collected"
+                );
+                let errors = infer.errors();
+                assert!(
+                    errors.iter().any(|e| e.to_string().contains("redeclared")),
+                    "Expected redeclaration error, got: {:?}",
+                    errors
                 );
             }
         }
@@ -1491,8 +1781,12 @@ mod tests {
 
         for decl in &file.decls {
             if let Decl::Func(func) = decl {
+                let _ = infer.infer_func_decl(func);
                 // Should fail: returning int where string expected
-                assert!(infer.infer_func_decl(func).is_err());
+                assert!(
+                    infer.has_errors(),
+                    "Expected type mismatch error to be collected"
+                );
             }
         }
     }

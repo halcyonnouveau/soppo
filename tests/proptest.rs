@@ -385,8 +385,8 @@ mod compiler_properties {
         let mut infer1 = Infer::new().unwrap();
         let mut infer2 = Infer::new().unwrap();
 
-        let ty1 = infer1.infer_expr(&expr);
-        let ty2 = infer2.infer_expr(&expr);
+        let ty1 = infer1.infer_expr_inner(&expr);
+        let ty2 = infer2.infer_expr_inner(&expr);
 
         assert_eq!(format!("{:?}", ty1), format!("{:?}", ty2));
     }

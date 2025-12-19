@@ -1,5 +1,5 @@
 ---
-source: tests/fail.rs
+source: tests/single.rs
 expression: result.unwrap_err()
 ---
 Error: soppo::undefined_variable
@@ -11,5 +11,17 @@ Error: soppo::undefined_variable
    ·     ┬
    ·     ╰── not found in this scope
  3 │     return x
+   ╰────
+  help: Use `:=` to declare a new variable: `x := <value>`
+
+Error: soppo::undefined_variable
+
+  × Cannot find value `x` in this scope
+   ╭─[undeclared_variable.sop:3:12]
+ 2 │     x = 42
+ 3 │     return x
+   ·            ┬
+   ·            ╰── not found in this scope
+ 4 │ }
    ╰────
   help: Use `:=` to declare a new variable: `x := <value>`

@@ -13,3 +13,15 @@ Error: soppo::shadows_import
  8 │     println(fmt)
    ╰────
   help: use a different variable name to avoid confusion
+
+Error: soppo::unused_import
+
+  × Imported package `fmt` is not used
+   ╭─[shadows_import.sop:3:8]
+ 2 │ 
+ 3 │ import "fmt"
+   ·        ──┬──
+   ·          ╰── unused import
+ 4 │ 
+   ╰────
+  help: remove the import, or use `_ "fmt"` to import for side effects only

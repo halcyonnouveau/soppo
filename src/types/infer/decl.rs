@@ -5,7 +5,8 @@ use crate::types::ctx::TypeDefKind;
 use crate::types::{SymbolInfo, SymbolKind, Type};
 
 impl Infer {
-    /// Infer the type of a function body, adding named return parameters to scope
+    /// Infer the type of a function body, adding named return parameters to scope.
+    /// Continues checking all statements even if some have errors.
     pub fn infer_func_body(
         &mut self,
         block: &Block,
@@ -18,7 +19,11 @@ impl Infer {
         for ret in returns {
             if !ret.ident.name.is_empty() {
                 let ret_ty = self.resolve_type(&ret.ty);
-                self.insert_var(ret.ident.name.clone(), ret_ty, Some(ret.ident.span))?;
+                if let Err(e) =
+                    self.insert_var(ret.ident.name.clone(), ret_ty, Some(ret.ident.span))
+                {
+                    self.emit_error(e);
+                }
                 // Named returns are implicitly used - mark as used
                 self.mark_var_used(&ret.ident.name);
             }
@@ -26,32 +31,43 @@ impl Infer {
 
         let mut last_ty = Type::unit();
 
+        // Check all statements, continuing after errors
         for stmt in &block.stmts {
-            last_ty = self.infer_stmt(stmt)?;
+            let ty = self.infer_stmt(stmt);
+            if !ty.is_error() {
+                last_ty = ty;
+            }
         }
 
         // Check for unused variables before popping scope
-        self.check_unused_vars_in_scope()?;
+        if let Err(e) = self.check_unused_vars_in_scope() {
+            self.emit_error(e);
+        }
 
         self.pop_scope();
 
         Ok(last_ty)
     }
 
-    /// Infer the type of a block
-    /// The type of a block is the type of its last expression (if any), otherwise unit
-    pub fn infer_block(&mut self, block: &Block) -> Result<Type> {
+    /// Infer the type of a block.
+    /// Continues checking all statements even if some have errors.
+    /// Returns the type of the last statement (or unit if empty/all errors).
+    pub fn infer_block(&mut self, block: &Block) -> Type {
         self.push_scope();
 
         let mut last_ty = Type::unit();
 
+        // Check all statements, continuing after errors
         for stmt in &block.stmts {
-            last_ty = self.infer_stmt(stmt)?;
+            let ty = self.infer_stmt(stmt);
+            if !ty.is_error() {
+                last_ty = ty;
+            }
         }
 
         self.pop_scope();
 
-        Ok(last_ty)
+        last_ty
     }
 
     /// Register a function's signature without checking the body.
@@ -223,7 +239,7 @@ impl Infer {
         if func.returns.len() == 1 {
             let declared_ret_ty = self.resolve_type(&func.returns[0].ty);
             // Point to return type annotation for better error messages
-            self.unify(&body_ty, &declared_ret_ty, &func.returns[0].ty.span)?;
+            self.unify_inner(&body_ty, &declared_ret_ty, &func.returns[0].ty.span)?;
         }
 
         self.pop_scope();
@@ -240,13 +256,15 @@ impl Infer {
     /// Type check a const declaration
     pub fn infer_const_decl(&mut self, const_decl: &ConstDecl) -> Result<()> {
         // Infer the type of the value
-        let value_ty = self.infer_expr(&const_decl.value)?;
+        let value_ty = self.infer_expr(&const_decl.value);
 
         // Determine the constant's type
-        let const_ty = if let Some(ty) = &const_decl.ty {
+        let const_ty = if value_ty.is_error() {
+            Type::error()
+        } else if let Some(ty) = &const_decl.ty {
             // const X type = value: unify declared with inferred
             let declared_ty = Type::from_ast(ty);
-            self.unify(&declared_ty, &value_ty, &const_decl.value.span)?;
+            self.unify(&declared_ty, &value_ty, &const_decl.value.span);
             declared_ty
         } else {
             // const X = value: infer from value
@@ -290,8 +308,10 @@ impl Infer {
             (Some(ty), Some(value)) => {
                 // var X type = value: unify declared with inferred
                 let declared_ty = Type::from_ast(ty);
-                let value_ty = self.infer_expr(value)?;
-                self.unify(&declared_ty, &value_ty, &value.span)?;
+                let value_ty = self.infer_expr(value);
+                if !value_ty.is_error() {
+                    self.unify(&declared_ty, &value_ty, &value.span);
+                }
                 declared_ty
             }
             (Some(ty), None) => {
@@ -300,14 +320,15 @@ impl Infer {
             }
             (None, Some(value)) => {
                 // var X = value: infer from value
-                self.infer_expr(value)?
+                self.infer_expr(value)
             }
             (None, None) => {
                 // This shouldn't happen - parser should reject it
-                return Err(SoppoError::Type {
+                self.emit_error(SoppoError::Type {
                     message: "var declaration must have type or value".to_string(),
                     span: var_decl.span,
                 });
+                Type::error()
             }
         };
 
@@ -508,7 +529,9 @@ mod tests {
 
         for decl in &file.decls {
             if let Decl::Func(func) = decl {
-                assert!(infer.infer_func_decl(func).is_err());
+                // Errors are now collected rather than returned
+                let _ = infer.infer_func_decl(func);
+                assert!(infer.has_errors(), "Expected type error to be collected");
             }
         }
     }
@@ -602,7 +625,12 @@ mod tests {
         // Then check the function - should fail because z doesn't exist
         for decl in &file.decls {
             if let Decl::Func(func) = decl {
-                assert!(infer.infer_func_decl(func).is_err());
+                // Errors are now collected rather than returned
+                let _ = infer.infer_func_decl(func);
+                assert!(
+                    infer.has_errors(),
+                    "Expected field access error to be collected"
+                );
             }
         }
     }
@@ -634,7 +662,12 @@ mod tests {
         // Then check the function - should fail because return type doesn't match
         for decl in &file.decls {
             if let Decl::Func(func) = decl {
-                assert!(infer.infer_func_decl(func).is_err());
+                // Errors are now collected rather than returned
+                let _ = infer.infer_func_decl(func);
+                assert!(
+                    infer.has_errors(),
+                    "Expected type mismatch error to be collected"
+                );
             }
         }
     }

@@ -17,3 +17,19 @@ Error: soppo::redeclared
  6 │     major = 1
    ╰────
   help: remove the redundant declaration, or use a different name
+
+Error: soppo::redeclared
+
+  × Variable `minor` redeclared in this block
+   ╭─[redeclare_named_return.sop:3:43]
+ 2 │ 
+ 3 │ func parseVersion(version string) (major, minor int, err error) {
+   ·                                           ──┬──
+   ·                                             ╰── previous declaration
+ 4 │     // This should fail: major, minor are already declared as named returns
+ 5 │     var major, minor int
+   ·                ──┬──
+   ·                  ╰── redeclared here
+ 6 │     major = 1
+   ╰────
+  help: remove the redundant declaration, or use a different name

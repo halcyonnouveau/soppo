@@ -13,3 +13,15 @@ Error: soppo::nil_to_non_nilable
  12 │ }
     ╰────
   help: use `?*User` for a nilable type
+
+Error: soppo::nil_pointer
+
+  × Potential nil pointer dereference
+    ╭─[nil_return_to_nonnull.sop:16:13]
+ 15 │     u := getUser(1)
+ 16 │     println(u.name)
+    ·             ┬
+    ·             ╰── this pointer may be nil
+ 17 │ }
+    ╰────
+  help: check for nil first, or use `.(!nil)` to assert non-nil
