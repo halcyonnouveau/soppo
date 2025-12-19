@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Soppo</title>
+        <meta
+            name="description"
+            content="Go, with the features it's missing. Type safety, enums, pattern matching, nil safety, and ergonomic error handling."
+        />
+        <meta property="og:title" content="Soppo" />
+        <meta
+            property="og:description"
+            content="Go, with the features it's missing. Type safety, enums, pattern matching, nil safety, and ergonomic error handling."
+        />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://soppolang.dev" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="Soppo" />
+        <meta
+            name="twitter:description"
+            content="Go, with the features it's missing. Type safety, enums, pattern matching, nil safety, and ergonomic error handling."
+        />
+        <link rel="icon" type="image/png" href="/favicon.png" />
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            html {
+                font-size: 18px;
+            }
+
+            body {
+                background: #1a1a1a;
+                color: #e8e4df;
+                font-family: Georgia, "Times New Roman", serif;
+                line-height: 1.7;
+                min-height: 100vh;
+            }
+
+            .container {
+                max-width: 600px;
+                margin-left: max(2rem, calc(50% - 600px));
+                padding: 0 2rem;
+            }
+
+            /* Hero */
+            .hero {
+                padding: 6rem 0 4rem;
+            }
+
+            h1 {
+                font-size: 3rem;
+                font-weight: normal;
+                letter-spacing: -0.02em;
+                margin-bottom: 1.5rem;
+            }
+
+            .tagline {
+                font-size: 1.4rem;
+                line-height: 1.5;
+                margin-bottom: 0.5rem;
+                color: #e8e4df;
+            }
+
+            .tagline-sub {
+                font-size: 1.1rem;
+                color: #a8a4a0;
+                margin-bottom: 2rem;
+            }
+
+            .status-note {
+                font-size: 0.9rem;
+                color: #6a6560;
+                margin-bottom: 1.5rem;
+            }
+
+            .cta {
+                display: inline-block;
+                background: #333;
+                color: #e8e4df;
+                padding: 0.7rem 1.4rem;
+                text-decoration: none;
+                margin-bottom: 1.5rem;
+            }
+
+            .cta:hover {
+                background: #444;
+                color: #fff;
+            }
+
+            .hero-links {
+                display: flex;
+                gap: 1.5rem;
+                font-size: 1rem;
+            }
+
+            a {
+                color: #e8e4df;
+                text-decoration: underline;
+                text-underline-offset: 3px;
+            }
+
+            a:hover {
+                color: #fff;
+            }
+
+            /* Sections */
+            .section {
+                padding: 4rem 0;
+                border-top: 1px solid #2a2a2a;
+                position: relative;
+            }
+
+            h2 {
+                font-size: 1.5rem;
+                font-weight: normal;
+                margin-bottom: 1rem;
+            }
+
+            p {
+                margin-bottom: 1rem;
+                color: #b8b4af;
+            }
+
+            /* Code blocks */
+            .code-block {
+                position: absolute;
+                left: calc(100% + 3rem);
+                top: 4rem;
+            }
+
+            pre {
+                background: #0f0f0f;
+                border-left: 2px solid #333;
+                padding: 1.5rem;
+                overflow-x: auto;
+                font-family:
+                    "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+                font-size: 0.82rem;
+                line-height: 1.6;
+                min-width: 500px;
+            }
+
+            .section:has(.code-block) {
+                min-height: 420px;
+            }
+
+            .section.tall:has(.code-block) {
+                min-height: 520px;
+            }
+
+            code {
+                font-family:
+                    "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+                font-size: 0.9em;
+            }
+
+            .comment {
+                color: #6a6a6a;
+            }
+            .error-title {
+                color: #f14c4c;
+            }
+            .error-label {
+                color: #f14c4c;
+            }
+            .error-help {
+                color: #4ec9b0;
+            }
+            .keyword {
+                color: #c586c0;
+            }
+            .type {
+                color: #4ec9b0;
+            }
+            .string {
+                color: #ce9178;
+            }
+            .function {
+                color: #dcdcaa;
+            }
+            .number {
+                color: #b5cea8;
+            }
+
+            /* Features list */
+            .features {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.4rem 1.5rem;
+                color: #b8b4af;
+            }
+
+            /* Install */
+            .install-cmd {
+                background: #0f0f0f;
+                padding: 1rem 1.5rem;
+                font-family: "SF Mono", Consolas, monospace;
+                font-size: 0.85rem;
+                margin-bottom: 1rem;
+                display: inline-block;
+            }
+
+            .muted {
+                color: #6a6560;
+                font-size: 0.9rem;
+            }
+
+            /* Footer */
+            .footer {
+                padding: 4rem 0;
+                border-top: 1px solid #2a2a2a;
+            }
+
+            /* Mobile */
+            @media (max-width: 1000px) {
+                .container {
+                    max-width: 100%;
+                    margin-left: auto;
+                    margin-right: auto;
+                    padding: 0 1.5rem;
+                }
+
+                .section {
+                    min-height: auto !important;
+                }
+
+                .code-block {
+                    position: static;
+                    margin-top: 1.5rem;
+                }
+
+                pre {
+                    min-width: auto;
+                    max-width: 100%;
+                }
+
+                h1 {
+                    font-size: 2.5rem;
+                }
+
+                .tagline {
+                    font-size: 1.2rem;
+                }
+
+                .hero {
+                    padding: 4rem 0 3rem;
+                }
+
+                .section {
+                    padding: 3rem 0;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <section class="hero">
+                <h1>Soppo</h1>
+                <p class="tagline">Go, with the features it's missing.</p>
+                <p class="tagline-sub">
+                    Type safety and ergonomics, with full interop.
+                </p>
+                <a href="https://play.soppolang.dev" class="cta"
+                    >Try it in the playground</a
+                >
+                <div class="hero-links">
+                    <a href="https://github.com/halcyonnouveau/soppo">GitHub</a>
+                    <a
+                        href="https://github.com/halcyonnouveau/soppo/blob/main/docs/design.md"
+                        >Docs</a
+                    >
+                </div>
+            </section>
+        </div>
+
+        <div class="container">
+            <section class="section">
+                <h2>Familiar syntax</h2>
+                <p>
+                    Soppo uses Go syntax wherever possible. If you know Go, you
+                    already know most of Soppo. Use any Go library directly,
+                    keep your existing tooling, and introduce Soppo gradually
+                    into existing projects.
+                </p>
+                <div class="code-block">
+                    <pre><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+    <span class="string">"fmt"</span>
+    <span class="string">"net/http"</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+    http.HandleFunc(<span class="string">"/"</span>, handleHome)
+    http.HandleFunc(<span class="string">"/hello"</span>, handleHello)
+
+    fmt.Println(<span class="string">"Server starting on :8080"</span>)
+    http.ListenAndServe(<span class="string">":8080"</span>, <span class="keyword">nil</span>)
+}</pre>
+                </div>
+            </section>
+        </div>
+
+        <div class="container">
+            <section class="section tall">
+                <h2>Enums and pattern matching</h2>
+                <p>
+                    Tagged unions with struct variants, and pattern matching
+                    that ensures you handle every case. The compiler catches
+                    missing branches before your code ever runs, so you can
+                    refactor with confidence.
+                </p>
+                <div class="code-block">
+                    <pre><span class="keyword">type</span> <span class="type">Shape</span> <span class="keyword">enum</span> {
+    Circle <span class="keyword">struct</span> { radius <span class="type">float64</span> }
+    Rectangle <span class="keyword">struct</span> { width, height <span class="type">float64</span> }
+}
+
+<span class="keyword">func</span> <span class="function">area</span>(s <span class="type">Shape</span>) <span class="type">float64</span> {
+    <span class="keyword">match</span> s {
+    <span class="keyword">case</span> Shape.Circle{radius: r}:
+        <span class="keyword">return</span> <span class="number">3.14159</span> * r * r
+    <span class="keyword">case</span> Shape.Rectangle{width: w, height: h}:
+        <span class="keyword">return</span> w * h
+    }
+}</pre>
+                </div>
+            </section>
+        </div>
+
+        <div class="container">
+            <section class="section">
+                <h2>Error handling with <code>?</code></h2>
+                <p>
+                    No more repetitive <code>if err != nil</code> blocks. The
+                    <code>?</code> operator propagates errors concisely while
+                    keeping error handling explicit and visible. Add custom
+                    handling when you need it.
+                </p>
+                <div class="code-block">
+                    <pre><span class="keyword">func</span> <span class="function">processFile</span>(path <span class="type">string</span>) <span class="type">error</span> {
+    <span class="comment">// Propagate error directly</span>
+    data := os.ReadFile(path) <span class="keyword">?</span>
+
+    <span class="comment">// Custom handling with named error</span>
+    result := parse(data) <span class="keyword">?</span> err {
+        <span class="keyword">return</span> fmt.Errorf(<span class="string">"parse failed: {err}"</span>)
+    }
+
+    fmt.Println(<span class="string">"Processed {len(result)} items"</span>)
+    <span class="keyword">return</span> <span class="keyword">nil</span>
+}</pre>
+                </div>
+            </section>
+        </div>
+
+        <div class="container">
+            <section class="section tall">
+                <h2>Nil safety</h2>
+                <p>
+                    Nil pointer dereferences are a common source of runtime
+                    panics in Go. Soppo tracks nilability at compile time, so
+                    you catch these bugs before they reach production. After a
+                    nil check, the type narrows automatically.
+                </p>
+                <div class="code-block">
+                    <pre><span class="keyword">func</span> <span class="function">findUser</span>(id <span class="type">int</span>) <span class="type">?*User</span> {  <span class="comment">// ? marks nilable</span>
+    <span class="keyword">if</span> id == <span class="number">0</span> {
+        <span class="keyword">return</span> <span class="keyword">nil</span>
+    }
+    <span class="keyword">return</span> &User{name: <span class="string">"Alice"</span>}
+}
+
+<span class="keyword">func</span> <span class="function">greet</span>(id <span class="type">int</span>) {
+    user := findUser(id)
+
+    <span class="keyword">if</span> user != <span class="keyword">nil</span> {
+        <span class="comment">// user is *User here, not ?*User</span>
+        fmt.Println(<span class="string">"Hello {user.name}"</span>)
+    }
+}</pre>
+                </div>
+            </section>
+        </div>
+
+        <div class="container">
+            <section class="section tall">
+                <h2>Clear error messages</h2>
+                <p>
+                    When something goes wrong, Soppo tells you exactly what
+                    happened and where. Error messages show the relevant code,
+                    highlight the problem, and suggest how to fix it. Debugging
+                    should be straightforward, not a guessing game.
+                </p>
+                <div class="code-block">
+                    <pre><span class="error-title">× Non-exhaustive match</span>
+    ╭─[main.sop:11:5]
+ 10 │         var message string
+ 11 │ ╭─▶     match colour {
+ 12 │ │       case Colour.Red:
+ 13 │ │           message = "Stop"
+ 14 │ │       case Colour.Yellow:
+ 15 │ │           message = "Wait"
+ 16 │ ├─▶     }
+    · ╰──── <span class="error-label">missing variants: Green</span>
+ 17 │     }
+    ╰────
+  <span class="error-help">help: Ensure all enum variants are handled, or add a `default` case</span></pre>
+                </div>
+            </section>
+        </div>
+
+        <div class="container">
+            <section class="section">
+                <h2>Get started</h2>
+                <p>
+                    The recommended way to install Soppo is through
+                    <a href="https://github.com/halcyonnouveau/sopmod">SOPMOD</a
+                    >, a version manager that handles installing, updating, and
+                    switching between versions. It also manages Go, which Soppo
+                    uses internally for compilation.
+                </p>
+                <div class="install-cmd">
+                    curl -fsSL https://soppolang.dev/install.sh | sh
+                </div>
+                <p>Then add to your PATH and install:</p>
+                <div class="install-cmd">
+                    export PATH="$HOME/.sopmod/bin:$PATH"<br />
+                    sopmod install sop latest
+                </div>
+                <p>
+                    Or install just the <code>sop</code> binary using Cargo,
+                    without SOPMOD (requires
+                    <a href="https://www.rust-lang.org/tools/install">Rust</a>
+                    and <a href="https://go.dev/doc/install">Go</a>):
+                </p>
+                <div class="install-cmd">cargo install soppo</div>
+            </section>
+        </div>
+    </body>
+</html>
