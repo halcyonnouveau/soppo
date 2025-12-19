@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/halcyonnouveau/soppo/compare/v0.6.0...v0.7.0) - 2025-12-19
+
+### Added
+
+- *(lsp)* add rename
+- *(lsp)* add Go doc comments and package name hover/goto
+- add tour and other fixes
+
+### Changed
+
+- *(lsp)* rename binary to sopls
+
+### Fixed
+
+- *(lsp)* function hovering
+- *(editor)* tree-sitter grammar
+
 ## [0.6.0](https://github.com/halcyonnouveau/soppo/compare/v0.5.0...v0.6.0) - 2025-12-18
 
 ### Added
