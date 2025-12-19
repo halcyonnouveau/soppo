@@ -359,3 +359,44 @@ func main() error {
     // The type should be []string (error stripped by ?)
     assert_eq!(symbol.ty.to_string(), "[]string");
 }
+
+#[test]
+fn function_call_has_doc_comment() {
+    let code = r#"
+package main
+
+// help me doc
+func readLines(path string) ([]string, error) {
+    return []string{}, nil
+}
+
+func main() error {
+    lines := readLines("input.txt") ?
+    println(lines)
+    return nil
+}
+"#;
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    assert!(
+        diagnostics.is_empty(),
+        "Should have no diagnostics: {:?}",
+        diagnostics
+    );
+    let symbols = symbols.expect("Should have symbols");
+
+    // Find 'readLines' at the call site
+    let call_offset = code.find("readLines(\"input").unwrap();
+    let symbol = symbols.find_at(call_offset);
+    assert!(
+        symbol.is_some(),
+        "Should find 'readLines' symbol at call site"
+    );
+    let symbol = symbol.unwrap();
+    assert_eq!(symbol.name, "readLines");
+    assert!(
+        symbol.doc_comment.is_some(),
+        "Function symbol should have doc comment. Symbol: {:?}",
+        symbol
+    );
+    assert_eq!(symbol.doc_comment.as_ref().unwrap(), " help me doc");
+}

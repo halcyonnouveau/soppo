@@ -358,6 +358,16 @@ impl fmt::Display for Type {
             } => {
                 let prefix = if *nullable { "?" } else { "" };
                 let n = &name.name;
+                // tuples are multivalue returns, Soppo does not have tuples
+                // TODO: i dunno why they're named tuple
+                if n == "tuple" {
+                    let args_str = args
+                        .iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return write!(f, "{}({})", prefix, args_str);
+                }
                 // For types where the inner type is encoded in the name, don't show args
                 // e.g., *int, []string, map[K]V, chan T
                 let hide_args = n.starts_with('*')

@@ -51,16 +51,31 @@ impl Infer {
 
                 // First, check local scopes
                 if let Some((ty, def_span)) = self.lookup_var(name) {
-                    // Record the symbol for LSP features
-                    // For variable references, name_span is the same as def_span (variable name location)
+                    // Check if this is a function type - functions are stored in local scope
+                    // but should be recorded as Function symbols with their doc comments
+                    let (kind, doc_comment, name_span) = if matches!(ty, Type::Func { .. }) {
+                        // Look up the function definition to get doc comment and name span
+                        if let Some(func_def) = self.global_state.lookup_function(name) {
+                            (
+                                SymbolKind::Function,
+                                func_def.doc_comment.clone(),
+                                func_def.name_span,
+                            )
+                        } else {
+                            (SymbolKind::Variable, None, def_span)
+                        }
+                    } else {
+                        (SymbolKind::Variable, None, def_span)
+                    };
+
                     self.record_symbol(
                         expr.span,
                         name.clone(),
                         ty.clone(),
                         def_span,
-                        def_span, // name_span same as def_span for variables
-                        SymbolKind::Variable,
-                        None, // Variables don't have doc comments
+                        name_span,
+                        kind,
+                        doc_comment,
                     );
                     return Ok(ty);
                 }

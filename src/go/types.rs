@@ -432,13 +432,10 @@ mod tests {
 
     #[test]
     fn test_multiple_returns() {
-        assert_eq!(
-            parse_go_type("(int, error)").to_string(),
-            "tuple[int, error]"
-        );
+        assert_eq!(parse_go_type("(int, error)").to_string(), "(int, error)");
         assert_eq!(
             parse_go_type("(string, int, bool)").to_string(),
-            "tuple[string, int, bool]"
+            "(string, int, bool)"
         );
     }
 }
