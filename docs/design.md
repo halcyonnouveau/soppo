@@ -11,14 +11,6 @@ This document describes the design of Soppo - the principles that guide developm
 - Every feature should complement Go's design
 - Always provide useful error messages
 
-## Compiler Architecture
-
-```
-Source (.sop) -> Parser -> AST -> Type Checking/Inference -> Codegen -> Output (.go)
-                                            ^
-                                   External .go packages
-```
-
 ## Enums
 
 Go lacks sum types, forcing developers to use interfaces or constants with no compile-time exhaustiveness checking. Soppo enums provide tagged unions that the compiler can verify.
@@ -356,6 +348,8 @@ This allows Soppo projects to depend on generated Go from other Soppo projects w
 
 > [!IMPORTANT]
 > You cannot import external Soppo source directly. To use an external Soppo library, import its generated Go code as a regular Go import.
+
+Unlike Go, import names cannot be shadowed by local variables. This prevents accidentally masking an import and causing confusing errors or subtle bugs.
 
 ## Build System
 
