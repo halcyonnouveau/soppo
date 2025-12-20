@@ -120,6 +120,19 @@ impl Span {
             byte_end: 1,
         }
     }
+
+    /// Create a span pointing to the last character of this span.
+    /// Useful for "expected X after Y" errors where we want to highlight
+    /// where the missing token should be.
+    pub fn at_end(&self) -> Self {
+        Self {
+            start: self.end,
+            end: self.end,
+            file: self.file,
+            byte_start: self.byte_end.saturating_sub(1),
+            byte_end: self.byte_end,
+        }
+    }
 }
 
 /// Unique identifier for a module

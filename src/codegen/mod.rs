@@ -535,15 +535,17 @@ impl Codegen {
         ));
         self.indent();
 
-        // Parse and emit each field, handling inner nilable types
+        // Parse and emit each field, handling inner nilable types and grouped fields
         for field_def in struct_body.split("; ") {
             if !field_def.is_empty() {
-                // Check if field type has ? prefix (nilable)
-                // Format: "name ?*Type" or "name Type"
-                if let Some((name, ty)) = field_def.split_once(' ') {
+                // Handle grouped fields like "a, b, c int" - split from end to get type
+                if let Some(last_space) = field_def.rfind(' ') {
+                    let names_part = &field_def[..last_space];
+                    let ty = &field_def[last_space + 1..];
+                    // Check if field type has ? prefix (nilable)
                     if let Some(inner_ty) = ty.strip_prefix('?') {
                         // Nilable inner field
-                        self.emit_line(&format!("{} {} //soppo:nilable", name, inner_ty));
+                        self.emit_line(&format!("{} {} //soppo:nilable", names_part, inner_ty));
                     } else {
                         self.emit_line(field_def);
                     }

@@ -667,7 +667,7 @@ impl Codegen {
         }
     }
 
-    /// Parse field names from anonymous struct type like "struct { a int; b int }"
+    /// Parse field names from anonymous struct type like "struct { a int; b, c int }"
     fn parse_anon_struct_field_names(s: &str) -> Option<Vec<String>> {
         // Handle both "struct{...}" and "struct { ... }" formats
         let inner = s
@@ -685,9 +685,16 @@ impl Codegen {
             if field_def.is_empty() {
                 continue;
             }
-            // Each field is "name type" separated by whitespace
-            if let Some(name) = field_def.split_whitespace().next() {
-                names.push(name.to_string());
+            // Handle grouped fields like "a, b, c int" - split from end to get type
+            if let Some(last_space) = field_def.rfind(' ') {
+                let names_part = &field_def[..last_space];
+                // Split on comma for grouped names
+                for name in names_part.split(',') {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        names.push(name.to_string());
+                    }
+                }
             }
         }
         Some(names)
@@ -710,10 +717,17 @@ impl Codegen {
             if field_def.is_empty() {
                 continue;
             }
-            // Each field is "name type" separated by whitespace
-            let parts: Vec<&str> = field_def.splitn(2, ' ').collect();
-            if parts.len() == 2 {
-                fields.push((parts[0].trim().to_string(), parts[1].trim().to_string()));
+            // Handle grouped fields like "a, b, c int" - split from end to get type
+            if let Some(last_space) = field_def.rfind(' ') {
+                let names_part = &field_def[..last_space];
+                let ty = field_def[last_space + 1..].trim().to_string();
+                // Split on comma for grouped names
+                for name in names_part.split(',') {
+                    let name = name.trim();
+                    if !name.is_empty() {
+                        fields.push((name.to_string(), ty.clone()));
+                    }
+                }
             }
         }
         Some(fields)

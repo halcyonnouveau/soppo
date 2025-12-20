@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 
 use clap::{Parser as ClapParser, Subcommand};
-use miette::{IntoDiagnostic, Result};
+use miette::{IntoDiagnostic, NamedSource, Result};
 use soppo::build;
 use soppo::config::{ConfigError, resolve_globs};
 use soppo::format;
@@ -296,7 +296,11 @@ fn format_files(files: &[PathBuf], write: bool, list: bool, diff: bool) -> Resul
             .into_diagnostic()
             .map_err(|e| e.context(format!("Failed to read file: {}", file.display())))?;
 
-        let formatted = format::format_source(&source)?;
+        let filename = file.display().to_string();
+        let formatted = format::format_source(&source).map_err(|e| {
+            miette::Report::from(e)
+                .with_source_code(NamedSource::new(filename.clone(), source.clone()))
+        })?;
 
         if source == formatted {
             // Already formatted

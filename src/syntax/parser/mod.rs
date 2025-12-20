@@ -165,11 +165,11 @@ impl Parser {
         match self.advance() {
             Some((tok, span)) if tok == expected => Ok(span),
             Some((tok, span)) => Err(SoppoError::Parse {
-                message: format!("Expected {:?}, found {:?}", expected, tok),
+                message: format!("Expected {}, found {}", expected, tok),
                 span,
             }),
             None => Err(SoppoError::Parse {
-                message: format!("Expected {:?}, found EOF", expected),
+                message: format!("Expected {}, found end of file", expected),
                 span: Span::dummy(),
             }),
         }
@@ -200,11 +200,11 @@ impl Parser {
         match self.advance() {
             Some((Token::Ident(name), span)) => Ok((name, span)),
             Some((tok, span)) => Err(SoppoError::Parse {
-                message: format!("Expected {} name, found {:?}", context, tok),
+                message: format!("Expected {} name, found {}", context, tok),
                 span,
             }),
             None => Err(SoppoError::Parse {
-                message: format!("Expected {} name", context),
+                message: format!("Expected {} name, found end of file", context),
                 span: Span::dummy(),
             }),
         }

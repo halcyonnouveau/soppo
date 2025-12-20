@@ -161,7 +161,7 @@ impl Parser {
                 }
                 Some(tok) => {
                     return Err(SoppoError::Parse {
-                        message: format!("Expected return type or name, found {:?}", tok),
+                        message: format!("Expected return type or name, found {}", tok),
                         span: self.peek_span(),
                     });
                 }
@@ -263,7 +263,7 @@ impl Parser {
                     Some((tok, span)) => {
                         return Err(SoppoError::Parse {
                             message: format!(
-                                "Expected type constraint (e.g., 'any', 'comparable'), found {:?}",
+                                "Expected type constraint (e.g., 'any', 'comparable'), found {}",
                                 tok
                             ),
                             span,
@@ -574,7 +574,7 @@ impl Parser {
             Some(Token::Func) => Ok(Decl::Func(self.parse_func_decl()?)),
             Some(Token::Type) => Ok(Decl::Type(self.parse_type_decl()?)),
             Some(tok) => Err(SoppoError::Parse {
-                message: format!("Expected declaration, found {:?}", tok),
+                message: format!("Expected declaration, found {}", tok),
                 span: self.peek_span(),
             }),
             None => Err(SoppoError::Parse {
@@ -776,45 +776,44 @@ impl Parser {
             }
             Some((Token::Ident(alias), start_span)) => {
                 // Aliased import: alias "path"
+                let alias_end = start_span.at_end();
                 match self.advance() {
                     Some((Token::String(path), _end_span)) => Ok(Import {
                         alias: Some(alias),
                         path,
                         span: start_span,
                     }),
-                    Some((tok, span)) => Err(SoppoError::Parse {
-                        message: format!(
-                            "Expected import path string after alias, found {:?}",
-                            tok
-                        ),
-                        span,
+                    Some((tok, _)) => Err(SoppoError::Parse {
+                        message: format!("Expected import path string after alias, found {}", tok),
+                        span: alias_end,
                     }),
                     None => Err(SoppoError::Parse {
                         message: "Expected import path string after alias".to_string(),
-                        span: start_span,
+                        span: alias_end,
                     }),
                 }
             }
             Some((Token::Underscore, start_span)) => {
                 // Blank import: _ "path" (for side effects only)
+                let underscore_end = start_span.at_end();
                 match self.advance() {
                     Some((Token::String(path), _end_span)) => Ok(Import {
                         alias: Some("_".to_string()),
                         path,
                         span: start_span,
                     }),
-                    Some((tok, span)) => Err(SoppoError::Parse {
-                        message: format!("Expected import path string after _, found {:?}", tok),
-                        span,
+                    Some((tok, _)) => Err(SoppoError::Parse {
+                        message: format!("Expected import path string after _, found {}", tok),
+                        span: underscore_end,
                     }),
                     None => Err(SoppoError::Parse {
                         message: "Expected import path string after _".to_string(),
-                        span: start_span,
+                        span: underscore_end,
                     }),
                 }
             }
             Some((tok, span)) => Err(SoppoError::Parse {
-                message: format!("Expected import path or alias, found {:?}", tok),
+                message: format!("Expected import path or alias, found {}", tok),
                 span,
             }),
             None => Err(SoppoError::Parse {

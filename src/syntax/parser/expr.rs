@@ -341,7 +341,7 @@ impl Parser {
                                 Some((tok, span)) => {
                                     return Err(SoppoError::Parse {
                                         message: format!(
-                                            "Expected 'nil' in nil assertion, found {:?}",
+                                            "Expected 'nil' in nil assertion, found {}",
                                             tok
                                         ),
                                         span,
@@ -453,10 +453,7 @@ impl Parser {
                                     Some((Token::Ident(name), _)) => name,
                                     Some((tok, span)) => {
                                         return Err(SoppoError::Parse {
-                                            message: format!(
-                                                "Expected field name, found {:?}",
-                                                tok
-                                            ),
+                                            message: format!("Expected field name, found {}", tok),
                                             span,
                                         });
                                     }
@@ -470,10 +467,19 @@ impl Parser {
 
                                 self.expect(Token::Colon)?;
                                 let value = self.parse_expr()?;
+                                let value_end = value.span.at_end();
 
                                 fields.push((Some(field_name), value));
 
                                 if !self.consume(&Token::Comma) {
+                                    // Check for missing trailing comma on multi-line
+                                    if matches!(self.peek(), Some(Token::Newline)) {
+                                        return Err(SoppoError::Parse {
+                                            message: "Missing trailing comma after struct field"
+                                                .to_string(),
+                                            span: value_end,
+                                        });
+                                    }
                                     break;
                                 }
 
@@ -796,7 +802,7 @@ impl Parser {
                             Some((Token::Ident(name), _)) => name,
                             Some((tok, field_span)) => {
                                 return Err(SoppoError::Parse {
-                                    message: format!("Expected field name, found {:?}", tok),
+                                    message: format!("Expected field name, found {}", tok),
                                     span: field_span,
                                 });
                             }

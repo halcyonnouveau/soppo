@@ -267,7 +267,7 @@ impl Parser {
                                         let tok = tok.clone();
                                         return Err(SoppoError::Parse {
                                             message: format!(
-                                                "Expected binding name or literal in struct pattern, found {:?}",
+                                                "Expected binding name or literal in struct pattern, found {}",
                                                 tok
                                             ),
                                             span: self.peek_span(),
@@ -323,7 +323,7 @@ impl Parser {
             }
 
             _ => Err(SoppoError::Parse {
-                message: format!("Expected pattern, found {:?}", tok),
+                message: format!("Expected pattern, found {}", tok),
                 span,
             }),
         }

@@ -1115,21 +1115,22 @@ impl Parser {
             if let ExprKind::Ident(name) = &first_expr.kind {
                 let first_name = Ident::new(name.clone(), first_expr.span);
                 if self.consume(&Token::Comma) {
+                    let comma_end = first_expr.span.at_end();
                     // v, ok := <-ch
                     match self.advance() {
                         Some((Token::Ident(second), span)) => {
                             (first_name, Some(Ident::new(second, span)))
                         }
-                        Some((tok, span)) => {
+                        Some((tok, _)) => {
                             return Err(SoppoError::Parse {
-                                message: format!("Expected identifier after ',', found {:?}", tok),
-                                span,
+                                message: format!("Expected identifier after ',', found {}", tok),
+                                span: comma_end,
                             });
                         }
                         None => {
                             return Err(SoppoError::Parse {
                                 message: "Expected identifier after ','".to_string(),
-                                span: Span::dummy(),
+                                span: comma_end,
                             });
                         }
                     }

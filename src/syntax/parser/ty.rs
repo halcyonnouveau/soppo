@@ -90,14 +90,19 @@ impl Parser {
             while !matches!(self.peek(), Some(Token::RBrace) | None) {
                 // Parse field: name type or grouped names: name1, name2 type
                 let parsed_fields = self.parse_fields()?;
-                for field in parsed_fields {
-                    // Preserve nullable marker in type name for inner fields
-                    let ty_str = if field.ty.nullable {
-                        format!("?{}", field.ty.name)
+
+                // Group fields by type to preserve "a, b, c int" syntax
+                if !parsed_fields.is_empty() {
+                    let ty_str = if parsed_fields[0].ty.nullable {
+                        format!("?{}", parsed_fields[0].ty.name)
                     } else {
-                        field.ty.name.clone()
+                        parsed_fields[0].ty.name.clone()
                     };
-                    field_strs.push(format!("{} {}", field.ident, ty_str));
+                    let names: Vec<_> = parsed_fields
+                        .iter()
+                        .map(|f| f.ident.name.as_str())
+                        .collect();
+                    field_strs.push(format!("{} {}", names.join(", "), ty_str));
                 }
 
                 // Skip terminators between fields

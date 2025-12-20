@@ -646,16 +646,18 @@ impl Formatter {
             return "struct {}".to_string();
         }
 
-        // Parse fields
+        // Parse fields - split on last space to handle grouped fields like "a, b, c int"
         let mut fields = Vec::new();
         for field_def in inner.split(';') {
             let field_def = field_def.trim();
             if field_def.is_empty() {
                 continue;
             }
-            let parts: Vec<&str> = field_def.splitn(2, ' ').collect();
-            if parts.len() == 2 {
-                fields.push((parts[0].trim(), parts[1].trim()));
+            // Find the last space to separate names from type
+            if let Some(last_space) = field_def.rfind(' ') {
+                let names = field_def[..last_space].trim();
+                let ty = field_def[last_space + 1..].trim();
+                fields.push((names, ty));
             }
         }
 
@@ -666,8 +668,8 @@ impl Formatter {
 
         // Multiple fields: multiline with alignment
         let max_name_len = fields.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
-        let indent_str = "    ".repeat(indent + 1);
-        let close_indent = "    ".repeat(indent);
+        let indent_str = "\t".repeat(indent + 1);
+        let close_indent = "\t".repeat(indent);
 
         let mut result = String::from("struct {\n");
         for (name, ty) in &fields {
@@ -734,7 +736,11 @@ impl Formatter {
             StmtKind::Decl { ident, value } => {
                 self.emit_indent();
                 self.emit(&format!("{} := ", ident.name));
-                self.emit(&self.format_expr(value));
+                if self.is_multiline_array(value) {
+                    self.format_array_lit_multiline(value);
+                } else {
+                    self.emit(&self.format_expr(value));
+                }
                 self.emit_trailing_comment(line);
                 self.output.push('\n');
             }
@@ -757,7 +763,11 @@ impl Formatter {
                 }
                 if let Some(v) = value {
                     self.emit(" = ");
-                    self.emit(&self.format_expr(v));
+                    if self.is_multiline_array(v) {
+                        self.format_array_lit_multiline(v);
+                    } else {
+                        self.emit(&self.format_expr(v));
+                    }
                 }
                 self.emit_trailing_comment(line);
                 self.output.push('\n');
@@ -810,7 +820,11 @@ impl Formatter {
                 self.emit_indent();
                 self.emit(&self.format_expr(target));
                 self.emit(" = ");
-                self.emit(&self.format_expr(value));
+                if self.is_multiline_array(value) {
+                    self.format_array_lit_multiline(value);
+                } else {
+                    self.emit(&self.format_expr(value));
+                }
                 self.emit_trailing_comment(line);
                 self.output.push('\n');
             }
@@ -1024,7 +1038,7 @@ impl Formatter {
         self.dedent();
 
         if let Some(else_b) = else_block {
-            // Check if else block contains a single if statement (else-if chain)
+            // Check if this is an else-if chain (block span == if stmt span means no braces)
             if else_b.stmts.len() == 1
                 && let StmtKind::If {
                     init: else_init,
@@ -1032,8 +1046,9 @@ impl Formatter {
                     then_block: else_then,
                     else_block: else_else,
                 } = &else_b.stmts[0].kind
+                && else_b.span == else_b.stmts[0].span
             {
-                // Format as else if (} else if on same line)
+                // This was originally "else if" - format as such
                 self.emit_indent();
                 self.emit("} else ");
                 self.format_if_chain(
@@ -1045,7 +1060,7 @@ impl Formatter {
                 return;
             }
 
-            // Regular else block
+            // Regular else block with explicit braces
             self.emit_line("} else {");
             self.indent();
             self.format_block_contents(else_b);
@@ -1274,7 +1289,85 @@ impl Formatter {
         self.dedent();
     }
 
+    /// Check if expression is an array literal that should be formatted multi-line
+    fn is_multiline_array(&self, expr: &Expr) -> bool {
+        if let ExprKind::ArrayLit { elements, .. } = &expr.kind {
+            elements.len() > 1
+                && elements
+                    .iter()
+                    .any(|e| matches!(&e.kind, ExprKind::StructLit { .. }))
+        } else {
+            false
+        }
+    }
+
+    /// Format a multi-line array literal, emitting directly to output with trailing comments
+    fn format_array_lit_multiline(&mut self, expr: &Expr) {
+        let ExprKind::ArrayLit { ty, elements } = &expr.kind else {
+            return;
+        };
+
+        if let Some(t) = ty {
+            self.emit(&Self::format_type_annotation_with_indent(
+                t,
+                self.indent_level,
+            ));
+        }
+        self.emit("{\n");
+        self.indent();
+
+        // First pass: format elements and find max length for comment alignment
+        let formatted: Vec<_> = elements
+            .iter()
+            .map(|e| (self.format_expr(e), e.span.start.line))
+            .collect();
+
+        // Find max length of elements that have trailing comments (for alignment)
+        let max_len = formatted
+            .iter()
+            .filter(|(_, line)| {
+                self.comments
+                    .get(self.comment_idx..)
+                    .map(|cs| cs.iter().any(|c| c.span.start.line == *line && !c.is_block))
+                    .unwrap_or(false)
+            })
+            .map(|(s, _)| s.len())
+            .max()
+            .unwrap_or(0);
+
+        // Second pass: emit with alignment
+        for (elem_str, elem_line) in formatted {
+            self.emit_indent();
+            self.emit(&elem_str);
+            self.output.push(',');
+
+            // Check if there's a trailing comment for this line
+            let has_comment = self.comment_idx < self.comments.len()
+                && self.comments[self.comment_idx].span.start.line == elem_line
+                && !self.comments[self.comment_idx].is_block;
+
+            if has_comment && max_len > 0 {
+                // Pad to align comments (padding comes before the space in emit_trailing_comment)
+                let padding = max_len.saturating_sub(elem_str.len());
+                for _ in 0..padding {
+                    self.output.push(' ');
+                }
+            }
+
+            self.emit_trailing_comment(elem_line);
+            self.output.push('\n');
+        }
+
+        self.dedent();
+        self.emit_indent();
+        self.output.push('}');
+    }
+
     fn format_expr(&self, expr: &Expr) -> String {
+        self.format_expr_indent(expr, self.indent_level)
+    }
+
+    fn format_expr_indent(&self, expr: &Expr, indent: usize) -> String {
         match &expr.kind {
             ExprKind::Integer(n, fmt) => match fmt {
                 IntFormat::Decimal => n.to_string(),
@@ -1347,9 +1440,19 @@ impl Formatter {
                     }
                 }
 
-                let arg_strs: Vec<_> = args
-                    .iter()
-                    .map(|(name, val, spread)| {
+                // Group args by line to preserve multi-line formatting
+                if !args.is_empty() {
+                    let mut lines: Vec<Vec<String>> = Vec::new();
+                    let mut current_line_num = args[0].1.span.start.line;
+                    let mut current_line_args: Vec<String> = Vec::new();
+
+                    for (name, val, spread) in args.iter() {
+                        let arg_line = val.span.start.line;
+                        if arg_line != current_line_num && !current_line_args.is_empty() {
+                            lines.push(current_line_args);
+                            current_line_args = Vec::new();
+                            current_line_num = arg_line;
+                        }
                         let mut s = if let Some((n, _)) = name {
                             format!("{}: {}", n, self.format_expr(val))
                         } else {
@@ -1358,10 +1461,30 @@ impl Formatter {
                         if *spread {
                             s.push_str("...");
                         }
-                        s
-                    })
-                    .collect();
-                result.push_str(&arg_strs.join(", "));
+                        current_line_args.push(s);
+                    }
+                    if !current_line_args.is_empty() {
+                        lines.push(current_line_args);
+                    }
+
+                    if lines.len() == 1 {
+                        // All args on one line
+                        result.push_str(&lines[0].join(", "));
+                    } else {
+                        // Multi-line: preserve line groupings
+                        for (i, line_args) in lines.iter().enumerate() {
+                            if i > 0 {
+                                result.push('\n');
+                                result.push_str(&"\t".repeat(indent + 1));
+                            }
+                            result.push_str(&line_args.join(", "));
+                            if i < lines.len() - 1 {
+                                result.push(',');
+                            }
+                        }
+                    }
+                }
+
                 result.push(')');
                 result
             }
@@ -1405,12 +1528,33 @@ impl Formatter {
             ExprKind::ArrayLit { ty, elements } => {
                 let mut result = String::new();
                 if let Some(t) = ty {
-                    result.push_str(&Self::format_type_annotation(t));
+                    result.push_str(&Self::format_type_annotation_with_indent(t, indent));
                 }
-                result.push('{');
-                let elems: Vec<_> = elements.iter().map(|e| self.format_expr(e)).collect();
-                result.push_str(&elems.join(", "));
-                result.push('}');
+
+                // Check if elements are struct literals - if so, use multi-line format
+                let has_struct_elements = elements
+                    .iter()
+                    .any(|e| matches!(&e.kind, ExprKind::StructLit { .. }));
+
+                if has_struct_elements && elements.len() > 1 {
+                    result.push_str("{\n");
+                    let elem_indent = "\t".repeat(indent + 1);
+                    for elem in elements {
+                        result.push_str(&elem_indent);
+                        result.push_str(&self.format_expr_indent(elem, indent + 1));
+                        result.push_str(",\n");
+                    }
+                    result.push_str(&"\t".repeat(indent));
+                    result.push('}');
+                } else {
+                    result.push('{');
+                    let elems: Vec<_> = elements
+                        .iter()
+                        .map(|e| self.format_expr_indent(e, indent))
+                        .collect();
+                    result.push_str(&elems.join(", "));
+                    result.push('}');
+                }
                 result
             }
             ExprKind::StructLit { ty, fields } => {
@@ -1418,16 +1562,59 @@ impl Formatter {
                     Some(t) => Self::format_type_annotation(t),
                     None => String::new(),
                 };
-                result.push('{');
-                let field_strs: Vec<_> = fields
-                    .iter()
-                    .map(|(name, val)| match name {
-                        Some(n) => format!("{}: {}", n, self.format_expr(val)),
-                        None => self.format_expr(val),
-                    })
-                    .collect();
-                result.push_str(&field_strs.join(", "));
-                result.push('}');
+
+                // Check if fields span multiple lines
+                let is_multiline = if fields.len() > 1 {
+                    let first_line = fields.first().map(|(_, v)| v.span.start.line);
+                    let last_line = fields.last().map(|(_, v)| v.span.start.line);
+                    first_line != last_line
+                } else {
+                    false
+                };
+
+                if is_multiline && !fields.is_empty() {
+                    // Multi-line: format with alignment
+                    result.push_str("{\n");
+
+                    // Calculate max field name length for alignment
+                    let max_name_len = fields
+                        .iter()
+                        .filter_map(|(name, _)| name.as_ref().map(|n| n.len()))
+                        .max()
+                        .unwrap_or(0);
+
+                    let field_indent = "\t".repeat(indent + 1);
+                    for (name, val) in fields {
+                        result.push_str(&field_indent);
+                        if let Some(n) = name {
+                            result.push_str(n);
+                            result.push(':');
+                            // Pad to align values
+                            let padding = max_name_len - n.len() + 1;
+                            for _ in 0..padding {
+                                result.push(' ');
+                            }
+                            result.push_str(&self.format_expr_indent(val, indent + 1));
+                        } else {
+                            result.push_str(&self.format_expr_indent(val, indent + 1));
+                        }
+                        result.push_str(",\n");
+                    }
+                    result.push_str(&"\t".repeat(indent));
+                    result.push('}');
+                } else {
+                    // Single-line
+                    result.push('{');
+                    let field_strs: Vec<_> = fields
+                        .iter()
+                        .map(|(name, val)| match name {
+                            Some(n) => format!("{}: {}", n, self.format_expr(val)),
+                            None => self.format_expr(val),
+                        })
+                        .collect();
+                    result.push_str(&field_strs.join(", "));
+                    result.push('}');
+                }
                 result
             }
             ExprKind::AnonStructLit { field_defs, fields } => {
@@ -1740,5 +1927,211 @@ func main() {
         let first = format_source(source).unwrap();
         let second = format_source(&first).unwrap();
         assert_eq!(first, second, "Formatting should be idempotent");
+    }
+
+    #[test]
+    fn test_format_anon_struct_uses_tabs() {
+        let source = r#"package main
+
+func foo() {
+    tests := []struct {
+        name string
+        age  int
+    }{}
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Should use tabs for indentation, not spaces
+        assert!(
+            result.contains("\t\tname"),
+            "Anonymous struct fields should use tab indentation"
+        );
+        assert!(
+            !result.contains("    name"),
+            "Should not use space indentation"
+        );
+    }
+
+    #[test]
+    fn test_format_array_struct_multiline() {
+        let source = r#"package main
+
+func foo() {
+    tests := []struct {
+        x int
+    }{
+        {x: 1},
+        {x: 2},
+        {x: 3},
+    }
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Each struct literal should be on its own line
+        assert!(
+            result.contains("{x: 1},\n"),
+            "Each struct element should be on its own line"
+        );
+        assert!(
+            result.contains("{x: 2},\n"),
+            "Each struct element should be on its own line"
+        );
+    }
+
+    #[test]
+    fn test_format_grouped_struct_fields() {
+        let source = r#"package main
+
+func foo() {
+    tests := []struct {
+        a, b, c int
+        name    string
+    }{}
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Grouped fields should stay grouped
+        assert!(
+            result.contains("a, b, c int"),
+            "Grouped struct fields should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_format_else_block_with_if_preserved() {
+        let source = r#"package main
+
+func foo() {
+    if true {
+        println("a")
+    } else {
+        if false {
+            println("b")
+        }
+    }
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Should NOT collapse else { if into else if
+        assert!(
+            result.contains("} else {\n"),
+            "else block should not be collapsed into else if"
+        );
+        assert!(
+            result.contains("\t\tif false"),
+            "Nested if should remain nested"
+        );
+    }
+
+    #[test]
+    fn test_format_else_if_preserved() {
+        let source = r#"package main
+
+func foo() {
+    if true {
+        println("a")
+    } else if false {
+        println("b")
+    }
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Should keep else if as else if
+        assert!(
+            result.contains("} else if false {"),
+            "else if should remain as else if"
+        );
+    }
+
+    #[test]
+    fn test_format_trailing_comment_aligned() {
+        let source = r#"package main
+
+func foo() {
+    tests := []struct {
+        x int
+    }{
+        {x: 1},   // first
+        {x: 123}, // second
+    }
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Trailing comments should be aligned
+        assert!(
+            result.contains("{x: 1},   // first"),
+            "Shorter element should be padded for alignment"
+        );
+        assert!(
+            result.contains("{x: 123}, // second"),
+            "Longest element should have one space"
+        );
+    }
+
+    #[test]
+    fn test_format_make_not_brackets() {
+        let source = r#"package main
+
+func foo() {
+    ch := make(chan int)
+    m := make(map[string]int)
+}
+"#;
+        let result = format_source(source).unwrap();
+        // make should use parentheses, not brackets
+        assert!(
+            result.contains("make(chan int)"),
+            "make should use parentheses"
+        );
+        assert!(!result.contains("make["), "make should not use brackets");
+    }
+
+    #[test]
+    fn test_format_multiline_call_preserved() {
+        let source = r#"package main
+
+func foo() {
+    t.Errorf("format %d %d",
+        a, b, c)
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Multi-line call should be preserved
+        assert!(
+            result.contains("\"format %d %d\",\n"),
+            "First line should end with comma and newline"
+        );
+        assert!(
+            result.contains("\t\ta, b, c)"),
+            "Second line should have args grouped"
+        );
+    }
+
+    #[test]
+    fn test_format_multiline_struct_literal_preserved() {
+        let source = r#"package main
+
+func foo() {
+    config := Config{
+        DefaultSop: &sopVersion,
+        DefaultGo:  &goVersion,
+    }
+}
+"#;
+        let result = format_source(source).unwrap();
+        // Multi-line struct literal should be preserved with alignment
+        assert!(
+            result.contains("Config{\n"),
+            "Struct literal should be multi-line"
+        );
+        // DefaultGo (9 chars) should have 2 spaces after : to align with DefaultSop (10 chars)
+        assert!(
+            result.contains("DefaultSop: &sopVersion"),
+            "DefaultSop should have 1 space after colon"
+        );
+        assert!(
+            result.contains("DefaultGo:  &goVersion"),
+            "DefaultGo should have 2 spaces after colon for alignment"
+        );
     }
 }
