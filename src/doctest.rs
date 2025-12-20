@@ -284,17 +284,29 @@ fn parse_expected_output(code: &str) -> (String, Option<String>) {
 }
 
 /// Generate a Go Example test file from extracted doctests.
+/// Returns None if there are no runnable doctests.
 pub fn generate_example_file(
     file_doctests: &FileDocTests,
     module_path: &str,
     source_path: &Path,
-) -> Result<String> {
+) -> Result<Option<String>> {
+    // Check if there are any runnable doctests (not compile_fail or no_run)
+    let runnable_doctests: Vec<_> = file_doctests
+        .doctests
+        .iter()
+        .filter(|d| !d.attrs.compile_fail && !d.attrs.no_run)
+        .collect();
+
+    if runnable_doctests.is_empty() {
+        return Ok(None);
+    }
+
     let mut output = String::new();
 
     // Package declaration (use _test suffix for external test package)
     output.push_str(&format!("package {}_test\n\n", file_doctests.package));
 
-    // Collect all unique imports
+    // Collect all unique imports from runnable doctests only
     let mut all_imports = Vec::new();
 
     // Add the package being tested with dot import so exported symbols
@@ -306,8 +318,8 @@ pub fn generate_example_file(
         path: package_import_path,
     });
 
-    // Add imports from all doctests
-    for doctest in &file_doctests.doctests {
+    // Add imports from runnable doctests only
+    for doctest in &runnable_doctests {
         for import in &doctest.imports {
             if !all_imports.iter().any(|i| i.path == import.path) {
                 all_imports.push(import.clone());
@@ -330,17 +342,12 @@ pub fn generate_example_file(
 
     // Generate Example functions
     for doctest in &file_doctests.doctests {
-        // Skip compile_fail doctests (they're for documentation only)
-        if doctest.attrs.compile_fail {
+        // Skip compile_fail and no_run doctests (they're for documentation only)
+        if doctest.attrs.compile_fail || doctest.attrs.no_run {
             continue;
         }
 
         let func_name = generate_example_name(&doctest.decl_name, doctest.index);
-
-        // Add no_run build constraint if needed
-        if doctest.attrs.no_run {
-            output.push_str("//go:build ignore\n\n");
-        }
 
         output.push_str(&format!("func {}() {{\n", func_name));
 
@@ -374,7 +381,7 @@ pub fn generate_example_file(
         output.push_str("}\n\n");
     }
 
-    Ok(output)
+    Ok(Some(output))
 }
 
 /// Compute the import path for the package being tested.

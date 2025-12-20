@@ -11,7 +11,7 @@ fn test_basic_fixture() {
         packages: vec![],
         run_pattern: None,
         verbose: false,
-        keep_temp: false,
+        keep_tmp: false,
         passthrough_args: vec![],
     };
 

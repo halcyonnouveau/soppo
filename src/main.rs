@@ -53,9 +53,9 @@ enum Command {
         #[arg(short, long)]
         verbose: bool,
 
-        /// Keep temp directory on failure (for debugging)
+        /// Keep temp directory
         #[arg(long)]
-        keep_temp: bool,
+        keep_tmp: bool,
 
         /// Additional arguments to pass to `go test`
         #[arg(last = true)]
@@ -123,7 +123,7 @@ fn main() -> Result<()> {
             packages,
             run,
             verbose,
-            keep_temp,
+            keep_tmp,
             args,
         } => {
             let cwd = std::env::current_dir().into_diagnostic()?;
@@ -151,7 +151,7 @@ fn main() -> Result<()> {
                 packages,
                 run_pattern: run,
                 verbose,
-                keep_temp,
+                keep_tmp,
                 passthrough_args: args,
             };
 

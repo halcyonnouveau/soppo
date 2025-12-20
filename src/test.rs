@@ -21,7 +21,7 @@ pub struct TestConfig {
     /// Whether to show verbose output
     pub verbose: bool,
     /// Keep temp directory (for debugging)
-    pub keep_temp: bool,
+    pub keep_tmp: bool,
     /// Additional arguments to pass to `go test`
     pub passthrough_args: Vec<String>,
 }
@@ -91,7 +91,7 @@ pub fn run_tests(config: &TestConfig) -> Result<TestResult> {
     let result = run_go_test(temp_root, config)?;
 
     // Handle temp directory cleanup
-    if config.keep_temp {
+    if config.keep_tmp {
         // Persist the temp directory for debugging
         let persisted = temp_dir.keep();
         println!("  Temp directory preserved at: {}", persisted.display());
@@ -252,8 +252,13 @@ fn generate_doctests(
         // Compute relative path for output
         let relative = source_path.strip_prefix(src_root).unwrap_or(source_path);
 
-        // Generate the doctest file
+        // Generate the doctest file (returns None if no runnable doctests)
         let doctest_code = doctest::generate_example_file(&file_doctests, module_path, relative)?;
+
+        // Skip if no runnable doctests
+        let Some(doctest_code) = doctest_code else {
+            continue;
+        };
 
         // Write to temp directory
         let output_name = relative

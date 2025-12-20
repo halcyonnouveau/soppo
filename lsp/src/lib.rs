@@ -658,9 +658,34 @@ impl LanguageServer for Backend {
             let mut content = format!("```soppo\n{}\n```", header);
             if let Some(ref doc) = symbol.doc_comment {
                 content.push_str("\n\n---\n\n");
-                content.push_str(doc);
+                // Clean up code block language identifiers for better syntax highlighting
+                // Strip doctest attributes like ,no_run ,should_panic ,compile_fail
+                let cleaned_doc = clean_doctest_fences(doc);
+                content.push_str(&cleaned_doc);
             }
             content
+        }
+
+        // Strip doctest attributes from code fences for better syntax highlighting
+        // Converts ```sop,no_run to ```sop, etc.
+        fn clean_doctest_fences(doc: &str) -> String {
+            let mut result = String::with_capacity(doc.len());
+            for line in doc.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("```sop,") {
+                    result.push_str("```sop");
+                } else if trimmed.starts_with("```soppo,") {
+                    result.push_str("```soppo");
+                } else {
+                    result.push_str(line);
+                }
+                result.push('\n');
+            }
+            // Remove trailing newline if original didn't have one
+            if !doc.ends_with('\n') && result.ends_with('\n') {
+                result.pop();
+            }
+            result
         }
 
         // Try workspace mode first
