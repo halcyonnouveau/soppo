@@ -266,6 +266,22 @@ impl Type {
                 | "complex128"
                 | "error"
                 | "any"
+                // fn
+                | "make"
+                | "new"
+                | "len"
+                | "cap"
+                | "append"
+                | "copy"
+                | "delete"
+                | "panic"
+                | "recover"
+                | "print"
+                | "println"
+                | "complex"
+                | "real"
+                | "imag"
+                | "close"
         )
     }
 

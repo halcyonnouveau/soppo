@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nil_to_non_nilable
+
+  × Cannot assign `nil` to non-nilable type `*string`
+    ╭─[nil_struct_field_positional.sop:10:27]
+  9 │     // Using positional syntax with nil for non-nilable pointer field
+ 10 │     p := Profile{"hello", nil}
+    ·                           ─┬─
+    ·                            ╰── cannot be nil
+ 11 │     println(p.bio)
+    ╰────
+  help: use `?*string` for a nilable type

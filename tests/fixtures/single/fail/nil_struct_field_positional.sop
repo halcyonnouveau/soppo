@@ -1,0 +1,12 @@
+package main
+
+type Profile struct {
+    bio  string
+    link *string
+}
+
+func main() {
+    // Using positional syntax with nil for non-nilable pointer field
+    p := Profile{"hello", nil}
+    println(p.bio)
+}

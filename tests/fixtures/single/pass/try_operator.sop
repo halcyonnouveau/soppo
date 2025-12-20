@@ -90,6 +90,20 @@ func nilSafety() error {
     return nil
 }
 
+// === Nil safety with reassignment ===
+
+func nilSafetyReassign() error {
+    // First declaration with :=
+    user := getUser(1) ?
+    fmt.Println(user.name)
+
+    // Reassignment with = should also strip nilability
+    user = getUser(2) ?
+    fmt.Println(user.name)
+
+    return nil
+}
+
 // === Nil safety for other nilable types after ? ===
 
 func getNames() ([]string, error) {
@@ -246,6 +260,7 @@ func main() {
     errorOnly()
     multiReturn()
     nilSafety()
+    nilSafetyReassign()
     nilSafetySlice()
     nilSafetyMap()
     multipleTry()

@@ -9,7 +9,7 @@ use crate::deps::DepGraph;
 use crate::error::SoppoError;
 use crate::go::Project;
 use crate::syntax::{Decl, File, FileId, FileRegistry, ModuleId, Parser};
-use crate::types::{GlobalCtxt, Infer, SymbolTable};
+use crate::types::{GlobalCtxt, Infer, SymbolTable, TypedFile};
 
 /// Result of compiling a project - maps relative paths to generated Go code
 pub type BuildResult = Vec<(String, String)>;
@@ -161,15 +161,50 @@ pub fn build_project_to_disk(root: &Path, output_dir: Option<&Path>) -> Result<u
 /// Compile a single source string
 pub fn compile(source: &str, filename: &str) -> Result<String> {
     let mut infer = Infer::new()?;
-    let file = parse_and_typecheck(source, filename, &mut infer)?;
+    let typed_file = parse_typecheck_to_typed(source, filename, &mut infer)?;
 
     let global_state = infer.into_global_state();
     let mut codegen = Codegen::with_global_state(global_state);
-    codegen.gen_file(&file).map_err(|e| {
+    codegen.gen_file(&typed_file).map_err(|e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
     })?;
 
     Ok(codegen.output().to_string())
+}
+
+/// Parse, typecheck, and build a TypedFile
+fn parse_typecheck_to_typed(source: &str, filename: &str, infer: &mut Infer) -> Result<TypedFile> {
+    // Parse the source file
+    let mut parser = Parser::new(source, FileId(0));
+    let file = parser.parse_file().map_err(|e| {
+        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
+    })?;
+
+    // Process imports (register Go packages, etc.)
+    infer.process_imports(&file.imports);
+
+    // Infer the file and get the typed AST directly
+    let mut typed_file = infer.infer_file(&file);
+
+    // substitute type variables with their solutions
+    crate::types::infer::bonk_file(&mut typed_file, infer.substitutions());
+
+    // Check for unused imports
+    if let Err(e) = infer.check_unused_imports() {
+        infer.emit_error(e);
+    }
+
+    // Handle any errors
+    if infer.has_errors() {
+        let errors = infer.take_errors();
+        let source_code = NamedSource::new(filename, source.to_string());
+
+        if let Some(errs) = crate::error::SoppoErrors::new(errors) {
+            return Err(miette::Report::from(errs).with_source_code(source_code));
+        }
+    }
+
+    Ok(typed_file)
 }
 
 /// Compile with existing GlobalCtxt, returning the code and updated GlobalCtxt
@@ -191,16 +226,15 @@ pub fn compile_with_context(
     };
 
     let mut infer = Infer::with_global_state_and_project(global_ctxt, project)?;
-    let file = parse_and_typecheck(source, filename, &mut infer)?;
+    let typed_file = parse_typecheck_to_typed(source, filename, &mut infer)?;
 
     let global_state = infer.into_global_state();
     let mut codegen = Codegen::with_module_info(
         global_state.clone(),
         module_path.to_string(),
         output_dir.map(String::from),
-        project_root.to_path_buf(),
     );
-    codegen.gen_file(&file).map_err(|e| {
+    codegen.gen_file(&typed_file).map_err(|e| {
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
     })?;
 
@@ -339,18 +373,18 @@ fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Resul
 fn register_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::Result<()> {
     match decl {
         Decl::Const(const_decl) => {
-            infer.infer_const_decl(const_decl)?;
+            infer.infer_const_decl(const_decl);
         }
         Decl::ConstBlock(consts) => {
             for const_decl in consts {
-                infer.infer_const_decl(const_decl)?;
+                infer.infer_const_decl(const_decl);
             }
         }
         Decl::Type(type_decl) => {
             infer.infer_type_decl(type_decl)?;
         }
         Decl::Var(var_decl) => {
-            infer.infer_var_decl(var_decl)?;
+            infer.infer_var_decl(var_decl);
         }
         Decl::Func(func) => {
             infer.register_func_signature(func)?;
@@ -680,5 +714,43 @@ func (c *Config) Save() error {
                 .map(|((start, end), s)| (start, end, &s.kind))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_typed_pipeline_compiles() {
+        // Test that the typed AST pipeline produces valid output
+        let source = r#"package main
+
+import "fmt"
+
+func add(a int, b int) int {
+    return a + b
+}
+
+func main() {
+    x := 1
+    y := 2
+    result := add(x, y)
+    name := "world"
+    fmt.Printf("Hello, %s! Result: %d\n", name, result)
+}
+"#;
+
+        // Compile using the typed pipeline (compile now uses typed internally)
+        let result = compile(source, "test.sop");
+        assert!(
+            result.is_ok(),
+            "Typed pipeline should compile successfully: {:?}",
+            result.err()
+        );
+
+        let output = result.unwrap();
+        assert!(
+            output.contains("package main"),
+            "Should have package declaration"
+        );
+        assert!(output.contains("func add"), "Should have add function");
+        assert!(output.contains("func main"), "Should have main function");
+        assert!(output.contains("fmt.Printf"), "Should have Printf call");
     }
 }

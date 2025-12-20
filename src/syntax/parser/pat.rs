@@ -48,7 +48,6 @@ impl Parser {
                 vec![Pattern {
                     kind: PatternKind::Default,
                     span,
-                    inferred_type_args: std::cell::RefCell::new(None),
                 }]
             } else {
                 self.expect(Token::Case)?;
@@ -119,7 +118,6 @@ impl Parser {
             Ok(Pattern {
                 kind: PatternKind::Guard(Box::new(expr)),
                 span,
-                inferred_type_args: std::cell::RefCell::new(None),
             })
         } else {
             self.parse_pattern()
@@ -137,7 +135,6 @@ impl Parser {
             Token::Underscore => Ok(Pattern {
                 kind: PatternKind::Default,
                 span,
-                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             // Literal patterns
@@ -146,31 +143,26 @@ impl Parser {
                     lit.value, lit.format,
                 )),
                 span,
-                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::String(s) => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::String(s)),
                 span,
-                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::True => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::Bool(true)),
                 span,
-                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::False => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::Bool(false)),
                 span,
-                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::Nil => Ok(Pattern {
                 kind: PatternKind::Literal(super::super::ast::Literal::Nil),
                 span,
-                inferred_type_args: std::cell::RefCell::new(None),
             }),
 
             Token::Ident(mut name) => {
@@ -213,7 +205,6 @@ impl Parser {
                             binding: Ident::new(binding_name, binding_span),
                         },
                         span: self.merge_spans(current_span, end_span),
-                        inferred_type_args: std::cell::RefCell::new(None),
                     })
                 }
                 // Check if it's a struct destructor pattern: Shape.Circle{radius: r, ...}
@@ -305,19 +296,13 @@ impl Parser {
                             rest,
                         },
                         span: self.merge_spans(current_span, end_span),
-                        inferred_type_args: std::cell::RefCell::new(None),
                     })
                 }
                 // Just a variant name
                 else {
                     Ok(Pattern {
-                        kind: PatternKind::Variant {
-                            name,
-                            type_args,
-                            is_soppo_enum: std::cell::Cell::new(true),
-                        },
+                        kind: PatternKind::Variant { name, type_args },
                         span: current_span,
-                        inferred_type_args: std::cell::RefCell::new(None),
                     })
                 }
             }

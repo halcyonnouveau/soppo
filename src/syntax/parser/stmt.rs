@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use super::Parser;
 use crate::error::{Result, SoppoError};
 use crate::syntax::ast::{
@@ -65,7 +63,6 @@ impl Parser {
                     error_name,
                     handler,
                     try_span,
-                    discard_count: Cell::new(0),
                 },
                 span: self.merge_spans(stmt_span, end_span),
             });

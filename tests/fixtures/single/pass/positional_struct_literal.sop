@@ -1,0 +1,51 @@
+package main
+
+import "fmt"
+
+type Point struct {
+    x int
+    y int
+}
+
+type Person struct {
+    name string
+    age  int
+}
+
+type Profile struct {
+    bio  string
+    link ?*string
+}
+
+func main() {
+    // Fully positional
+    p1 := Point{1, 2}
+    fmt.Println(p1.x, p1.y)
+
+    // Mixed positional and named (positional first)
+    p2 := Point{10, y: 20}
+    fmt.Println(p2.x, p2.y)
+
+    // Person with positional
+    person := Person{"Alice", 30}
+    fmt.Println(person.name, person.age)
+
+    // Nilable field with nil (should work)
+    profile := Profile{"hello", nil}
+    fmt.Println(profile.bio)
+
+    // Nested struct with positional
+    type Rect struct {
+        topLeft     Point
+        bottomRight Point
+    }
+    rect := Rect{Point{0, 0}, Point{100, 100}}
+    fmt.Println(rect.topLeft.x, rect.bottomRight.y)
+
+    // Multi-line positional struct literal
+    p3 := Point{
+        100,
+        200,
+    }
+    fmt.Println(p3.x, p3.y)
+}

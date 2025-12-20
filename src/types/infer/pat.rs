@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use super::Infer;
 use crate::error::Result;
 use crate::syntax::{EnumVariant, FieldPattern, Pattern, PatternKind};
-use crate::types::Type;
+use crate::types::ast::TypedFieldPattern;
 use crate::types::ctx::TypeDefKind;
+use crate::types::{Type, TypedPattern, TypedPatternKind};
 
 impl Infer {
     /// Add pattern bindings to the current scope
@@ -249,5 +250,201 @@ impl Infer {
         }
 
         Ok(bindings)
+    }
+
+    /// Build a TypedPattern from a Pattern during inference.
+    pub fn build_typed_pattern(
+        &mut self,
+        pattern: &crate::syntax::Pattern,
+        matched_ty: &Type,
+    ) -> TypedPattern {
+        let kind = match &pattern.kind {
+            PatternKind::Default => TypedPatternKind::Default,
+
+            PatternKind::Variant {
+                name, type_args, ..
+            } => {
+                let resolved_type_args: Vec<Type> =
+                    type_args.iter().map(|t| self.resolve_type(t)).collect();
+
+                // Try to resolve enum type from name
+                let enum_ty = if let Some((enum_name, _)) = name.split_once('.') {
+                    Type::simple(enum_name)
+                } else {
+                    Type::error()
+                };
+                // Determine if this is a Soppo enum from the matched type
+                let is_soppo_enum = self.is_soppo_enum_type(matched_ty);
+                TypedPatternKind::Variant {
+                    enum_ty,
+                    variant_name: name.clone(),
+                    type_args: resolved_type_args,
+                    is_soppo_enum,
+                }
+            }
+
+            PatternKind::Literal(lit) => TypedPatternKind::Literal(lit.clone()),
+
+            PatternKind::Destructor {
+                name,
+                type_args,
+                binding,
+            } => {
+                let resolved_type_args: Vec<Type> =
+                    type_args.iter().map(|t| self.resolve_type(t)).collect();
+                let enum_ty = if let Some((enum_name, _)) = name.split_once('.') {
+                    Type::simple(enum_name)
+                } else {
+                    Type::error()
+                };
+
+                // Look up binding type from variant definition
+                let variant_name_part = name.rsplit('.').next().unwrap_or(name);
+                let binding_ty = if let Type::Con { sym: type_name, .. } = matched_ty
+                    && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
+                    && let TypeDefKind::Enum { variants } = &type_def.kind
+                {
+                    variants
+                        .iter()
+                        .find_map(|variant| {
+                            if let EnumVariant::Single {
+                                ident: vname, ty, ..
+                            } = variant
+                                && vname.name == variant_name_part
+                            {
+                                Some(Type::simple(&ty.name))
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_else(Type::error)
+                } else {
+                    Type::error()
+                };
+
+                TypedPatternKind::Destructor {
+                    enum_ty,
+                    variant_name: name.clone(),
+                    type_args: resolved_type_args,
+                    binding: binding.clone(),
+                    binding_ty,
+                }
+            }
+
+            PatternKind::StructDestructor {
+                name,
+                type_args,
+                fields,
+                rest,
+            } => {
+                let resolved_type_args: Vec<Type> =
+                    type_args.iter().map(|t| self.resolve_type(t)).collect();
+                let struct_ty = if let Some((type_name, _)) = name.split_once('.') {
+                    Type::simple(type_name)
+                } else {
+                    Type::simple(name)
+                };
+
+                // Build a map of field name -> type from the struct/variant definition
+                let variant_name_part = name.rsplit('.').next().unwrap_or(name);
+                let field_type_map: std::collections::HashMap<&str, Type> =
+                    if let Type::Con { sym: type_name, .. } = matched_ty
+                        && let Some(type_def) = self.global_state.lookup_type(&type_name.name)
+                    {
+                        match &type_def.kind {
+                            TypeDefKind::Enum { variants } => {
+                                // Look for matching struct variant
+                                variants
+                                    .iter()
+                                    .find_map(|variant| {
+                                        if let EnumVariant::Struct {
+                                            ident: vname,
+                                            fields: variant_fields,
+                                            ..
+                                        } = variant
+                                            && vname.name == variant_name_part
+                                        {
+                                            Some(
+                                                variant_fields
+                                                    .iter()
+                                                    .map(|f| {
+                                                        (
+                                                            f.ident.name.as_str(),
+                                                            Type::simple(&f.ty.name),
+                                                        )
+                                                    })
+                                                    .collect(),
+                                            )
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or_default()
+                            }
+                            TypeDefKind::Struct {
+                                fields: struct_fields,
+                            } => struct_fields
+                                .iter()
+                                .map(|(name, ty)| (name.as_str(), ty.clone()))
+                                .collect(),
+                            _ => std::collections::HashMap::new(),
+                        }
+                    } else {
+                        std::collections::HashMap::new()
+                    };
+
+                let typed_fields: Vec<(String, TypedFieldPattern)> = fields
+                    .iter()
+                    .map(|(field_name, fp)| {
+                        let typed_fp = match fp {
+                            crate::syntax::FieldPattern::Bind(ident) => {
+                                let field_ty = field_type_map
+                                    .get(field_name.as_str())
+                                    .cloned()
+                                    .unwrap_or_else(Type::error);
+                                TypedFieldPattern::Bind(ident.clone(), field_ty)
+                            }
+                            crate::syntax::FieldPattern::Literal(lit) => {
+                                TypedFieldPattern::Literal(lit.clone())
+                            }
+                        };
+                        (field_name.clone(), typed_fp)
+                    })
+                    .collect();
+                TypedPatternKind::StructDestructor {
+                    pattern_name: name.clone(),
+                    struct_ty,
+                    type_args: resolved_type_args,
+                    fields: typed_fields,
+                    rest: *rest,
+                }
+            }
+
+            PatternKind::Guard(expr) => TypedPatternKind::Guard(Box::new(self.infer_expr(expr))),
+        };
+
+        TypedPattern {
+            kind,
+            span: pattern.span,
+            matched_ty: matched_ty.clone(),
+        }
+    }
+
+    /// Check if a type is a Soppo enum (vs a Go interface/constant).
+    fn is_soppo_enum_type(&self, ty: &Type) -> bool {
+        if let Type::Con { sym, .. } = ty {
+            if sym.module.0.is_empty() {
+                // Local type in current module
+                self.global_state
+                    .lookup_type(&sym.name)
+                    .map(|td| matches!(td.kind, TypeDefKind::Enum { .. }))
+                    .unwrap_or(false)
+            } else {
+                // Cross-package type
+                self.global_state.is_soppo_enum(&sym.module.0, &sym.name)
+            }
+        } else {
+            false
+        }
     }
 }

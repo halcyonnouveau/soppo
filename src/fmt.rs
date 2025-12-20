@@ -1561,7 +1561,7 @@ impl Formatter {
                 }
                 result
             }
-            ExprKind::StructLit { ty, fields } => {
+            ExprKind::StructLit { ty, fields, .. } => {
                 let mut result = match ty {
                     Some(t) => Self::format_type_annotation(t),
                     None => String::new(),

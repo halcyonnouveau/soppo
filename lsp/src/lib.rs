@@ -8,7 +8,7 @@ use std::sync::Arc;
 use miette::Diagnostic as MietteDiagnostic;
 use soppo::build::{typecheck, typecheck_with_symbols, typecheck_workspace};
 use soppo::error::{SoppoError, SoppoErrors};
-use soppo::format::format_source;
+use soppo::fmt::format_source;
 use soppo::go::SourceLocation;
 use soppo::syntax::{FileId, FileRegistry, Span};
 use soppo::types::{GlobalCtxt, SymbolKind as SoppoSymbolKind, SymbolTable};

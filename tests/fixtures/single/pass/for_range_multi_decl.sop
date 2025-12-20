@@ -1,0 +1,32 @@
+package main
+
+import "fmt"
+
+type testCase struct {
+    input   string
+    major   int
+    minor   int
+    patch   int
+    wantErr bool
+}
+
+func parseVersion(s string) (int, int, int, error) {
+    return 1, 2, 3, nil
+}
+
+func main() {
+    tests := []testCase{
+        {input: "1.0.0", major: 1, minor: 0, patch: 0, wantErr: false},
+    }
+
+    for _, tt := range tests {
+        major, minor, patch, err := parseVersion(tt.input)
+        if tt.wantErr {
+            if err == nil {
+                fmt.Println("expected error")
+            }
+        } else {
+            fmt.Println(major, minor, patch)
+        }
+    }
+}

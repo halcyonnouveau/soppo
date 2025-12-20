@@ -375,7 +375,6 @@ impl Parser {
                             ExprKind::TypeAssert {
                                 expr: Box::new(expr),
                                 ty,
-                                known_match: std::cell::Cell::new(false),
                             },
                             self.merge_spans(expr_span, end_span),
                         );
@@ -389,7 +388,7 @@ impl Parser {
                         ExprKind::Field {
                             expr: Box::new(expr),
                             field,
-                            field_span,
+                            span: field_span,
                         },
                         self.merge_spans(expr_span, field_span),
                     );
@@ -417,11 +416,15 @@ impl Parser {
                     let type_info = extract_type_info(&expr);
 
                     if let Some((type_name, type_args)) = type_info {
-                        // Peek ahead to see if this looks like a struct literal
-                        // Struct literals have pattern: { ident: expr, ... }
-                        // Blocks have pattern: { stmt; ... }
-                        // Check if next token is } (empty struct) or identifier followed by colon
-                        // Need to account for newlines after {
+                        // Struct literal heuristic:
+                        // - {} -> struct literal (empty)
+                        // - { ident: ... } -> struct literal (named field)
+                        // - { expr, ... } -> struct literal (positional with comma)
+                        // - { expr } -> ambiguous, NOT a struct literal (could be block)
+                        //
+                        // This avoids misparsing `if min { stmt }` as struct literal.
+                        // Go handles this at grammar level (conditions can't end with composite lit).
+                        // Our heuristic is a pragmatic workaround.
                         let pos_after_brace = if matches!(self.peek_at(1), Some(Token::Newline)) {
                             2
                         } else {
@@ -434,7 +437,52 @@ impl Parser {
                         ) {
                             (Some(Token::RBrace), _) => true,                    // {}
                             (Some(Token::Ident(_)), Some(Token::Colon)) => true, // { foo: ...
-                            _ => false,
+                            _ => {
+                                // Check for positional: expr followed by comma, ending with }
+                                // But NOT if we see := or = which indicates a multi-declaration
+                                // e.g., `tests { a, b := foo() }` is a block, not struct literal
+                                let saved_pos = self.pos;
+                                self.advance(); // consume {
+                                self.skip_terminators();
+
+                                if matches!(self.peek(), Some(Token::RBrace)) {
+                                    // Empty - already handled above, but just in case
+                                    self.pos = saved_pos;
+                                    true
+                                } else {
+                                    // Try to parse an expression
+                                    let expr_result = self.parse_expr();
+                                    let has_comma = matches!(self.peek(), Some(Token::Comma));
+
+                                    // If we have expr followed by comma, scan ahead to check
+                                    // if there's := or = before } (which means it's a multi-decl)
+                                    // Note: we DON'T check for newlines here because multi-line
+                                    // struct literals like Point{\n1,\n2,\n} are valid
+                                    let is_struct_lit = if expr_result.is_ok() && has_comma {
+                                        let mut is_multi_decl = false;
+                                        let scan_pos = self.pos;
+                                        while let Some(tok) = self.peek() {
+                                            match tok {
+                                                Token::RBrace => break,
+                                                Token::ColonAssign | Token::Assign => {
+                                                    is_multi_decl = true;
+                                                    break;
+                                                }
+                                                _ => {
+                                                    self.advance();
+                                                }
+                                            }
+                                        }
+                                        self.pos = scan_pos;
+                                        !is_multi_decl
+                                    } else {
+                                        false
+                                    };
+
+                                    self.pos = saved_pos; // restore position
+                                    is_struct_lit
+                                }
+                            }
                         };
 
                         if !is_struct_lit {
@@ -442,47 +490,68 @@ impl Parser {
                         }
 
                         self.advance(); // consume {
+
+                        // Track if this is a multiline struct literal
+                        let mut multiline = matches!(self.peek(), Some(Token::Newline));
                         self.skip_terminators();
 
                         let mut fields = Vec::new();
 
                         if !matches!(self.peek(), Some(Token::RBrace)) {
                             loop {
-                                // Parse field name
-                                let field_name = match self.advance() {
-                                    Some((Token::Ident(name), _)) => name,
-                                    Some((tok, span)) => {
-                                        return Err(SoppoError::Parse {
-                                            message: format!("Expected field name, found {}", tok),
-                                            span,
-                                        });
-                                    }
-                                    None => {
-                                        return Err(SoppoError::Parse {
-                                            message: "Expected field name".to_string(),
-                                            span: Span::dummy(),
-                                        });
-                                    }
-                                };
+                                // Check if this is a named field (ident:) or positional
+                                let is_named = matches!(
+                                    (self.peek(), self.peek_at(1)),
+                                    (Some(Token::Ident(_)), Some(Token::Colon))
+                                );
 
-                                self.expect(Token::Colon)?;
-                                let value = self.parse_expr()?;
-                                let value_end = value.span.at_end();
+                                if is_named {
+                                    // Parse named field: ident: expr
+                                    let field_name = match self.advance() {
+                                        Some((Token::Ident(name), _)) => name,
+                                        _ => unreachable!(),
+                                    };
+                                    self.expect(Token::Colon)?;
+                                    let value = self.parse_expr()?;
+                                    let value_end = value.span.at_end();
 
-                                fields.push((Some(field_name), value));
+                                    fields.push((Some(field_name), value));
 
-                                if !self.consume(&Token::Comma) {
-                                    // Check for missing trailing comma on multi-line
-                                    if matches!(self.peek(), Some(Token::Newline)) {
-                                        return Err(SoppoError::Parse {
-                                            message: "Missing trailing comma after struct field"
-                                                .to_string(),
-                                            span: value_end,
-                                        });
+                                    if !self.consume(&Token::Comma) {
+                                        if matches!(self.peek(), Some(Token::Newline)) {
+                                            return Err(SoppoError::Parse {
+                                                message:
+                                                    "Missing trailing comma after struct field"
+                                                        .to_string(),
+                                                span: value_end,
+                                            });
+                                        }
+                                        break;
                                     }
-                                    break;
+                                } else {
+                                    // Parse positional field: expr
+                                    let value = self.parse_expr()?;
+                                    let value_end = value.span.at_end();
+
+                                    fields.push((None, value));
+
+                                    if !self.consume(&Token::Comma) {
+                                        if matches!(self.peek(), Some(Token::Newline)) {
+                                            return Err(SoppoError::Parse {
+                                                message:
+                                                    "Missing trailing comma after struct field"
+                                                        .to_string(),
+                                                span: value_end,
+                                            });
+                                        }
+                                        break;
+                                    }
                                 }
 
+                                // Check for newlines between fields
+                                if matches!(self.peek(), Some(Token::Newline)) {
+                                    multiline = true;
+                                }
                                 self.skip_terminators();
 
                                 // Allow trailing comma
@@ -503,6 +572,7 @@ impl Parser {
                                     nullable: false,
                                 }),
                                 fields,
+                                multiline,
                             },
                             self.merge_spans(expr.span, end_span),
                         );
@@ -887,9 +957,13 @@ impl Parser {
             Token::LBrace => {
                 let mut fields = Vec::new();
                 let mut seen_named = false;
+                let mut multiline = false;
 
                 if !matches!(self.peek(), Some(Token::RBrace)) {
                     loop {
+                        if matches!(self.peek(), Some(Token::Newline)) {
+                            multiline = true;
+                        }
                         self.skip_terminators();
 
                         if matches!(self.peek(), Some(Token::RBrace)) {
@@ -926,6 +1000,9 @@ impl Parser {
                             break;
                         }
 
+                        if matches!(self.peek(), Some(Token::Newline)) {
+                            multiline = true;
+                        }
                         self.skip_terminators();
 
                         // Allow trailing comma
@@ -941,6 +1018,7 @@ impl Parser {
                     ExprKind::StructLit {
                         ty: None, // Type inferred from context
                         fields,
+                        multiline,
                     },
                     self.merge_spans(span, end_span),
                 ))

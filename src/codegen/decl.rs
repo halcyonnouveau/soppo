@@ -1,231 +1,292 @@
-use super::Codegen;
-use crate::syntax::{
-    Block, ConstDecl, EnumVariant, FuncDecl, IntFormat, Literal, Pattern, PatternKind, TypeDecl,
-    TypeKind, VarDecl,
+use std::collections::HashSet;
+
+use super::{Codegen, type_to_go_string};
+use crate::syntax::{FileId, LineColumn, Span};
+use crate::types::ast::{
+    TypedCallArg, TypedConstDecl, TypedDecl, TypedEnumVariant, TypedExpr, TypedExprKind, TypedFile,
+    TypedFuncDecl, TypedImportKind, TypedTypeDecl, TypedTypeKind, TypedVarDecl,
 };
 
 impl Codegen {
-    /// Generate a const declaration
-    pub(crate) fn gen_const_decl(&mut self, const_decl: &ConstDecl) {
-        if let Some(ty) = &const_decl.ty {
-            // const X type = value
-            self.emit(format!(
-                "const {} {} = ",
-                const_decl.ident,
-                self.go_type(&ty.name)
-            ));
-        } else {
-            // const X = value (type inference)
-            self.emit(format!("const {} = ", const_decl.ident));
+    /// Generate code for an entire typed file
+    pub fn gen_file(&mut self, file: &TypedFile) -> crate::error::Result<()> {
+        // Find the earliest position in the file (first import or first declaration)
+        let first_line = file
+            .imports
+            .first()
+            .map(|i| i.span.start.line)
+            .into_iter()
+            .chain(file.decls.first().map(|d| self.get_decl_span(d).start.line))
+            .min()
+            .unwrap_or(usize::MAX);
+
+        // Separate file-level comments from the rest
+        let (file_comments, other_comments): (Vec<_>, Vec<_>) = file
+            .comments
+            .iter()
+            .cloned()
+            .partition(|c| c.span.start.line < first_line);
+
+        // Set up only non-file-level comments for emission during declarations
+        self.set_comments(other_comments);
+
+        // Generate declarations first to discover needed imports
+        let decls_output = self.gen_declarations(file)?;
+
+        // Now build the final output with header, imports, and declarations
+        // Soppo generated marker - always first
+        self.emit_line("//soppo:generated");
+
+        // Emit file-level comments (after marker, before package)
+        for comment in &file_comments {
+            self.output.push_str(&comment.text);
+            self.output.push('\n');
         }
-        self.gen_expr(&const_decl.value);
+
+        // Package declaration
+        self.emit_line(&format!("package {}", file.package));
+        self.emit_line("");
+
+        // Collect explicit import paths
+        let explicit_imports: HashSet<_> = file.imports.iter().map(|i| i.path.as_str()).collect();
+
+        // Generate imports (explicit + auto-detected)
+        let has_imports = !file.imports.is_empty()
+            || self
+                .needed_imports
+                .iter()
+                .any(|i| !explicit_imports.contains(i.as_str()));
+
+        if has_imports {
+            // Add auto-detected imports that aren't already explicit
+            let auto_imports: Vec<_> = self
+                .needed_imports
+                .iter()
+                .filter(|i| !explicit_imports.contains(i.as_str()))
+                .cloned()
+                .collect();
+            for needed in auto_imports {
+                self.emit_line(&format!("import \"{}\"", needed));
+            }
+
+            for import in &file.imports {
+                self.emit_comments_before(import.span.byte_start, import.span.start.line);
+
+                // Transform Soppo imports if needed
+                let go_path = match (&import.kind, &self.module_path, &self.output_dir) {
+                    (TypedImportKind::Soppo(_), Some(module_path), Some(out_dir)) => {
+                        // Get local path from import
+                        if let Some(local_path) =
+                            crate::deps::get_local_package_path(&import.path, module_path)
+                        {
+                            format!("{}/{}/{}", module_path, out_dir, local_path)
+                        } else {
+                            import.path.clone()
+                        }
+                    }
+                    _ => import.path.clone(),
+                };
+
+                if let Some(alias) = &import.alias {
+                    self.emit_line(&format!("import {} \"{}\"", alias, go_path));
+                } else {
+                    self.emit_line(&format!("import \"{}\"", go_path));
+                }
+            }
+            self.emit_line("");
+        }
+
+        // Append the pre-generated declarations
+        self.output.push_str(&decls_output);
+
+        // Emit any remaining comments at the end
+        self.emit_remaining_comments();
+
+        Ok(())
+    }
+
+    /// Generate a constant declaration
+    pub(crate) fn gen_const_decl(&mut self, decl: &TypedConstDecl) {
+        // Doc comments are emitted via emit_comments_before in gen_typed_file
+        self.emit_indent();
+        self.emit("const ");
+        self.emit(&decl.ident.name);
+        if decl.has_explicit_type {
+            self.emit(" ");
+            self.emit(type_to_go_string(&decl.const_ty));
+        }
+        self.emit(" = ");
+        self.gen_expr(&decl.value);
         self.emit("\n");
     }
 
-    /// Generate a grouped const block (for iota support)
-    pub(crate) fn gen_const_block(&mut self, consts: &[ConstDecl]) {
-        self.emit_line("const (");
-        self.indent();
-        for const_decl in consts {
-            self.emit_indent();
-            if let Some(ty) = &const_decl.ty {
-                // X type = value
-                self.emit(format!(
-                    "{} {} = ",
-                    const_decl.ident,
-                    self.go_type(&ty.name)
-                ));
-                self.gen_expr(&const_decl.value);
-            } else {
-                // X = value or just X (for implicit iota continuation)
-                self.emit(&const_decl.ident);
-                // Only emit " = value" if the value isn't just "iota" on continuation lines
-                // For the first entry with iota, we need to emit it
-                // For subsequent entries, Go handles implicit continuation
-                let is_iota = matches!(
-                    &const_decl.value.kind,
-                    crate::syntax::ExprKind::Ident(name) if name == "iota"
-                );
-                if !is_iota || consts.first() == Some(const_decl) {
-                    self.emit(" = ");
-                    self.gen_expr(&const_decl.value);
-                }
-            }
-            self.emit("\n");
+    /// Generate a variable declaration
+    pub(crate) fn gen_var_decl(&mut self, decl: &TypedVarDecl) {
+        self.emit_indent();
+        self.emit("var ");
+        self.emit(&decl.ident.name);
+        if decl.has_explicit_type {
+            self.emit(" ");
+            self.emit(type_to_go_string(&decl.var_ty));
         }
-        self.dedent();
-        self.emit_line(")");
-    }
-
-    /// Generate a var declaration
-    pub(crate) fn gen_var_decl(&mut self, var_decl: &VarDecl) {
-        if let Some(ty) = &var_decl.ty {
-            if let Some(value) = &var_decl.value {
-                // var X type = value
-                self.emit(format!(
-                    "var {} {} = ",
-                    var_decl.ident,
-                    self.go_type(&ty.name)
-                ));
-                self.gen_expr(value);
-                self.emit("\n");
-            } else {
-                // var X type (zero value)
-                self.emit_line(&format!(
-                    "var {} {}",
-                    var_decl.ident,
-                    self.go_type(&ty.name)
-                ));
-            }
-        } else if let Some(value) = &var_decl.value {
-            // var X = value (type inference)
-            self.emit(format!("var {} = ", var_decl.ident));
+        if let Some(value) = &decl.value {
+            self.emit(" = ");
             self.gen_expr(value);
-            self.emit("\n");
         }
+        self.emit("\n");
     }
 
-    /// Generate a type declaration (enum or struct)
-    pub(crate) fn gen_type_decl(&mut self, type_decl: &TypeDecl) {
-        match &type_decl.kind {
-            TypeKind::Alias { target } => {
-                // Type alias: type Foo = Bar (Foo is exactly Bar)
+    /// Generate a type declaration
+    pub(crate) fn gen_type_decl(&mut self, decl: &TypedTypeDecl) {
+        // Doc comments are emitted via emit_comments_before in gen_typed_file
+        match &decl.kind {
+            TypedTypeKind::Alias { target } => {
                 self.emit_line(&format!(
-                    "type {} = {}",
-                    type_decl.ident,
-                    self.go_type_from_ast(target)
+                    "type {}{} = {}",
+                    decl.ident,
+                    self.format_generic_brackets(&decl.generics),
+                    type_to_go_string(target)
                 ));
             }
-
-            TypeKind::Definition { target } => {
-                // Type definition: type Foo Bar (Foo is a new distinct type)
+            TypedTypeKind::Definition { target } => {
                 self.emit_line(&format!(
-                    "type {} {}",
-                    type_decl.ident,
-                    self.go_type_from_ast(target)
+                    "type {}{} {}",
+                    decl.ident,
+                    self.format_generic_brackets(&decl.generics),
+                    type_to_go_string(target)
                 ));
             }
-
-            TypeKind::Enum { variants } => {
-                // Generate the interface with generics if present
-                let generic_params = self.format_generic_brackets(&type_decl.generics);
-
-                self.emit_soppo_enum_marker(type_decl, variants);
+            TypedTypeKind::Struct { fields } => {
                 self.emit_line(&format!(
-                    "type {}{} interface {{",
-                    type_decl.ident, generic_params
+                    "type {}{} struct {{",
+                    decl.ident,
+                    self.format_generic_brackets(&decl.generics)
                 ));
                 self.indent();
-                self.emit_line(&format!("is{}()", type_decl.ident));
+                for (name, ty, tag) in fields {
+                    let tag_str = tag.as_ref().map(|t| format!("`{}`", t)).unwrap_or_default();
+                    // Add //soppo:nilable comment for nullable pointer/slice/interface fields
+                    let nilable_comment = if ty.is_nullable() {
+                        " //soppo:nilable"
+                    } else {
+                        ""
+                    };
+                    let go_type = type_to_go_string(ty);
+                    // Check if this is an anonymous struct type (needs multiline formatting)
+                    if go_type.starts_with("*struct { ") && go_type.ends_with(" }") {
+                        self.emit_struct_field_with_anon_struct(
+                            name,
+                            &go_type,
+                            &tag_str,
+                            nilable_comment,
+                        );
+                    } else {
+                        let tag_with_space = if tag_str.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", tag_str)
+                        };
+                        self.emit_line(&format!(
+                            "{} {}{}{}",
+                            name, go_type, tag_with_space, nilable_comment
+                        ));
+                    }
+                }
+                self.dedent();
+                self.emit_line("}");
+            }
+            TypedTypeKind::Enum { variants } => {
+                // Generate enum as interface + variant structs
+                let generic_params = self.format_generic_brackets(&decl.generics);
+                let generic_names = self.format_generic_name_brackets(&decl.generics);
+
+                // Emit soppo:enum marker comment for Go tools to recognize this as a Soppo enum
+                self.emit_soppo_enum_marker(decl, variants);
+
+                // Interface type
+                self.emit_line(&format!(
+                    "type {}{} interface {{",
+                    decl.ident, generic_params
+                ));
+                self.indent();
+                self.emit_line(&format!("is{}()", decl.ident));
                 self.dedent();
                 self.emit_line("}");
                 self.emit_line("");
 
-                // Generate each variant as a type with namespaced name (EnumName_VariantName)
+                // Variant structs
                 for variant in variants {
-                    match variant {
-                        EnumVariant::Unit { ident: name, .. } => {
-                            // Unit variant: empty struct with generics if present
-                            let full_name = format!("{}_{}", type_decl.ident, name);
-                            let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names =
-                                self.format_generic_name_brackets(&type_decl.generics);
+                    let variant_ident = match variant {
+                        TypedEnumVariant::Unit { ident } => ident,
+                        TypedEnumVariant::Single { ident, .. } => ident,
+                        TypedEnumVariant::Struct { ident, .. } => ident,
+                    };
+                    let full_name = format!("{}_{}", decl.ident, variant_ident);
 
+                    match variant {
+                        TypedEnumVariant::Unit { .. } => {
                             self.emit_line(&format!(
                                 "type {}{} struct {{}}",
                                 full_name, generic_params
                             ));
-                            self.emit_line(&format!(
-                                "func ({}{}) is{}() {{}}",
-                                full_name, generic_names, type_decl.ident
-                            ));
-                            self.emit_line(&format!(
-                                "func ({}{}) String() string {{ return \"{}\" }}",
-                                full_name, generic_names, name
-                            ));
-                            self.emit_line("");
                         }
-                        EnumVariant::Single {
-                            ident: name, ty, ..
-                        } => {
-                            // Single value variant: struct with Value field and generics if present
-                            let full_name = format!("{}_{}", type_decl.ident, name);
-                            let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names =
-                                self.format_generic_name_brackets(&type_decl.generics);
-
+                        TypedEnumVariant::Single { ty, .. } => {
                             self.emit_line(&format!(
                                 "type {}{} struct {{",
                                 full_name, generic_params
                             ));
                             self.indent();
-                            self.emit_line(&format!("Value {}", self.go_type(&ty.name)));
+                            self.emit_line(&format!("Value {}", type_to_go_string(ty)));
                             self.dedent();
                             self.emit_line("}");
-                            self.emit_line(&format!(
-                                "func ({}{}) is{}() {{}}",
-                                full_name, generic_names, type_decl.ident
-                            ));
-                            self.emit_line("");
                         }
-                        EnumVariant::Struct {
-                            ident: name,
-                            fields,
-                            ..
-                        } => {
-                            // Struct variant: struct with all fields and generics if present
-                            let full_name = format!("{}_{}", type_decl.ident, name);
-                            let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names =
-                                self.format_generic_name_brackets(&type_decl.generics);
-
+                        TypedEnumVariant::Struct { fields, .. } => {
                             self.emit_line(&format!(
                                 "type {}{} struct {{",
                                 full_name, generic_params
                             ));
                             self.indent();
-                            for field in fields {
-                                let tag = field
-                                    .tag
-                                    .as_ref()
-                                    .map(|t| format!(" `{}`", t))
-                                    .unwrap_or_default();
-                                self.emit_line(&format!(
-                                    "{} {}{}",
-                                    field.ident,
-                                    self.go_type(&field.ty.name),
-                                    tag
-                                ));
+                            for (name, ty) in fields {
+                                self.emit_line(&format!("{} {}", name, type_to_go_string(ty)));
                             }
                             self.dedent();
                             self.emit_line("}");
-                            self.emit_line(&format!(
-                                "func ({}{}) is{}() {{}}",
-                                full_name, generic_names, type_decl.ident
-                            ));
-                            self.emit_line("");
                         }
                     }
+
+                    // Interface implementation
+                    self.emit_line(&format!(
+                        "func ({}{}) is{}() {{}}",
+                        full_name, generic_names, decl.ident
+                    ));
+
+                    // String() method for unit variants
+                    if matches!(variant, TypedEnumVariant::Unit { .. }) {
+                        self.emit_line(&format!(
+                            "func ({}{}) String() string {{ return \"{}\" }}",
+                            full_name, generic_names, variant_ident
+                        ));
+                    }
+
+                    self.emit_line("");
                 }
 
-                // Generate constructors for unit variants and functions for variants with data
+                // Generate var block for non-generic unit variants
                 let unit_variants: Vec<_> = variants
                     .iter()
-                    .filter(|v| matches!(v, EnumVariant::Unit { .. }))
+                    .filter(|v| matches!(v, TypedEnumVariant::Unit { .. }))
                     .collect();
 
-                if !unit_variants.is_empty() && type_decl.generics.is_empty() {
-                    // Only generate var block for non-generic unit variants
-                    // Var names don't use underscore (to avoid collision with type names)
+                if !unit_variants.is_empty() && decl.generics.is_empty() {
                     self.emit_line("var (");
                     self.indent();
                     for variant in unit_variants {
-                        if let EnumVariant::Unit { ident: name, .. } = variant {
-                            let type_name = format!("{}_{}", type_decl.ident, name);
-                            let var_name = format!("{}{}", type_decl.ident, name);
+                        if let TypedEnumVariant::Unit { ident } = variant {
+                            let type_name = format!("{}_{}", decl.ident, ident);
+                            let var_name = format!("{}{}", decl.ident, ident);
                             self.emit_line(&format!(
                                 "{} {} = {}{{}}",
-                                var_name, type_decl.ident, type_name
+                                var_name, decl.ident, type_name
                             ));
                         }
                     }
@@ -236,23 +297,15 @@ impl Codegen {
                 // Generate constructor functions for variants with data
                 for variant in variants {
                     match variant {
-                        EnumVariant::Single {
-                            ident: name, ty, ..
-                        } => {
-                            // Generate: func MyResultOk[T any, E any](value T) MyResult[T, E] { return MyResult_Ok[T, E]{Value: value} }
-                            // Function name without underscore, type name with underscore
-                            let func_name = format!("{}{}", type_decl.ident, name);
-                            let type_name = format!("{}_{}", type_decl.ident, name);
-                            let generic_params = self.format_generic_brackets(&type_decl.generics);
-                            let generic_names =
-                                self.format_generic_name_brackets(&type_decl.generics);
-
+                        TypedEnumVariant::Single { ident, ty } => {
+                            let func_name = format!("{}{}", decl.ident, ident);
+                            let type_name = format!("{}_{}", decl.ident, ident);
                             self.emit_line(&format!(
                                 "func {}{}(value {}) {}{} {{",
                                 func_name,
                                 generic_params,
-                                self.go_type(&ty.name),
-                                type_decl.ident,
+                                type_to_go_string(ty),
+                                decl.ident,
                                 generic_names
                             ));
                             self.indent();
@@ -263,115 +316,51 @@ impl Codegen {
                             self.dedent();
                             self.emit_line("}");
                         }
-                        EnumVariant::Struct { .. } => {
-                            // No constructor for struct variants - use struct literal syntax directly
+                        TypedEnumVariant::Unit { ident } if !decl.generics.is_empty() => {
+                            // Generic unit variants need constructor functions
+                            let func_name = format!("{}{}", decl.ident, ident);
+                            let type_name = format!("{}_{}", decl.ident, ident);
+                            self.emit_line(&format!(
+                                "func {}{}() {}{} {{",
+                                func_name, generic_params, decl.ident, generic_names
+                            ));
+                            self.indent();
+                            self.emit_line(&format!("return {}{}{{}}", type_name, generic_names));
+                            self.dedent();
+                            self.emit_line("}");
                         }
-                        EnumVariant::Unit { ident: name, .. } => {
-                            // For generic unit variants, generate a constructor function
-                            // Function name without underscore, type name with underscore
-                            if !type_decl.generics.is_empty() {
-                                let func_name = format!("{}{}", type_decl.ident, name);
-                                let type_name = format!("{}_{}", type_decl.ident, name);
-                                let generic_params =
-                                    self.format_generic_brackets(&type_decl.generics);
-                                let generic_names =
-                                    self.format_generic_name_brackets(&type_decl.generics);
-
-                                self.emit_line(&format!(
-                                    "func {}{}() {}{} {{",
-                                    func_name, generic_params, type_decl.ident, generic_names
-                                ));
-                                self.indent();
-                                self.emit_line(&format!(
-                                    "return {}{}{{}}",
-                                    type_name, generic_names
-                                ));
-                                self.dedent();
-                                self.emit_line("}");
-                            }
-                        }
+                        _ => {}
                     }
                 }
             }
-
-            TypeKind::Struct { fields } => {
-                // Generate struct type with generics if present
-                let generic_params = self.format_generic_brackets(&type_decl.generics);
-
-                self.emit_line(&format!(
-                    "type {}{} struct {{",
-                    type_decl.ident, generic_params
-                ));
-                self.indent();
-                for field in fields {
-                    let go_type = self.go_type_from_ast(&field.ty);
-                    let nilable_comment = self.nilable_comment(&field.ty);
-                    let tag = field
-                        .tag
-                        .as_ref()
-                        .map(|t| format!(" `{}`", t))
-                        .unwrap_or_default();
-
-                    // Special handling for nilable anonymous struct pointers
-                    // Format as multiline: *struct { //soppo:nilable\n  field1\n  field2\n}
-                    if !nilable_comment.is_empty() && go_type.starts_with("*struct { ") {
-                        self.emit_struct_field_with_anon_struct(
-                            &field.ident,
-                            &go_type,
-                            &tag,
-                            nilable_comment,
-                        );
-                    } else {
-                        self.emit_line(&format!(
-                            "{} {}{}{}",
-                            field.ident, go_type, tag, nilable_comment
-                        ));
-                    }
-                }
-                self.dedent();
-                self.emit_line("}");
-            }
-
-            TypeKind::Interface { methods } => {
-                // Generate Go interface directly
-                let generic_params = self.format_generic_brackets(&type_decl.generics);
-
+            TypedTypeKind::Interface { methods } => {
                 self.emit_line(&format!(
                     "type {}{} interface {{",
-                    type_decl.ident, generic_params
+                    decl.ident,
+                    self.format_generic_brackets(&decl.generics)
                 ));
                 self.indent();
                 for method in methods {
-                    self.emit_indent();
-                    self.emit(format!("{}(", method.ident));
-
-                    // Parameters
-                    for (i, param) in method.params.iter().enumerate() {
-                        if i > 0 {
-                            self.emit(", ");
-                        }
-                        self.emit(format!("{} {}", param.ident, self.go_type(&param.ty.name)));
-                    }
-
-                    self.emit(")");
-
-                    // Return types
-                    if !method.returns.is_empty() {
-                        if method.returns.len() == 1 {
-                            self.emit(format!(" {}", self.go_type(&method.returns[0].name)));
-                        } else {
-                            self.emit(" (");
-                            for (i, ty) in method.returns.iter().enumerate() {
-                                if i > 0 {
-                                    self.emit(", ");
-                                }
-                                self.emit(self.go_type(&ty.name));
-                            }
-                            self.emit(")");
-                        }
-                    }
-
-                    self.emit("\n");
+                    let params: Vec<String> = method
+                        .params
+                        .iter()
+                        .map(|p| format!("{} {}", p.ident.name, type_to_go_string(&p.ty)))
+                        .collect();
+                    let returns: Vec<String> =
+                        method.returns.iter().map(type_to_go_string).collect();
+                    let ret_str = if returns.is_empty() {
+                        String::new()
+                    } else if returns.len() == 1 {
+                        format!(" {}", returns[0])
+                    } else {
+                        format!(" ({})", returns.join(", "))
+                    };
+                    self.emit_line(&format!(
+                        "{}({}){}",
+                        method.ident.name,
+                        params.join(", "),
+                        ret_str
+                    ));
                 }
                 self.dedent();
                 self.emit_line("}");
@@ -380,21 +369,23 @@ impl Codegen {
     }
 
     /// Generate a function declaration
-    pub(crate) fn gen_func_decl(&mut self, func: &FuncDecl) {
+    pub(crate) fn gen_func_decl(&mut self, decl: &TypedFuncDecl) {
+        self.reset_error_vars();
+
         // Emit //soppo:nilable comment if any parameters or return types are nullable
         // Format: //soppo:nilable p q : 0 1
         //         (params before :, return indices after :)
-        let nilable_params: Vec<&str> = func
+        let nilable_params: Vec<&str> = decl
             .params
             .iter()
-            .filter(|p| p.ty.nullable)
+            .filter(|p| p.nullable)
             .map(|p| p.ident.name.as_str())
             .collect();
-        let nilable_returns: Vec<String> = func
+        let nilable_returns: Vec<String> = decl
             .returns
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.ty.nullable)
+            .filter(|(_, p)| p.nullable)
             .map(|(i, _)| i.to_string())
             .collect();
 
@@ -413,281 +404,247 @@ impl Codegen {
             self.emit_line(&format!("//soppo:nilable {}", annotation));
         }
 
-        // Function signature with optional receiver
+        // Doc comments are emitted via emit_comments_before in gen_typed_file
+        self.emit_indent();
         self.emit("func ");
 
-        if let Some(receiver) = &func.receiver {
-            // Use go_receiver_type to convert EnumName.Variant -> EnumName_Variant
-            let receiver_type = self.go_receiver_type(&receiver.ty.name);
-            self.emit(format!("({} {}) ", receiver.ident, receiver_type));
+        // Receiver
+        if let Some(receiver) = &decl.receiver {
+            self.emit("(");
+            self.emit(&receiver.ident.name);
+            self.emit(" ");
+            let recv_ty = type_to_go_string(&receiver.ty);
+            self.emit(self.go_receiver_type(&recv_ty));
+            self.emit(") ");
         }
 
-        self.emit(&func.ident);
-
-        // Generic parameters
-        let generic_params = self.format_generic_brackets(&func.generics);
-        if !generic_params.is_empty() {
-            self.emit(&generic_params);
-        }
-
-        self.emit("(");
+        // Function name and generics
+        self.emit(&decl.ident.name);
+        self.emit(self.format_generic_brackets(&decl.generics));
 
         // Parameters
-        // Note: //soppo:nilable comments on params would make Go syntax invalid
-        // Instead, we just strip the ? prefix and rely on type checking having validated nullability
-        for (i, param) in func.params.iter().enumerate() {
+        self.emit("(");
+        for (i, param) in decl.params.iter().enumerate() {
             if i > 0 {
                 self.emit(", ");
             }
-            let go_type = self.go_type_from_ast(&param.ty);
-            self.emit(format!("{} {}", param.ident, go_type));
+            self.emit(&param.ident.name);
+            self.emit(" ");
+            self.emit(type_to_go_string(&param.ty));
         }
-
         self.emit(")");
 
-        // Return type(s) - handles both named (x int, y string) and unnamed (int, string)
-        // Use go_type_from_ast to strip ? prefix from nullable types
-        self.current_return_types = func
+        // Set up return types for try statement expansion
+        self.current_return_types = decl
             .returns
             .iter()
-            .map(|p| self.go_type_from_ast(&p.ty))
+            .map(|p| type_to_go_string(&p.ty))
             .collect();
 
-        if !func.returns.is_empty() {
-            // Check if returns are named (first return has non-empty name)
-            let is_named = !func.returns[0].ident.name.is_empty();
-
-            if func.returns.len() == 1 && !is_named {
-                // Single unnamed return type
-                let go_type = self.go_type_from_ast(&func.returns[0].ty);
-                self.emit(format!(" {}", go_type));
-                self.current_func_return_type = Some(go_type);
+        // Return types
+        if !decl.returns.is_empty() {
+            let is_named = !decl.returns[0].ident.name.is_empty();
+            if decl.returns.len() == 1 && !is_named {
+                self.emit(" ");
+                self.emit(type_to_go_string(&decl.returns[0].ty));
             } else {
-                // Multi-value return or named returns: (type1, type2, ...) or (x int, y string)
-                let returns_str: Vec<String> = func
-                    .returns
-                    .iter()
-                    .map(|p| {
-                        let go_type = self.go_type_from_ast(&p.ty);
-                        if p.ident.name.is_empty() {
-                            go_type
-                        } else {
-                            format!("{} {}", p.ident.name, go_type)
-                        }
-                    })
-                    .collect();
-                self.emit(format!(" ({})", returns_str.join(", ")));
-                let types_only: Vec<String> = func
-                    .returns
-                    .iter()
-                    .map(|p| self.go_type_from_ast(&p.ty))
-                    .collect();
-                self.current_func_return_type = Some(types_only.join(", "));
+                self.emit(" (");
+                for (i, ret) in decl.returns.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    if !ret.ident.name.is_empty() {
+                        self.emit(&ret.ident.name);
+                        self.emit(" ");
+                    }
+                    self.emit(type_to_go_string(&ret.ty));
+                }
+                self.emit(")");
             }
-        } else {
-            self.current_func_return_type = None;
         }
 
         self.emit(" ");
+        self.gen_block(&decl.body);
+        self.emit("\n");
 
-        // Reset error variable counter for this function
-        self.reset_error_vars();
-
-        // Body
-        self.gen_block(&func.body);
-
-        // Clear return type after function is done
-        self.current_func_return_type = None;
+        // Clear return types after function
         self.current_return_types.clear();
-
-        self.output.push('\n');
     }
 
-    /// Generate a block
-    pub(crate) fn gen_block(&mut self, block: &Block) {
-        self.emit("{\n");
-        self.indent();
-
-        let mut prev_end_line = 0;
-        for stmt in &block.stmts {
-            // Preserve blank lines between statements
-            if prev_end_line > 0 && stmt.span.start.line > prev_end_line + 1 {
-                self.emit("\n");
-            }
-            self.gen_stmt(stmt);
-            prev_end_line = stmt.span.end.line;
-        }
-
-        self.dedent();
-        self.emit_indent();
-        self.emit("}");
-    }
-
-    /// Generate a pattern for match arms
-    pub(crate) fn gen_pattern(&mut self, pattern: &Pattern) {
-        // Get inferred type args if explicit ones are empty
-        let inferred_args = pattern.inferred_type_args.borrow();
-
-        match &pattern.kind {
-            PatternKind::Variant {
-                name,
-                type_args,
-                is_soppo_enum,
-            } => {
-                if is_soppo_enum.get() {
-                    // Soppo enum: convert qualified name to Go type name
-                    // Colour.Red → Colour_Red
-                    // pkg.Status.Active → pkg.Status_Active
-                    self.emit(self.convert_enum_pattern(name, type_args, inferred_args.as_ref()));
-                } else {
-                    // Go constant: keep as-is (e.g., tar.TypeDir)
-                    self.emit(name);
+    /// Generate a declaration
+    pub(crate) fn gen_decl(&mut self, decl: &TypedDecl) {
+        match decl {
+            TypedDecl::Const(c) => self.gen_const_decl(c),
+            TypedDecl::ConstBlock(consts) => {
+                self.emit_line("const (");
+                self.indent();
+                for (i, c) in consts.iter().enumerate() {
+                    self.emit_indent();
+                    self.emit(&c.ident.name);
+                    if c.has_explicit_type {
+                        self.emit(" ");
+                        self.emit(type_to_go_string(&c.const_ty));
+                        self.emit(" = ");
+                        self.gen_expr(&c.value);
+                    } else {
+                        // Check if value is just "iota" - for continuation lines, skip emitting it
+                        let is_iota =
+                            matches!(&c.value.kind, TypedExprKind::Ident(name) if name == "iota");
+                        if !is_iota || i == 0 {
+                            self.emit(" = ");
+                            self.gen_expr(&c.value);
+                        }
+                    }
+                    self.emit("\n");
                 }
+                self.dedent();
+                self.emit_line(")");
             }
-            PatternKind::Literal(lit) => match lit {
-                Literal::Integer(n, fmt) => match fmt {
-                    IntFormat::Decimal => self.emit(n.to_string()),
-                    IntFormat::Octal => self.emit(format!("0o{:o}", n)),
-                    IntFormat::Hex => self.emit(format!("0x{:x}", n)),
-                    IntFormat::Binary => self.emit(format!("0b{:b}", n)),
-                },
-                Literal::String(s) => self.emit(format!("\"{}\"", s)),
-                Literal::Bool(b) => self.emit(b.to_string()),
-                Literal::Nil => self.emit("nil"),
-            },
-            PatternKind::Destructor {
-                name, type_args, ..
-            } => {
-                // Convert qualified name to Go type name
-                self.emit(self.convert_enum_pattern(name, type_args, inferred_args.as_ref()));
-            }
-            PatternKind::StructDestructor {
-                name, type_args, ..
-            } => {
-                // Convert qualified name to Go type name
-                self.emit(self.convert_enum_pattern(name, type_args, inferred_args.as_ref()));
-            }
-            PatternKind::Guard(expr) => {
-                // For expression-less match, emit the boolean expression
-                self.gen_expr(expr.as_ref());
-            }
-            PatternKind::Default => {
-                // Default is handled separately, shouldn't reach here
-                self.emit("default");
-            }
+            TypedDecl::Var(v) => self.gen_var_decl(v),
+            TypedDecl::Type(t) => self.gen_type_decl(t),
+            TypedDecl::Func(f) => self.gen_func_decl(f),
         }
     }
 
-    /// Convert a qualified enum pattern name to Go type name
-    /// - `Colour.Red` → `Colour_Red` (soppo enum)
-    /// - `Option.Some` with type_args=[int] → `Option_Some[int]` (generic soppo enum)
-    /// - `pkg.Status.Active` → `pkg.Status_Active` (soppo enum in package)
-    /// - `tar.TypeDir` → `tar.TypeDir` (Go constant, unchanged)
-    fn convert_enum_pattern(
+    /// Generate typed declarations to a separate buffer (to discover needed imports first)
+    fn gen_declarations(&mut self, file: &TypedFile) -> crate::error::Result<String> {
+        let saved_output = std::mem::take(&mut self.output);
+
+        for decl in &file.decls {
+            let span = self.get_decl_span(decl);
+            self.emit_comments_before(span.byte_start, span.start.line);
+            self.gen_decl(decl);
+            self.emit_line("");
+        }
+
+        let decls = std::mem::replace(&mut self.output, saved_output);
+        Ok(decls)
+    }
+
+    /// Get the span of a typed declaration
+    fn get_decl_span(&self, decl: &TypedDecl) -> crate::syntax::Span {
+        let zero_span = Span {
+            byte_start: 0,
+            byte_end: 0,
+            start: LineColumn { line: 0, col: 0 },
+            end: LineColumn { line: 0, col: 0 },
+            file: FileId(0),
+        };
+        match decl {
+            TypedDecl::Const(c) => c.span,
+            TypedDecl::ConstBlock(consts) => consts.first().map(|c| c.span).unwrap_or(zero_span),
+            TypedDecl::Var(v) => v.span,
+            TypedDecl::Type(t) => t.span,
+            TypedDecl::Func(f) => f.span,
+        }
+    }
+
+    /// Reorder function call arguments based on named arguments
+    /// Named args are placed in their designated positions, positional args fill remaining slots
+    pub(crate) fn reorder_call_args<'a>(
         &self,
-        name: &str,
-        type_args: &[crate::syntax::TypeAnnotation],
-        inferred_type_args: Option<&Vec<String>>,
-    ) -> String {
-        // Format type args if present (prefer explicit, fall back to inferred)
-        let type_params_str = if !type_args.is_empty() {
-            let args: Vec<String> = type_args
-                .iter()
-                .map(|ta| self.go_type_from_ast(ta).to_string())
-                .collect();
-            format!("[{}]", args.join(", "))
-        } else if let Some(inferred) = inferred_type_args {
-            if inferred.is_empty() {
-                String::new()
-            } else {
-                let args: Vec<String> = inferred
+        func: &TypedExpr,
+        args: &'a [TypedCallArg],
+    ) -> Vec<(&'a TypedExpr, bool)> {
+        let has_named = args.iter().any(|(name, _, _)| name.is_some());
+
+        // If no named args, just return all in order
+        if !has_named {
+            return args.iter().map(|(_, arg, spread)| (arg, *spread)).collect();
+        }
+
+        // Look up parameter names (exclude variadic params)
+        let param_names: Option<Vec<String>> = if let TypedExprKind::Ident(func_name) = &func.kind {
+            self.global_state.lookup_function(func_name).map(|f| {
+                f.params
                     .iter()
-                    .map(|s| self.go_type(s).to_string())
-                    .collect();
-                format!("[{}]", args.join(", "))
-            }
+                    .filter(|(_, ty)| !ty.to_string().starts_with("variadic"))
+                    .map(|(name, _)| name.clone())
+                    .collect()
+            })
         } else {
-            String::new()
+            None
         };
 
-        let parts: Vec<&str> = name.split('.').collect();
-        match parts.len() {
-            0 => name.to_string(),
-            1 => name.to_string(),
-            2 => {
-                let base_type = parts[0];
-                let variant = parts[1];
+        if let Some(param_names) = param_names {
+            // Reorder based on parameter names
+            // Rules:
+            // - Named args reserve their specific slots first
+            // - Positional args fill remaining slots in order
+            // - Extra positional args go to variadic
+            let mut result: Vec<Option<(&TypedExpr, bool)>> = vec![None; param_names.len()];
+            let mut variadic_args: Vec<(&TypedExpr, bool)> = Vec::new();
+            let mut positional_args: Vec<(&TypedExpr, bool)> = Vec::new();
 
-                // Use the type system to check if it's an enum
-                if self.global_state.is_enum(base_type) {
-                    // Soppo enum like Result.Ok → Result_Ok
-                    // or Option.Some with type_args → Option_Some[int]
-                    format!("{}_{}{}", base_type, variant, type_params_str)
-                } else {
-                    // Go constant like tar.TypeDir - keep as-is
-                    name.to_string()
-                }
-            }
-            _ => {
-                // pkg.Type.Variant or pkg.subpkg.Type.Variant
-                let prefix = parts[..parts.len() - 2].join(".");
-                let type_name = parts[parts.len() - 2];
-                let variant = parts[parts.len() - 1];
-
-                // For cross-package enums, check using soppo_enum detection
-                if parts.len() == 3 {
-                    let pkg = parts[0];
-                    if self.global_state.is_soppo_enum(pkg, type_name) {
-                        return format!("{}.{}_{}{}", pkg, type_name, variant, type_params_str);
+            // First pass: process named args to reserve slots, collect positional args
+            for (name, arg, spread) in args {
+                match name {
+                    Some((n, _)) => {
+                        if let Some(idx) = param_names.iter().position(|p| p == n) {
+                            result[idx] = Some((arg, *spread));
+                        }
+                    }
+                    None => {
+                        positional_args.push((arg, *spread));
                     }
                 }
-
-                // Default: assume enum variant pattern
-                format!("{}.{}_{}{}", prefix, type_name, variant, type_params_str)
             }
+
+            // Second pass: fill remaining slots with positional args
+            let mut positional_iter = positional_args.into_iter();
+            for slot in result.iter_mut() {
+                if slot.is_none()
+                    && let Some(arg) = positional_iter.next()
+                {
+                    *slot = Some(arg);
+                }
+            }
+
+            // Any remaining positional args go to variadic
+            variadic_args.extend(positional_iter);
+
+            // Collect results (type checker already validated all are filled)
+            let mut ordered: Vec<(&TypedExpr, bool)> = result.into_iter().flatten().collect();
+
+            // Add variadic args at the end
+            ordered.extend(variadic_args);
+
+            ordered
+        } else {
+            // Unknown function - just use positional order (type checker would have errored)
+            args.iter().map(|(_, arg, spread)| (arg, *spread)).collect()
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::syntax::{FileId, Parser};
+    /// Emit a soppo:enum marker block comment for an enum type
+    fn emit_soppo_enum_marker(&mut self, decl: &TypedTypeDecl, variants: &[TypedEnumVariant]) {
+        // Format: /*soppo:enum\nEnumName[T, E] {\n    Ok T\n    Err E\n}\n*/
+        self.emit_line("/*soppo:enum");
 
-    #[test]
-    fn test_gen_simple_function() {
-        let source = "func add(x int, y int) int { return x + y }";
-        let mut parser = Parser::new(source, FileId(0));
-        let func = parser.parse_func_decl().unwrap();
+        // Enum name with generics (Soppo-style, just names)
+        let generic_names = self.format_generic_name_brackets(&decl.generics);
+        self.emit_line(&format!("{}{} {{", decl.ident, generic_names));
 
-        let mut codegen = Codegen::new();
-        codegen.gen_func_decl(&func);
-
-        let output = codegen.output();
-        assert!(output.contains("func add(x int, y int) int"));
-        assert!(output.contains("return x + y"));
-    }
-
-    #[test]
-    fn test_gen_complete_file() {
-        let source = r#"
-            func add(x int, y int) int {
-                return x + y
+        // Variants
+        for variant in variants {
+            match variant {
+                TypedEnumVariant::Unit { ident } => {
+                    self.emit_line(&format!("    {}", ident));
+                }
+                TypedEnumVariant::Single { ident, ty } => {
+                    self.emit_line(&format!("    {} {}", ident, type_to_go_string(ty)));
+                }
+                TypedEnumVariant::Struct { ident, fields } => {
+                    self.emit_line(&format!("    {} {{", ident));
+                    for (name, ty) in fields {
+                        self.emit_line(&format!("        {} {}", name, type_to_go_string(ty)));
+                    }
+                    self.emit_line("    }");
+                }
             }
+        }
 
-            func main() int {
-                return add(1, 2)
-            }
-        "#;
-        let mut parser = Parser::new(source, FileId(0));
-        let file = parser.parse_file().unwrap();
-
-        let mut codegen = Codegen::new();
-        codegen.gen_file(&file).unwrap();
-
-        let output = codegen.output();
-        assert!(output.contains("package main"));
-        assert!(output.contains("func add(x int, y int) int"));
-        assert!(output.contains("func main() int"));
+        self.emit_line("}");
+        self.emit_line("*/");
     }
 }

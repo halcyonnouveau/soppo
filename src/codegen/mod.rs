@@ -3,18 +3,15 @@ mod expr;
 mod stmt;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
 
-use crate::error::Result;
-use crate::syntax::{AssignOp, BinOp, Comment, Decl, EnumVariant, File, Generic, Stmt, TypeDecl};
-use crate::types::GlobalCtxt;
+use crate::syntax::{AssignOp, BinOp, Comment, Generic, Stmt};
+use crate::types::{GlobalCtxt, Infer, Type};
 
 /// Code generator for emitting Go code
 pub struct Codegen {
     pub(crate) output: String,
     indent_level: usize,
     pub(crate) global_state: GlobalCtxt,
-    pub(crate) current_func_return_type: Option<String>,
     /// Current function's return types (for ? operator zero value generation)
     pub(crate) current_return_types: Vec<String>,
     /// Counter for generating unique error variable names (_err0, _err1, etc.)
@@ -25,8 +22,6 @@ pub struct Codegen {
     module_path: Option<String>,
     /// Output directory relative to project root (e.g., "gen")
     output_dir: Option<String>,
-    /// Project root for checking if imports are Soppo packages
-    project_root: Option<PathBuf>,
     /// Imports needed by generated code (e.g., "fmt" for string interpolation)
     pub(crate) needed_imports: HashSet<String>,
 }
@@ -38,14 +33,12 @@ impl Codegen {
             output: String::new(),
             indent_level: 0,
             global_state,
-            current_func_return_type: None,
             current_return_types: Vec::new(),
             error_var_counter: 0,
             comments: Vec::new(),
             comment_idx: 0,
             module_path: None,
             output_dir: None,
-            project_root: None,
             needed_imports: HashSet::new(),
         }
     }
@@ -63,12 +56,10 @@ impl Codegen {
         global_state: GlobalCtxt,
         module_path: String,
         output_dir: Option<String>,
-        project_root: PathBuf,
     ) -> Self {
         Self {
             module_path: Some(module_path),
             output_dir,
-            project_root: Some(project_root),
             ..Self::base(global_state)
         }
     }
@@ -169,10 +160,20 @@ impl Codegen {
         &self.output
     }
 
-    /// Generate Go code for a list of statements (used for doctests)
+    /// Generate Go code for a list of statements (used for doctests).
+    /// This creates a minimal type inference context, infers types for the statements,
+    /// and uses the typed codegen.
     pub fn gen_statements(&mut self, stmts: &[Stmt]) {
+        // Create a minimal type inference context with existing global state
+        let mut infer = match Infer::with_global_state(self.global_state.clone()) {
+            Ok(infer) => infer,
+            Err(_) => return, // Can't create infer context
+        };
+
         for stmt in stmts {
-            self.gen_stmt(stmt);
+            // Infer types and get the typed statement directly
+            let typed_stmt = infer.infer_stmt(stmt);
+            self.gen_stmt(&typed_stmt);
         }
     }
 
@@ -243,243 +244,46 @@ impl Codegen {
         }
     }
 
-    /// Emit a soppo:enum marker block comment for an enum type
-    pub(crate) fn emit_soppo_enum_marker(
-        &mut self,
-        type_decl: &TypeDecl,
-        variants: &[EnumVariant],
-    ) {
-        // Format: /*soppo:enum\nEnumName[T, E] {\n    Ok T\n    Err E\n}\n*/
-        self.emit_line("/*soppo:enum");
-
-        // Enum name with generics (Soppo-style, just names)
-        let generic_names = self.format_generic_name_brackets(&type_decl.generics);
-        self.emit_line(&format!("{}{} {{", type_decl.ident, generic_names));
-
-        // Variants
-        for variant in variants {
-            match variant {
-                EnumVariant::Unit { ident: name, .. } => {
-                    self.emit_line(&format!("    {}", name));
-                }
-                EnumVariant::Single {
-                    ident: name, ty, ..
-                } => {
-                    self.emit_line(&format!("    {} {}", name, self.go_type(&ty.name)));
-                }
-                EnumVariant::Struct {
-                    ident: name,
-                    fields,
-                    ..
-                } => {
-                    self.emit_line(&format!("    {} {{", name));
-                    for field in fields {
-                        let tag = field
-                            .tag
-                            .as_ref()
-                            .map(|t| format!(" `{}`", t))
-                            .unwrap_or_default();
-                        self.emit_line(&format!(
-                            "        {} {}{}",
-                            field.ident,
-                            self.go_type(&field.ty.name),
-                            tag
-                        ));
-                    }
-                    self.emit_line("    }");
-                }
-            }
-        }
-
-        self.emit_line("}");
-        self.emit_line("*/");
-    }
-
-    /// Generate code for an entire file
-    pub fn gen_file(&mut self, file: &File) -> Result<()> {
-        // Find the earliest position in the file (first import or first declaration)
-        let first_line = file
-            .imports
-            .first()
-            .map(|i| i.span.start.line)
-            .into_iter()
-            .chain(file.decls.first().map(|d| d.span().start.line))
-            .min()
-            .unwrap_or(usize::MAX);
-
-        // Separate file-level comments from the rest
-        let (file_comments, other_comments): (Vec<_>, Vec<_>) = file
-            .comments
-            .iter()
-            .cloned()
-            .partition(|c| c.span.start.line < first_line);
-
-        // Set up only non-file-level comments for emission during gen_declarations
-        self.set_comments(other_comments);
-
-        // Generate declarations first to discover needed imports
-        let decls_output = self.gen_declarations(file)?;
-
-        // Now build the final output with header, imports, and declarations
-        // Soppo generated marker - always first
-        self.emit_line("//soppo:generated");
-
-        // Emit file-level comments (after marker, before package)
-        for comment in &file_comments {
-            self.output.push_str(&comment.text);
-            self.output.push('\n');
-        }
-
-        // Package declaration
-        self.emit_line(&format!("package {}", file.package));
-        self.emit_line("");
-
-        // Collect explicit import paths
-        let explicit_imports: HashSet<_> = file.imports.iter().map(|i| i.path.as_str()).collect();
-
-        // Generate imports (explicit + auto-detected)
-        let has_imports = !file.imports.is_empty()
-            || self
-                .needed_imports
-                .iter()
-                .any(|i| !explicit_imports.contains(i.as_str()));
-
-        if has_imports {
-            // Add auto-detected imports that aren't already explicit
-            let auto_imports: Vec<_> = self
-                .needed_imports
-                .iter()
-                .filter(|i| !explicit_imports.contains(i.as_str()))
-                .cloned()
-                .collect();
-            for needed in auto_imports {
-                self.emit_line(&format!("import \"{}\"", needed));
-            }
-
-            for import in &file.imports {
-                self.emit_comments_before(import.span.byte_start, import.span.start.line);
-
-                // Check if this is a local Soppo import that needs transformation
-                // Local Soppo imports: github.com/user/project/helpers -> github.com/user/project/gen/helpers
-                let is_soppo = match (&self.module_path, &self.project_root) {
-                    (Some(module_path), Some(project_root)) => {
-                        crate::deps::is_soppo_import(&import.path, module_path, project_root)
-                    }
-                    _ => false,
-                };
-
-                let go_path = if is_soppo {
-                    let module_path = self.module_path.as_ref().unwrap();
-                    // Get the local path portion (e.g., "helpers" from "github.com/user/project/helpers")
-                    let local_path =
-                        crate::deps::get_local_package_path(&import.path, module_path).unwrap();
-
-                    // Build Go import path: {module_path}/{output_dir}/{local_path}
-                    match &self.output_dir {
-                        Some(out_dir) => {
-                            format!("{}/{}/{}", module_path, out_dir, local_path)
-                        }
-                        None => {
-                            // No output_dir, keep original path
-                            import.path.clone()
-                        }
-                    }
+    /// Convert a struct type name for codegen:
+    /// - `Type` → `Type` (simple type)
+    /// - `pkg.Type` → `pkg.Type` (cross-package type)
+    /// - `Type.Variant` → `Type_Variant` (enum variant)
+    /// - `pkg.Type.Variant` → `pkg.Type_Variant` (cross-package enum variant)
+    pub(crate) fn convert_struct_type_name(&self, name: &str) -> String {
+        let parts: Vec<&str> = name.split('.').collect();
+        match parts.len() {
+            0 | 1 => name.to_string(), // Simple type
+            2 => {
+                // Could be pkg.Type or Type.Variant
+                // Use the type system to check if it's an enum
+                if self.global_state.is_enum(parts[0]) {
+                    // Enum variant - convert to Type_Variant
+                    format!("{}_{}", parts[0], parts[1])
                 } else {
-                    // Go import - keep as-is
-                    import.path.clone()
-                };
-
-                // Generate with alias if present
-                if let Some(alias) = &import.alias {
-                    self.emit_line(&format!("import {} \"{}\"", alias, go_path));
-                } else {
-                    self.emit_line(&format!("import \"{}\"", go_path));
+                    // pkg.Type - keep as is
+                    name.to_string()
                 }
             }
-            self.emit_line("");
-        }
-
-        // Append the pre-generated declarations
-        self.output.push_str(&decls_output);
-
-        // Emit any remaining comments at the end
-        self.emit_remaining_comments();
-        Ok(())
-    }
-
-    /// Generate declarations to a separate buffer (to discover needed imports first)
-    fn gen_declarations(&mut self, file: &File) -> Result<String> {
-        let saved_output = std::mem::take(&mut self.output);
-
-        for decl in &file.decls {
-            match decl {
-                Decl::Const(const_decl) => {
-                    self.emit_comments_before(
-                        const_decl.span.byte_start,
-                        const_decl.span.start.line,
-                    );
-                    self.gen_const_decl(const_decl);
-                    self.emit_line("");
-                }
-                Decl::ConstBlock(consts) => {
-                    if let Some(first) = consts.first() {
-                        self.emit_comments_before(first.span.byte_start, first.span.start.line);
-                    }
-                    self.gen_const_block(consts);
-                    self.emit_line("");
-                }
-                Decl::Var(var_decl) => {
-                    self.emit_comments_before(var_decl.span.byte_start, var_decl.span.start.line);
-                    self.gen_var_decl(var_decl);
-                    self.emit_line("");
-                }
-                Decl::Type(type_decl) => {
-                    self.emit_comments_before(type_decl.span.byte_start, type_decl.span.start.line);
-                    self.gen_type_decl(type_decl);
-                    self.emit_line("");
-                }
-                Decl::Func(func) => {
-                    self.emit_comments_before(func.span.byte_start, func.span.start.line);
-                    self.gen_func_decl(func);
-                    self.emit_line("");
-                }
-            }
-        }
-
-        let decls = std::mem::replace(&mut self.output, saved_output);
-        Ok(decls)
-    }
-
-    /// Convert Soppo type to Go type
-    pub(crate) fn go_type<'a>(&self, ty: &'a str) -> &'a str {
-        match ty {
-            "()" => "", // Unit type
-            _ => ty,
-        }
-    }
-
-    /// Convert Soppo type to Go type, stripping the ? prefix for nullable types
-    /// Go doesn't have nullable syntax - nullability is tracked by Soppo's type checker
-    pub(crate) fn go_type_from_ast(&self, ty: &crate::syntax::TypeAnnotation) -> String {
-        let name = &ty.name;
-        // Strip ? prefix if present (nullable marker in Soppo syntax)
-        let go_name = name.strip_prefix('?').unwrap_or(name);
-        match go_name {
-            "()" => String::new(), // Unit type
             _ => {
-                // Handle generic type arguments: Option[int] -> Option[int]
-                // Only add [args] if this is a generic type (check type system)
-                // For compound types like *T, []T, map[K]V, the args contain inner types
-                // but those are already encoded in the name, so we don't add them again
-                if !ty.args.is_empty() && self.global_state.is_generic_type(go_name) {
-                    let args: Vec<String> = ty
-                        .args
-                        .iter()
-                        .map(|a| self.go_type(&a.name).to_string())
-                        .collect();
-                    format!("{}[{}]", go_name, args.join(", "))
+                // pkg.Type.Variant or deeper
+                // Check if the second-to-last part is an enum in the package context
+                let prefix = parts[..parts.len() - 2].join(".");
+                let type_name = parts[parts.len() - 2];
+                let variant = parts[parts.len() - 1];
+
+                // For cross-package enums, check using soppo_enum detection
+                if parts.len() == 3 {
+                    let pkg = parts[0];
+                    if self.global_state.is_soppo_enum(pkg, type_name) {
+                        return format!("{}.{}_{}", pkg, type_name, variant);
+                    }
+                }
+
+                // Default: assume enum variant pattern
+                if prefix.is_empty() {
+                    format!("{}_{}", type_name, variant)
                 } else {
-                    go_name.to_string()
+                    format!("{}.{}_{}", prefix, type_name, variant)
                 }
             }
         }
@@ -499,12 +303,6 @@ impl Codegen {
         let converted = base.replace('.', "_");
 
         format!("{}{}", prefix, converted)
-    }
-
-    /// Generate nilable comment if the type is nullable
-    /// Returns " //soppo:nilable" if nullable, empty string otherwise
-    pub(crate) fn nilable_comment(&self, ty: &crate::syntax::TypeAnnotation) -> &'static str {
-        if ty.nullable { " //soppo:nilable" } else { "" }
     }
 
     /// Emit a struct field with an anonymous struct type, formatting it as multiline
@@ -604,4 +402,221 @@ impl Default for Codegen {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Convert a Type to a Go type string
+pub fn type_to_go_string(ty: &Type) -> String {
+    match ty {
+        Type::Con { sym, args, .. } => {
+            let name = sym.name.as_str();
+            let module = &sym.module.0;
+
+            // Build the full qualified name if module is present
+            let full_name = if module.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}.{}", module, name)
+            };
+
+            // Handle pointer types - they store inner type in args but don't emit as generics
+            if let Some(stripped) = name.strip_prefix('*') {
+                // For qualified pointer types like *types.Config, the inner type is in args
+                // Check if there's an inner type with a module
+                if let Some(inner_ty) = args.first() {
+                    let inner_str = type_to_go_string(inner_ty);
+                    // If the inner type has a module prefix, use it
+                    if inner_str.contains('.') || !module.is_empty() {
+                        return format!("*{}", inner_str);
+                    }
+                }
+                // Fallback: qualified pointer type like *types.Config with module in sym
+                if !module.is_empty() {
+                    return format!("*{}.{}", module, stripped);
+                }
+                return name.to_string();
+            }
+
+            // Handle slice types - they store element type in args but don't emit as generics
+            if let Some(stripped) = name.strip_prefix("[]") {
+                // For qualified slice types like []types.Config, the inner type is in args
+                if let Some(inner_ty) = args.first() {
+                    let inner_str = type_to_go_string(inner_ty);
+                    if inner_str.contains('.') || !module.is_empty() {
+                        return format!("[]{}", inner_str);
+                    }
+                }
+                // Fallback: qualified slice type with module in sym
+                if !module.is_empty() {
+                    return format!("[]{}.{}", module, stripped);
+                }
+                return name.to_string();
+            }
+
+            // Handle channel types
+            if name.starts_with("chan ")
+                || name.starts_with("<-chan ")
+                || name.starts_with("chan<-")
+            {
+                return full_name;
+            }
+
+            // Handle map types - format is map[K]V
+            if name.starts_with("map[") {
+                return full_name;
+            }
+
+            // Handle variadic types: variadic[T] -> ...T
+            if name == "variadic" && args.len() == 1 {
+                return format!("...{}", type_to_go_string(&args[0]));
+            }
+
+            if args.is_empty() {
+                // Handle special type names
+                match name {
+                    "()" => String::new(),
+                    _ => full_name,
+                }
+            } else {
+                // Generic type with arguments
+                let arg_strs: Vec<String> = args.iter().map(type_to_go_string).collect();
+                format!("{}[{}]", full_name, arg_strs.join(", "))
+            }
+        }
+        Type::Func { args, ret, .. } => {
+            // Function type: func(a int, b string) bool
+            let param_strs: Vec<String> = args
+                .iter()
+                .map(|(name, ty)| {
+                    if let Some(n) = name {
+                        format!("{} {}", n, type_to_go_string(ty))
+                    } else {
+                        type_to_go_string(ty)
+                    }
+                })
+                .collect();
+            let ret_str = type_to_go_string(ret);
+            if ret_str.is_empty() {
+                format!("func({})", param_strs.join(", "))
+            } else {
+                format!("func({}) {}", param_strs.join(", "), ret_str)
+            }
+        }
+        Type::Var(id) => {
+            // Type variable - shouldn't appear in codegen, but handle gracefully
+            format!("T{}", id)
+        }
+        Type::Never => {
+            // Never type - shouldn't appear in codegen
+            "/* never */".to_string()
+        }
+        Type::Error => "/* error type */".to_string(),
+    }
+}
+
+/// Get the default format specifier for a Type
+pub(crate) fn default_format_for_type(ty: &Type) -> String {
+    match ty {
+        Type::Con { sym, .. } => {
+            match sym.name.as_str() {
+                // String types
+                "string" => "%s".to_string(),
+
+                // Integer types
+                "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16"
+                | "uint32" | "uint64" | "uintptr" | "byte" | "rune" => "%d".to_string(),
+
+                // Float types
+                "float32" | "float64" => "%g".to_string(),
+
+                // Boolean
+                "bool" => "%t".to_string(),
+
+                // Default to %v for other types
+                _ => "%v".to_string(),
+            }
+        }
+        // Functions, type variables, never, and errors all use %v
+        Type::Func { .. } | Type::Var(_) | Type::Never | Type::Error => "%v".to_string(),
+    }
+}
+
+/// Parse field definitions from an anonymous struct type name.
+/// Input: "struct { input string; major, minor, patch int; wantErr bool }"
+/// Output: [("input", "string"), ("major", "int"), ("minor", "int"), ("patch", "int"), ("wantErr", "bool")]
+pub(crate) fn parse_anon_struct_fields(ty: &Type) -> Option<Vec<(String, String)>> {
+    let s = match ty {
+        Type::Con { sym, .. } => &sym.name,
+        _ => return None,
+    };
+
+    // Handle both "struct{...}" and "struct { ... }" formats
+    let inner = s
+        .strip_prefix("struct {")
+        .or_else(|| s.strip_prefix("struct{"))?
+        .strip_suffix('}')?
+        .trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let mut fields = Vec::new();
+    for field_def in inner.split(';') {
+        let field_def = field_def.trim();
+        if field_def.is_empty() {
+            continue;
+        }
+        // Handle grouped fields like "a, b, c int" - split from end to get type
+        if let Some(last_space) = field_def.rfind(' ') {
+            let names_part = &field_def[..last_space];
+            let type_part = field_def[last_space + 1..].trim();
+            // Split on comma for grouped names
+            for name in names_part.split(',') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    fields.push((name.to_string(), type_part.to_string()));
+                }
+            }
+        }
+    }
+    Some(fields)
+}
+
+/// Parse field names from an anonymous struct type name.
+/// Input: "struct { input string; major, minor, patch int; wantErr bool }"
+/// Output: ["input", "major", "minor", "patch", "wantErr"]
+pub(crate) fn parse_anon_struct_field_names(ty: &Type) -> Option<Vec<String>> {
+    let s = match ty {
+        Type::Con { sym, .. } => &sym.name,
+        _ => return None,
+    };
+
+    // Handle both "struct{...}" and "struct { ... }" formats
+    let inner = s
+        .strip_prefix("struct {")
+        .or_else(|| s.strip_prefix("struct{"))?
+        .strip_suffix('}')?
+        .trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+
+    let mut names = Vec::new();
+    for field_def in inner.split(';') {
+        let field_def = field_def.trim();
+        if field_def.is_empty() {
+            continue;
+        }
+        // Handle grouped fields like "a, b, c int" - split from end to get type
+        if let Some(last_space) = field_def.rfind(' ') {
+            let names_part = &field_def[..last_space];
+            // Split on comma for grouped names
+            for name in names_part.split(',') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    Some(names)
 }

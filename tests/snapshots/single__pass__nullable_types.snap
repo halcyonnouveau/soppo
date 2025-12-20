@@ -74,7 +74,10 @@ func main() {
 	printUser(newUser)
 
 	// === Struct with nullable field ===
-	container := Container{required: (&User{name: "Required", age: 1}), optional: nil}
+	container := Container{
+		required: (&User{name: "Required", age: 1}),
+		optional: nil,
+	}
 	printUser(container.required)
 
 	if container.optional != nil {

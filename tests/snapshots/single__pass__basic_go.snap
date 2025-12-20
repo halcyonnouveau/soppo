@@ -106,7 +106,12 @@ func arrayOps() int {
 
 // Struct creation and field access
 func createUser(name string, age int) User {
-	user := User{id: UserId(1), name: name, age: age, active: true}
+	user := User{
+		id: UserId(1),
+		name: name,
+		age: age,
+		active: true,
+	}
 	return user
 }
 

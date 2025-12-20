@@ -1,235 +1,170 @@
-use super::Codegen;
-use crate::syntax::{
-    Arm, Expr, ExprKind, FieldPattern, IntFormat, Literal, PatternKind, SelectCaseKind, Stmt,
-    StmtKind,
+use super::{Codegen, type_to_go_string};
+use crate::syntax::{IntFormat, Literal};
+use crate::types::Type;
+use crate::types::ast::{
+    TypedArm, TypedBlock, TypedExpr, TypedExprKind, TypedFieldPattern, TypedPatternKind,
+    TypedSelectCase, TypedSelectCaseKind, TypedStmt, TypedStmtKind,
 };
 
 impl Codegen {
-    /// Emit a statement ending with optional trailing comment and newline
-    pub(crate) fn emit_stmt_end(&mut self, line: usize) {
+    /// Emit statement ending with optional trailing comment and newline
+    fn emit_stmt_end(&mut self, line: usize) {
         self.emit_trailing_comment(line);
         self.emit("\n");
     }
 
-    /// Generate a statement inline (no indent, no newline) - for C-style for loop parts
-    pub(crate) fn gen_stmt_inline(&mut self, stmt: &Stmt) {
-        match &stmt.kind {
-            StmtKind::Decl { ident: name, value } => {
-                self.emit(format!("{} := ", name));
-                self.gen_expr(value);
-            }
-            StmtKind::Assign { target, value } => {
-                self.gen_expr(target);
-                self.emit(" = ");
-                self.gen_expr(value);
-            }
-            StmtKind::IncDec { target, is_inc } => {
-                self.gen_expr(target);
-                self.emit(if *is_inc { "++" } else { "--" });
-            }
-            StmtKind::CompoundAssign { target, op, value } => {
-                let op_str = self.go_assign_op(op).to_string();
-                self.gen_expr(target);
-                self.emit(" ");
-                self.emit(&op_str);
-                self.emit(" ");
-                self.gen_expr(value);
-            }
-            StmtKind::Expr(expr) => {
-                self.gen_expr(expr);
-            }
-            // For other statement types, fall back to full generation (shouldn't happen in for loop)
-            _ => self.gen_stmt(stmt),
-        }
-    }
-
-    /// Generate a statement
-    pub(crate) fn gen_stmt(&mut self, stmt: &Stmt) {
-        // Emit any comments that appear before this statement
+    /// Generate a statement from TypedStmt
+    pub(crate) fn gen_stmt(&mut self, stmt: &TypedStmt) {
+        // Emit any comments that should appear before this statement
         self.emit_comments_before(stmt.span.byte_start, stmt.span.start.line);
 
         // Track the statement's line for trailing comments
         let stmt_line = stmt.span.start.line;
 
         match &stmt.kind {
-            StmtKind::Decl { ident: name, value } => {
+            TypedStmtKind::Decl { ident, value, .. } => {
                 self.emit_indent();
                 // Check if assigning an enum variant struct literal
                 // If so, declare with interface type so type assertions work in Go
-                if let ExprKind::StructLit { ty: Some(ty), .. } = &value.kind {
-                    // Check for enum variant pattern: EnumType.Variant
-                    if let Some((enum_name, _variant)) = ty.name.split_once('.') {
-                        // Use the type system to check if this is actually an enum
-                        if self.global_state.is_enum(enum_name) {
-                            // This is an enum variant like Shape.Circle
-                            // Generate: var name EnumInterface = Variant{...}
-                            let interface_type = self.go_type(enum_name);
-                            self.emit(format!("var {} {} = ", name, interface_type));
-                            self.gen_expr(value);
-                            self.emit_stmt_end(stmt_line);
-                            return;
-                        }
+                if let TypedExprKind::StructLit { struct_ty, .. } = &value.kind {
+                    let type_str = type_to_go_string(struct_ty);
+                    // Check for enum variant pattern: EnumType.Variant or EnumType_Variant
+                    if let Some((enum_name, _variant)) = type_str.split_once('.')
+                        && self.global_state.is_enum(enum_name)
+                    {
+                        // This is an enum variant like Shape.Circle
+                        // Generate: var name EnumInterface = Variant{...}
+                        self.emit("var ");
+                        self.emit(&ident.name);
+                        self.emit(" ");
+                        self.emit(enum_name);
+                        self.emit(" = ");
+                        self.gen_expr(value);
+                        self.emit_stmt_end(stmt_line);
+                        return;
                     }
                 }
-                self.emit(format!("{} := ", name));
-                self.gen_expr(value);
-                self.emit_stmt_end(stmt_line);
-            }
-
-            StmtKind::MultiDecl {
-                ident: names,
-                values,
-            } => {
-                self.emit_indent();
-                self.emit(
-                    names
-                        .iter()
-                        .map(|n| n.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                );
+                self.emit(&ident.name);
                 self.emit(" := ");
-
-                // Check for comma-ok idiom: v, ok := expr
-                // For these expressions, generate native Go comma-ok syntax
-                if names.len() == 2
-                    && values.len() == 1
-                    && let Some(raw) = self.gen_comma_ok_expr(&values[0])
-                {
-                    self.emit(&raw);
-                    self.emit_stmt_end(stmt_line);
-                    return;
-                }
-
-                for (i, val) in values.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
-                    }
-                    self.gen_expr(val);
-                }
-                self.emit_stmt_end(stmt_line);
-            }
-
-            StmtKind::VarDecl {
-                ident: name,
-                ty,
-                value,
-            } => {
-                self.emit_indent();
-                match (ty, value) {
-                    (Some(t), Some(expr)) => {
-                        // var x type = value
-                        self.emit(format!("var {} {} = ", name, self.go_type(&t.name)));
-                        self.gen_expr(expr);
-                    }
-                    (Some(t), None) => {
-                        // var x type (zero value)
-                        self.emit(format!("var {} {}", name, self.go_type(&t.name)));
-                    }
-                    (None, Some(expr)) => {
-                        // var x = value (type inference)
-                        // For enum variants, emit explicit interface type
-                        if let ExprKind::StructLit { ty: Some(ty), .. } = &expr.kind
-                            && let Some((enum_name, _variant)) = ty.name.split_once('.')
-                            && self.global_state.is_enum(enum_name)
-                        {
-                            let interface_type = self.go_type(enum_name);
-                            self.emit(format!("var {} {} = ", name, interface_type));
-                            self.gen_expr(expr);
-                            self.emit_stmt_end(stmt_line);
-                            return;
-                        }
-                        self.emit(format!("var {} = ", name));
-                        self.gen_expr(expr);
-                    }
-                    // INVARIANT: type checker ensures var has type or value
-                    (None, None) => unreachable!("var declaration without type or value"),
-                }
-                self.emit_stmt_end(stmt_line);
-            }
-
-            StmtKind::ConstDecl {
-                ident: name,
-                ty,
-                value,
-            } => {
-                self.emit_indent();
-                if let Some(t) = ty {
-                    // const x type = value
-                    self.emit(format!("const {} {} = ", name, self.go_type(&t.name)));
-                } else {
-                    // const x = value (type inference)
-                    self.emit(format!("const {} = ", name));
-                }
                 self.gen_expr(value);
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::MultiVarDecl {
-                ident: names,
-                ty,
-                values,
-            } => {
+            TypedStmtKind::MultiDecl { idents, values, .. } => {
                 self.emit_indent();
-                let names_str = names
-                    .iter()
-                    .map(|n| n.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if values.is_empty() {
-                    // var a, b, c type (zero values)
-                    let ty = ty.as_ref().expect("MultiVarDecl without values needs type");
-                    self.emit(format!("var {} {}", names_str, self.go_type(&ty.name)));
-                } else if let Some(t) = ty {
-                    // var a, b type = expr1, expr2
-                    self.emit(format!("var {} {} = ", names_str, self.go_type(&t.name)));
-                    for (i, val) in values.iter().enumerate() {
-                        if i > 0 {
-                            self.emit(", ");
-                        }
-                        self.gen_expr(val);
-                    }
-                } else {
-                    // var a, b = expr1, expr2
-                    self.emit(format!("var {} = ", names_str));
-                    for (i, val) in values.iter().enumerate() {
-                        if i > 0 {
-                            self.emit(", ");
-                        }
-                        self.gen_expr(val);
-                    }
-                }
-                self.emit_stmt_end(stmt_line);
-            }
-
-            StmtKind::MultiConstDecl {
-                idents: names,
-                ty,
-                values,
-            } => {
-                self.emit_indent();
-                let names_str = names
-                    .iter()
-                    .map(|n| n.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if let Some(t) = ty {
-                    // const a, b type = expr1, expr2
-                    self.emit(format!("const {} {} = ", names_str, self.go_type(&t.name)));
-                } else {
-                    // const a, b = expr1, expr2
-                    self.emit(format!("const {} = ", names_str));
-                }
-                for (i, val) in values.iter().enumerate() {
+                for (i, ident) in idents.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
                     }
-                    self.gen_expr(val);
+                    self.emit(&ident.name);
+                }
+                self.emit(" := ");
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(value);
                 }
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::Assign { target, value } => {
+            TypedStmtKind::VarDecl {
+                ident,
+                var_ty,
+                has_explicit_type,
+                value,
+            } => {
+                self.emit_indent();
+                self.emit("var ");
+                self.emit(&ident.name);
+                if *has_explicit_type {
+                    self.emit(" ");
+                    self.emit(type_to_go_string(var_ty));
+                }
+                if let Some(v) = value {
+                    self.emit(" = ");
+                    self.gen_expr(v);
+                }
+                self.emit_stmt_end(stmt_line);
+            }
+
+            TypedStmtKind::MultiVarDecl {
+                idents,
+                var_ty,
+                has_explicit_type,
+                values,
+            } => {
+                self.emit_indent();
+                self.emit("var ");
+                for (i, ident) in idents.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit(&ident.name);
+                }
+                if *has_explicit_type {
+                    self.emit(" ");
+                    self.emit(type_to_go_string(var_ty));
+                }
+                if !values.is_empty() {
+                    self.emit(" = ");
+                    for (i, value) in values.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.gen_expr(value);
+                    }
+                }
+                self.emit_stmt_end(stmt_line);
+            }
+
+            TypedStmtKind::ConstDecl {
+                ident,
+                const_ty,
+                has_explicit_type,
+                value,
+            } => {
+                self.emit_indent();
+                self.emit("const ");
+                self.emit(&ident.name);
+                if *has_explicit_type {
+                    self.emit(" ");
+                    self.emit(type_to_go_string(const_ty));
+                }
+                self.emit(" = ");
+                self.gen_expr(value);
+                self.emit_stmt_end(stmt_line);
+            }
+
+            TypedStmtKind::MultiConstDecl {
+                idents,
+                const_ty,
+                has_explicit_type,
+                values,
+            } => {
+                self.emit_indent();
+                self.emit("const ");
+                for (i, ident) in idents.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit(&ident.name);
+                }
+                if *has_explicit_type {
+                    self.emit(" ");
+                    self.emit(type_to_go_string(const_ty));
+                }
+                self.emit(" = ");
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(value);
+                }
+                self.emit_stmt_end(stmt_line);
+            }
+
+            TypedStmtKind::Assign { target, value } => {
                 self.emit_indent();
                 self.gen_expr(target);
                 self.emit(" = ");
@@ -237,7 +172,7 @@ impl Codegen {
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::MultiAssign { targets, values } => {
+            TypedStmtKind::MultiAssign { targets, values } => {
                 self.emit_indent();
                 for (i, target) in targets.iter().enumerate() {
                     if i > 0 {
@@ -246,16 +181,16 @@ impl Codegen {
                     self.gen_expr(target);
                 }
                 self.emit(" = ");
-                for (i, val) in values.iter().enumerate() {
+                for (i, value) in values.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
                     }
-                    self.gen_expr(val);
+                    self.gen_expr(value);
                 }
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::CompoundAssign { target, op, value } => {
+            TypedStmtKind::CompoundAssign { target, op, value } => {
                 self.emit_indent();
                 self.gen_expr(target);
                 self.emit(format!(" {} ", self.go_assign_op(op)));
@@ -263,27 +198,23 @@ impl Codegen {
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::IncDec { target, is_inc } => {
+            TypedStmtKind::IncDec { target, is_inc } => {
                 self.emit_indent();
                 self.gen_expr(target);
-                if *is_inc {
-                    self.emit("++");
-                } else {
-                    self.emit("--");
-                }
+                self.emit(if *is_inc { "++" } else { "--" });
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::For { condition, body } => {
+            TypedStmtKind::For { condition, body } => {
                 self.emit_indent();
                 self.emit("for ");
                 self.gen_expr(condition);
                 self.emit(" ");
                 self.gen_block(body);
-                self.output.push('\n');
+                self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::ForCStyle {
+            TypedStmtKind::ForCStyle {
                 init,
                 condition,
                 post,
@@ -295,52 +226,47 @@ impl Codegen {
                 // If all parts are None, generate simple infinite loop: for { ... }
                 if init.is_none() && condition.is_none() && post.is_none() {
                     self.gen_block(body);
-                    self.output.push('\n');
+                    self.emit("\n");
                 } else {
-                    // Generate init statement (without newline/indent)
-                    if let Some(init_stmt) = init {
-                        self.gen_stmt_inline(init_stmt);
+                    if let Some(init) = init {
+                        self.gen_stmt_inline(init);
                     }
                     self.emit("; ");
-
-                    // Generate condition
                     if let Some(cond) = condition {
                         self.gen_expr(cond);
                     }
                     self.emit("; ");
-
-                    // Generate post statement (without newline/indent)
-                    if let Some(post_stmt) = post {
-                        self.gen_stmt_inline(post_stmt);
+                    if let Some(post) = post {
+                        self.gen_stmt_inline(post);
                     }
-
                     self.emit(" ");
                     self.gen_block(body);
-                    self.output.push('\n');
+                    self.emit_stmt_end(stmt_line);
                 }
             }
 
-            StmtKind::ForRange {
+            TypedStmtKind::ForRange {
                 key,
                 value,
                 collection,
                 body,
+                ..
             } => {
                 self.emit_indent();
                 self.emit("for ");
-                self.emit(key);
+                self.emit(&key.name);
                 if let Some(val) = value {
                     self.emit(", ");
-                    self.emit(val);
+                    self.emit(&val.name);
                 }
                 self.emit(" := range ");
                 self.gen_expr(collection);
                 self.emit(" ");
                 self.gen_block(body);
-                self.output.push('\n');
+                self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::If {
+            TypedStmtKind::If {
                 init,
                 condition,
                 then_block,
@@ -348,84 +274,132 @@ impl Codegen {
             } => {
                 self.emit_indent();
                 self.emit("if ");
-                // Generate init statement if present: if x := expr; cond { }
-                if let Some(init_stmt) = init {
-                    // Generate the init statement inline (without indent/newline)
-                    match &init_stmt.kind {
-                        StmtKind::Decl { ident: name, value } => {
-                            self.emit(name);
-                            self.emit(" := ");
-                            // Special handling for type assertions on enum variants
-                            // Go type assertions return structs directly, but we need
-                            // to compare to nil, so wrap in a closure returning pointer
-                            if let ExprKind::TypeAssert { expr, ty, .. } = &value.kind {
-                                let type_name = ty.name.replace('.', "_");
-                                self.emit(format!("func() *{} {{ if _v, _ok := ", type_name));
-                                self.gen_expr(expr);
-                                self.emit(format!(
-                                    ".({}); _ok {{ return &_v }}; return nil }}()",
-                                    type_name
-                                ));
-                            } else {
-                                self.gen_expr(value);
-                            }
-                        }
-                        StmtKind::MultiDecl {
-                            ident: names,
-                            values,
-                        } => {
-                            self.emit(
-                                names
-                                    .iter()
-                                    .map(|n| n.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                            );
-                            self.emit(" := ");
-                            for (i, v) in values.iter().enumerate() {
-                                if i > 0 {
-                                    self.emit(", ");
-                                }
-                                self.gen_expr(v);
-                            }
-                        }
-                        _ => {
-                            // For other statement types, just generate them inline
-                            // This shouldn't happen in practice
-                        }
-                    }
+                if let Some(init) = init {
+                    self.gen_stmt_inline(init);
                     self.emit("; ");
                 }
                 self.gen_expr(condition);
                 self.emit(" ");
                 self.gen_block(then_block);
-
-                if let Some(else_block) = else_block {
+                if let Some(else_blk) = else_block {
                     self.emit(" else ");
-                    self.gen_block(else_block);
+                    self.gen_block(else_blk);
                 }
-                self.output.push('\n');
+                self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::Return { values } => {
+            TypedStmtKind::Return { values } => {
                 self.emit_indent();
-                if values.is_empty() {
-                    self.emit("return");
-                } else {
-                    self.emit("return ");
-                    for (i, expr) in values.iter().enumerate() {
+                self.emit("return");
+                if !values.is_empty() {
+                    self.emit(" ");
+                    for (i, value) in values.iter().enumerate() {
                         if i > 0 {
                             self.emit(", ");
                         }
-                        self.gen_expr(expr);
+                        self.gen_expr(value);
                     }
                 }
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::Match { scrutinee, arms } => self.gen_match(scrutinee, arms),
+            TypedStmtKind::Match {
+                scrutinee, arms, ..
+            } => {
+                // Check for struct matching (regular structs, not enum variants)
+                // This needs if/else chains instead of type switches
+                let is_struct_match = scrutinee.is_some()
+                    && arms.iter().any(|arm| {
+                        arm.patterns.iter().any(|p| {
+                            if let TypedPatternKind::StructDestructor { pattern_name, .. } = &p.kind
+                            {
+                                // It's a struct match if pattern_name has no dot (not an enum variant)
+                                !pattern_name.contains('.')
+                            } else {
+                                false
+                            }
+                        })
+                    });
 
-            StmtKind::Send { channel, value } => {
+                if is_struct_match {
+                    self.gen_struct_match(scrutinee.as_ref().unwrap(), arms);
+                    return;
+                }
+
+                // Check if this is a type switch (for Soppo enums)
+                let is_type_switch = scrutinee.is_some()
+                    && arms.iter().any(|arm| {
+                        arm.patterns.iter().any(|p| {
+                            matches!(
+                                &p.kind,
+                                TypedPatternKind::Variant {
+                                    is_soppo_enum: true,
+                                    ..
+                                } | TypedPatternKind::Destructor { .. }
+                                    | TypedPatternKind::StructDestructor { .. }
+                            )
+                        })
+                    });
+
+                // Check if any arm needs the bound variable (Destructor or StructDestructor patterns)
+                let needs_binding = arms.iter().any(|arm| {
+                    arm.patterns.iter().any(|p| {
+                        matches!(
+                            &p.kind,
+                            TypedPatternKind::Destructor { .. }
+                                | TypedPatternKind::StructDestructor { .. }
+                        )
+                    })
+                });
+
+                self.emit_indent();
+                if let Some(expr) = scrutinee {
+                    if is_type_switch {
+                        if needs_binding {
+                            self.emit("switch __v := ");
+                        } else {
+                            self.emit("switch ");
+                        }
+                        self.gen_expr(expr);
+                        self.emit(".(type) {\n");
+                    } else {
+                        self.emit("switch ");
+                        self.gen_expr(expr);
+                        self.emit(" {\n");
+                    }
+                } else {
+                    self.emit("switch {\n");
+                }
+                // Check if any arm is a default case
+                let has_default = arms.iter().any(|arm| {
+                    arm.patterns.len() == 1
+                        && matches!(arm.patterns[0].kind, TypedPatternKind::Default)
+                });
+
+                // Check if all arms diverge (return, panic, etc.)
+                let all_arms_diverge = arms.iter().all(|arm| {
+                    arm.body
+                        .stmts
+                        .last()
+                        .map(Self::check_stmt_diverges)
+                        .unwrap_or(false)
+                });
+
+                for arm in arms {
+                    self.gen_arm_with_mode(arm, is_type_switch);
+                }
+                self.emit_indent();
+                self.emit("}\n");
+
+                // For type switches without default where all arms diverge,
+                // add panic("unreachable") for Go compiler
+                if is_type_switch && !has_default && all_arms_diverge {
+                    self.emit_indent();
+                    self.emit("panic(\"unreachable\")\n");
+                }
+            }
+
+            TypedStmtKind::Send { channel, value } => {
                 self.emit_indent();
                 self.gen_expr(channel);
                 self.emit(" <- ");
@@ -433,217 +407,526 @@ impl Codegen {
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::Select { cases } => {
+            TypedStmtKind::Select { cases } => {
                 self.emit_indent();
                 self.emit("select {\n");
-
                 for case in cases {
-                    self.emit_indent();
-
-                    match &case.kind {
-                        SelectCaseKind::Recv { channel } => {
-                            self.emit("case <-");
-                            self.gen_expr(channel);
-                            self.emit(":\n");
-                        }
-                        SelectCaseKind::RecvDecl {
-                            ident: name,
-                            channel,
-                        } => {
-                            self.emit(format!("case {} := <-", name));
-                            self.gen_expr(channel);
-                            self.emit(":\n");
-                        }
-                        SelectCaseKind::RecvDeclOk {
-                            ident: name,
-                            ok_ident: ok_name,
-                            channel,
-                        } => {
-                            self.emit(format!("case {}, {} := <-", name, ok_name));
-                            self.gen_expr(channel);
-                            self.emit(":\n");
-                        }
-                        SelectCaseKind::Send { channel, value } => {
-                            self.emit("case ");
-                            self.gen_expr(channel);
-                            self.emit(" <- ");
-                            self.gen_expr(value);
-                            self.emit(":\n");
-                        }
-                        SelectCaseKind::Default => {
-                            self.emit("default:\n");
-                        }
-                    }
-
-                    self.indent();
-                    for stmt in &case.body.stmts {
-                        self.gen_stmt(stmt);
-                    }
-                    self.dedent();
+                    self.gen_select_case(case);
                 }
-
                 self.emit_indent();
                 self.emit("}\n");
             }
 
-            StmtKind::Go(expr) => {
+            TypedStmtKind::Go(expr) => {
                 self.emit_indent();
                 self.emit("go ");
                 self.gen_expr(expr);
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::DeferStmt(expr) => {
+            TypedStmtKind::DeferStmt(expr) => {
                 self.emit_indent();
                 self.emit("defer ");
                 self.gen_expr(expr);
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::Break => {
+            TypedStmtKind::Break => {
                 self.emit_indent();
                 self.emit("break");
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::Continue => {
+            TypedStmtKind::Continue => {
                 self.emit_indent();
                 self.emit("continue");
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::Expr(expr) => {
+            TypedStmtKind::Expr(expr) => {
                 self.emit_indent();
                 self.gen_expr(expr);
                 self.emit_stmt_end(stmt_line);
             }
 
-            StmtKind::TryStmt {
-                stmt: inner_stmt,
+            TypedStmtKind::TryStmt {
+                stmt,
                 error_name,
                 handler,
                 discard_count,
+                discard_types,
                 ..
             } => {
-                // Generate the inner statement with error capture
-                let err_var = self.fresh_error_var();
-                let discard = discard_count.get();
+                // Generate the try operator expansion
+                self.gen_try_stmt(stmt, error_name, handler, *discard_count, discard_types);
+            }
 
-                // For assignments (not declarations), we need to declare the error variable first
-                // because Go doesn't allow mixing := and = in the same statement
-                let needs_err_decl = matches!(
-                    &inner_stmt.kind,
-                    StmtKind::Assign { .. } | StmtKind::MultiAssign { .. }
-                );
+            TypedStmtKind::LocalTypeDecl(type_decl) => {
+                self.gen_type_decl(type_decl);
+            }
+        }
+    }
 
-                if needs_err_decl {
-                    self.emit_indent();
-                    self.emit(format!("var {} error\n", err_var));
-                }
-
-                // Emit the inner statement with error variable added
-                self.emit_indent();
-                self.gen_try_inner_stmt(inner_stmt, &err_var, discard);
-                self.emit("\n");
-
-                // Generate error check: if err != nil { ... }
-                self.emit_indent();
-                self.emit(format!("if {} != nil ", err_var));
-                self.emit("{\n");
-                self.indent();
-
-                if let Some(block) = handler {
-                    // Custom handler block
-                    if let Some(name) = error_name {
-                        // Bind error to the named variable
-                        self.emit_indent();
-                        self.emit(format!("{} := {}\n", name, err_var));
-                    }
-                    // Emit handler body
-                    for handler_stmt in &block.stmts {
-                        self.gen_stmt(handler_stmt);
-                    }
+    /// Generate a statement inline (without newline at end)
+    fn gen_stmt_inline(&mut self, stmt: &TypedStmt) {
+        match &stmt.kind {
+            TypedStmtKind::Decl { ident, value, .. } => {
+                self.emit(&ident.name);
+                self.emit(" := ");
+                // Special handling for type assertions on enum variants
+                // Go type assertions return structs directly, but we need
+                // to compare to nil, so wrap in a closure returning pointer
+                if let TypedExprKind::TypeAssert {
+                    expr, target_ty, ..
+                } = &value.kind
+                {
+                    let type_name = type_to_go_string(target_ty).replace('.', "_");
+                    self.emit(format!("func() *{} {{ if _v, _ok := ", type_name));
+                    self.gen_expr(expr);
+                    self.emit(format!(
+                        ".({}); _ok {{ return &_v }}; return nil }}()",
+                        type_name
+                    ));
                 } else {
-                    // Default: return zero values (+ error if function returns error)
-                    self.emit_indent();
-                    self.emit("return ");
-
-                    let return_types = self.current_return_types.clone();
-                    let returns_error = return_types
-                        .last()
-                        .is_some_and(|ty| ty == "error" || ty.ends_with(".error"));
-
-                    if returns_error {
-                        // Generate zero values for all return types except last (error)
-                        let zero_values: Vec<String> = return_types
-                            .iter()
-                            .take(return_types.len().saturating_sub(1))
-                            .map(|ty| self.zero_value(ty))
-                            .collect();
-
-                        self.emit(zero_values.join(", "));
-
-                        // Add error variable
-                        if !zero_values.is_empty() {
-                            self.emit(", ");
-                        }
-                        self.emit(&err_var);
-                    } else {
-                        // No error return - just return zero values for all return types
-                        let zero_values: Vec<String> =
-                            return_types.iter().map(|ty| self.zero_value(ty)).collect();
-
-                        self.emit(zero_values.join(", "));
+                    self.gen_expr(value);
+                }
+            }
+            TypedStmtKind::MultiDecl { idents, values, .. } => {
+                for (i, ident) in idents.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
                     }
+                    self.emit(&ident.name);
+                }
+                self.emit(" := ");
+                for (i, val) in values.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.gen_expr(val);
+                }
+            }
+            TypedStmtKind::Assign { target, value } => {
+                self.gen_expr(target);
+                self.emit(" = ");
+                self.gen_expr(value);
+            }
+            TypedStmtKind::IncDec { target, is_inc } => {
+                self.gen_expr(target);
+                self.emit(if *is_inc { "++" } else { "--" });
+            }
+            TypedStmtKind::CompoundAssign { target, op, value } => {
+                self.gen_expr(target);
+                self.emit(" ");
+                self.emit(match op {
+                    crate::syntax::AssignOp::Add => "+=",
+                    crate::syntax::AssignOp::Sub => "-=",
+                    crate::syntax::AssignOp::Mul => "*=",
+                    crate::syntax::AssignOp::Div => "/=",
+                    crate::syntax::AssignOp::Mod => "%=",
+                    crate::syntax::AssignOp::BitAnd => "&=",
+                    crate::syntax::AssignOp::BitOr => "|=",
+                    crate::syntax::AssignOp::BitXor => "^=",
+                    crate::syntax::AssignOp::Shl => "<<=",
+                    crate::syntax::AssignOp::Shr => ">>=",
+                });
+                self.emit(" ");
+                self.gen_expr(value);
+            }
+            TypedStmtKind::If {
+                init,
+                condition,
+                then_block,
+                else_block,
+            } => {
+                self.emit("if ");
+                if let Some(init) = init {
+                    self.gen_stmt_inline(init);
+                    self.emit("; ");
+                }
+                self.gen_expr(condition);
+                self.emit(" ");
+                self.gen_block(then_block);
+                if let Some(else_blk) = else_block {
+                    self.emit(" else ");
+                    self.gen_block(else_blk);
+                }
+            }
+            _ => {
+                // For other statements, generate normally but strip trailing newline
+                let saved = std::mem::take(&mut self.output);
+                self.gen_stmt(stmt);
+                let generated = std::mem::replace(&mut self.output, saved);
+                self.output.push_str(generated.trim_end());
+            }
+        }
+    }
+
+    /// Generate a block from TypedBlock
+    pub(crate) fn gen_block(&mut self, block: &TypedBlock) {
+        self.emit("{\n");
+        self.indent();
+
+        let mut prev_end_line = 0;
+        for stmt in &block.stmts {
+            // Preserve blank lines between statements
+            if prev_end_line > 0 && stmt.span.start.line > prev_end_line + 1 {
+                self.emit("\n");
+            }
+            self.gen_stmt(stmt);
+            prev_end_line = stmt.span.end.line;
+        }
+
+        self.dedent();
+        self.emit_indent();
+        self.emit("}");
+    }
+
+    /// Check if a typed statement diverges (never falls through)
+    fn check_stmt_diverges(stmt: &TypedStmt) -> bool {
+        match &stmt.kind {
+            TypedStmtKind::Return { .. } => true,
+            TypedStmtKind::Break | TypedStmtKind::Continue => true,
+            TypedStmtKind::Expr(expr) => {
+                // Check for panic() call
+                if let TypedExprKind::Call { func, .. } = &expr.kind
+                    && let TypedExprKind::Ident(name) = &func.kind
+                {
+                    return name == "panic";
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Generate a match arm with mode (type switch vs value switch)
+    fn gen_arm_with_mode(&mut self, arm: &TypedArm, _is_type_switch: bool) {
+        use crate::syntax::Literal;
+        use crate::types::ast::TypedPatternKind;
+
+        // Check if this is a default case first
+        if arm.patterns.len() == 1
+            && let TypedPatternKind::Default = &arm.patterns[0].kind
+        {
+            self.emit_indent();
+            self.emit("default:\n");
+            self.indent();
+            for stmt in &arm.body.stmts {
+                self.gen_stmt(stmt);
+            }
+            self.dedent();
+            return;
+        }
+
+        self.emit_indent();
+        self.emit("case ");
+
+        for (i, pattern) in arm.patterns.iter().enumerate() {
+            if i > 0 {
+                self.emit(", ");
+            }
+            match &pattern.kind {
+                TypedPatternKind::Default => {
+                    // Should not reach here - handled above
+                }
+                TypedPatternKind::Variant {
+                    variant_name,
+                    type_args,
+                    is_soppo_enum,
+                    ..
+                } => {
+                    if *is_soppo_enum {
+                        // Use explicit type_args, or infer from matched_ty
+                        let effective_args = if type_args.is_empty() {
+                            if let Type::Con { args, .. } = &pattern.matched_ty {
+                                args.clone()
+                            } else {
+                                vec![]
+                            }
+                        } else {
+                            type_args.clone()
+                        };
+                        // Convert enum pattern: Type.Variant -> Type_Variant
+                        // or pkg.Type.Variant -> pkg.Type_Variant
+                        let converted =
+                            self.convert_enum_pattern_name(variant_name, &effective_args);
+                        self.emit(&converted);
+                    } else {
+                        // Go constant
+                        self.emit(variant_name);
+                    }
+                }
+                TypedPatternKind::Literal(lit) => {
+                    // Format literal properly
+                    match lit {
+                        Literal::Integer(val, _) => self.emit(val.to_string()),
+                        Literal::String(s) => self.emit(format!("\"{}\"", s)),
+                        Literal::Bool(b) => self.emit(if *b { "true" } else { "false" }),
+                        Literal::Nil => self.emit("nil"),
+                    }
+                }
+                TypedPatternKind::Guard(expr) => {
+                    self.gen_expr(expr);
+                }
+                TypedPatternKind::Destructor {
+                    variant_name,
+                    type_args,
+                    binding,
+                    ..
+                } => {
+                    // Use explicit type_args, or infer from matched_ty
+                    let effective_args = if type_args.is_empty() {
+                        if let Type::Con { args, .. } = &pattern.matched_ty {
+                            args.clone()
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        type_args.clone()
+                    };
+                    // Type switch with binding: case Type_Variant
+                    let converted = self.convert_enum_pattern_name(variant_name, &effective_args);
+                    self.emit(&converted);
+                    // Binding variable will be created in the body
+                    let _ = binding; // We'll handle binding in body generation
+                }
+                TypedPatternKind::StructDestructor {
+                    pattern_name,
+                    type_args,
+                    ..
+                } => {
+                    // Use explicit type_args, or infer from matched_ty
+                    let effective_args = if type_args.is_empty() {
+                        if let Type::Con { args, .. } = &pattern.matched_ty {
+                            args.clone()
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        type_args.clone()
+                    };
+                    // Type switch with struct pattern - convert Shape.Circle -> Shape_Circle
+                    let converted = self.convert_enum_pattern_name(pattern_name, &effective_args);
+                    self.emit(&converted);
+                }
+            }
+        }
+
+        self.emit(":\n");
+        self.indent();
+
+        // For destructor patterns, emit the binding assignment
+        if arm.patterns.len() == 1 {
+            match &arm.patterns[0].kind {
+                TypedPatternKind::Destructor { binding, .. } => {
+                    // For single-value enum variant: value := __v.Value
+                    self.emit_indent();
+                    self.emit(&binding.name);
+                    self.emit(" := __v.Value\n");
+                    // Add blank assignment to avoid unused variable warnings
+                    self.emit_indent();
+                    self.emit("_ = ");
+                    self.emit(&binding.name);
                     self.emit("\n");
                 }
+                TypedPatternKind::StructDestructor { fields, .. } => {
+                    use crate::types::ast::TypedFieldPattern;
+                    // For struct variant: extract each field binding
+                    for (field_name, field_pattern) in fields {
+                        if let TypedFieldPattern::Bind(binding, _) = field_pattern {
+                            self.emit_indent();
+                            self.emit(&binding.name);
+                            self.emit(" := __v.");
+                            self.emit(field_name);
+                            self.emit("\n");
+                            // Add blank assignment to avoid unused variable warnings
+                            self.emit_indent();
+                            self.emit("_ = ");
+                            self.emit(&binding.name);
+                            self.emit("\n");
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
+        for stmt in &arm.body.stmts {
+            self.gen_stmt(stmt);
+        }
+        self.dedent();
+    }
+
+    /// Generate a select case
+    fn gen_select_case(&mut self, case: &TypedSelectCase) {
+        self.emit_indent();
+        match &case.kind {
+            TypedSelectCaseKind::Recv { channel, .. } => {
+                self.emit("case <-");
+                self.gen_expr(channel);
+            }
+            TypedSelectCaseKind::RecvDecl { ident, channel, .. } => {
+                self.emit("case ");
+                self.emit(&ident.name);
+                self.emit(" := <-");
+                self.gen_expr(channel);
+            }
+            TypedSelectCaseKind::RecvDeclOk {
+                ident,
+                ok_ident,
+                channel,
+                ..
+            } => {
+                self.emit("case ");
+                self.emit(&ident.name);
+                self.emit(", ");
+                self.emit(&ok_ident.name);
+                self.emit(" := <-");
+                self.gen_expr(channel);
+            }
+            TypedSelectCaseKind::Send { channel, value } => {
+                self.emit("case ");
+                self.gen_expr(channel);
+                self.emit(" <- ");
+                self.gen_expr(value);
+            }
+            TypedSelectCaseKind::Default => {
+                self.emit("default");
+            }
+        }
+        self.emit(":\n");
+        self.indent();
+        for stmt in &case.body.stmts {
+            self.gen_stmt(stmt);
+        }
+        self.dedent();
+    }
+
+    /// Generate try statement expansion
+    fn gen_try_stmt(
+        &mut self,
+        stmt: &TypedStmt,
+        error_name: &Option<String>,
+        handler: &Option<TypedBlock>,
+        discard_count: usize,
+        _discard_types: &[Type],
+    ) {
+        // Generate the inner statement and capture error
+        let err_var = self.fresh_error_var();
+
+        // For assignments (not declarations), we need to declare the error variable first
+        // because Go doesn't allow mixing := and = in the same statement
+        let needs_err_decl = matches!(
+            &stmt.kind,
+            TypedStmtKind::Assign { .. } | TypedStmtKind::MultiAssign { .. }
+        );
+
+        if needs_err_decl {
+            self.emit_indent();
+            self.emit(format!("var {} error\n", err_var));
+        }
+
+        // Emit the inner statement with error variable added
+        self.emit_indent();
+        self.gen_try_inner_stmt(stmt, &err_var, discard_count);
+        self.emit("\n");
+
+        // Generate error check
+        self.emit_indent();
+        self.emit("if ");
+        self.emit(&err_var);
+        self.emit(" != nil ");
+        if let Some(handler_block) = handler {
+            // Named error and handler
+            if let Some(name) = error_name {
+                self.emit("{\n");
+                self.indent();
+                self.emit_indent();
+                self.emit(name);
+                self.emit(" := ");
+                self.emit(&err_var);
+                self.emit("\n");
+                for stmt in &handler_block.stmts {
+                    self.gen_stmt(stmt);
+                }
                 self.dedent();
                 self.emit_indent();
                 self.emit("}\n");
+            } else {
+                self.gen_block(handler_block);
+                self.emit("\n");
             }
+        } else {
+            // Default: return zero values (+ error if function returns error)
+            self.emit("{\n");
+            self.indent();
+            self.emit_indent();
+            self.emit("return ");
 
-            StmtKind::LocalTypeDecl(type_decl) => {
-                // Generate local type declaration
-                // Reuse the top-level type declaration generator
-                self.gen_type_decl(type_decl);
+            let return_types = self.current_return_types.clone();
+            let returns_error = return_types
+                .last()
+                .is_some_and(|ty| ty == "error" || ty.ends_with(".error"));
+
+            if returns_error {
+                // Generate zero values for all return types except last (error)
+                let zero_values: Vec<String> = return_types
+                    .iter()
+                    .take(return_types.len().saturating_sub(1))
+                    .map(|ty| self.zero_value(ty))
+                    .collect();
+
+                self.emit(zero_values.join(", "));
+
+                // Add error variable
+                if !zero_values.is_empty() {
+                    self.emit(", ");
+                }
+                self.emit(&err_var);
+            } else {
+                // No error return - just return zero values for all return types
+                let zero_values: Vec<String> =
+                    return_types.iter().map(|ty| self.zero_value(ty)).collect();
+
+                self.emit(zero_values.join(", "));
             }
+            self.emit("\n");
+            self.dedent();
+            self.emit_indent();
+            self.emit("}\n");
         }
     }
 
     /// Generate inner statement with error capture for ? operator
     /// Transforms: x := f() -> x, _err := f()
     /// Transforms: x = f()  -> x, _err = f()
-    /// Transforms: f()      -> _, _err := f() (with appropriate number of _ for multi-return)
-    fn gen_try_inner_stmt(&mut self, stmt: &Stmt, err_var: &str, discard_count: usize) {
+    fn gen_try_inner_stmt(&mut self, stmt: &TypedStmt, err_var: &str, discard_count: usize) {
         match &stmt.kind {
-            StmtKind::Decl { ident: name, value } => {
+            TypedStmtKind::Decl { ident, value, .. } => {
                 // x := f() -> x, _err := f()
-                self.emit(format!("{}, {} := ", name, err_var));
+                self.emit(format!("{}, {} := ", ident.name, err_var));
                 self.gen_expr(value);
             }
-            StmtKind::MultiDecl {
-                ident: names,
-                values,
-            } if values.len() == 1 => {
+            TypedStmtKind::MultiDecl { idents, values, .. } if values.len() == 1 => {
                 // x, y := f() -> x, y, _err := f()
                 self.emit(
-                    names
+                    idents
                         .iter()
-                        .map(|n| n.to_string())
+                        .map(|n| n.name.as_str())
                         .collect::<Vec<_>>()
                         .join(", "),
                 );
                 self.emit(format!(", {} := ", err_var));
                 self.gen_expr(&values[0]);
             }
-            StmtKind::Assign { target, value } => {
+            TypedStmtKind::Assign { target, value } => {
                 // x = f() -> x, _err = f()
                 self.gen_expr(target);
                 self.emit(format!(", {} = ", err_var));
                 self.gen_expr(value);
             }
-            StmtKind::MultiAssign { targets, values } if values.len() == 1 => {
+            TypedStmtKind::MultiAssign { targets, values } if values.len() == 1 => {
                 // x, y = f() -> x, y, _err = f()
                 for (i, target) in targets.iter().enumerate() {
                     if i > 0 {
@@ -654,7 +937,7 @@ impl Codegen {
                 self.emit(format!(", {} = ", err_var));
                 self.gen_expr(&values[0]);
             }
-            StmtKind::Expr(expr) => {
+            TypedStmtKind::Expr(expr) => {
                 // f() -> _err := f() for error-only returns
                 // f() -> _, _err := f() for (T, error) returns
                 // f() -> _, _, _err := f() for (T, U, error) returns
@@ -673,296 +956,129 @@ impl Codegen {
         }
     }
 
-    /// Generate code for a match statement
-    fn gen_match(&mut self, scrutinee: &Option<Expr>, arms: &[Arm]) {
-        // Expression-less match: `match { case x > 0: ... }` -> `switch { case x > 0: ... }`
-        let is_expression_less = scrutinee.is_none();
-
-        // Check if this is struct matching (regular structs, not enum variants)
-        // Use the type system to check if the struct destructor is for an enum variant
-        let is_struct_match = !is_expression_less
-            && arms.iter().any(|arm| {
-                arm.patterns.iter().any(|p| {
-                    if let PatternKind::StructDestructor { name, .. } = &p.kind {
-                        // Check if this is an enum variant by seeing if the base type is an enum
-                        if let Some((base, _)) = name.split_once('.') {
-                            // Has a dot - check if base is an enum type
-                            // Strip type parameters: Option[int] -> Option
-                            let base_type = base.split('[').next().unwrap_or(base);
-                            !self.global_state.is_enum(base_type)
-                        } else {
-                            // No dot - regular struct
-                            true
-                        }
-                    } else {
-                        false
-                    }
-                })
-            });
-
-        // Handle struct matching with if/else chains
-        if is_struct_match {
-            let scrutinee_expr = scrutinee.as_ref().unwrap();
-            let mut first_arm = true;
-
-            for arm in arms {
-                let is_default = arm
-                    .patterns
-                    .iter()
-                    .any(|p| matches!(&p.kind, PatternKind::Default));
-
-                self.emit_indent();
-                if is_default {
-                    if first_arm {
-                        self.emit("{\n");
-                    } else {
-                        self.emit("} else {\n");
-                    }
-                } else if let Some(pattern) = arm.patterns.first()
-                    && let PatternKind::StructDestructor { fields, .. } = &pattern.kind
-                {
-                    // Collect literal conditions
-                    let conditions: Vec<_> = fields
-                        .iter()
-                        .filter_map(|(field_name, field_pattern)| {
-                            if let FieldPattern::Literal(lit) = field_pattern {
-                                Some((field_name.clone(), lit.clone()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    if first_arm {
-                        self.emit("if ");
-                    } else {
-                        self.emit("} else if ");
-                    }
-
-                    // Generate condition from literal patterns
-                    if conditions.is_empty() {
-                        // No literal conditions - this matches anything (like a default)
-                        self.emit("true");
-                    } else {
-                        for (i, (field_name, lit)) in conditions.iter().enumerate() {
-                            if i > 0 {
-                                self.emit(" && ");
-                            }
-                            self.gen_expr(scrutinee_expr);
-                            self.emit(format!(".{} == ", field_name));
-                            match lit {
-                                Literal::Integer(n, fmt) => match fmt {
-                                    IntFormat::Decimal => self.emit(format!("{}", n)),
-                                    IntFormat::Octal => self.emit(format!("0o{:o}", n)),
-                                    IntFormat::Hex => self.emit(format!("0x{:x}", n)),
-                                    IntFormat::Binary => self.emit(format!("0b{:b}", n)),
-                                },
-                                Literal::String(s) => self.emit(format!("\"{}\"", s)),
-                                Literal::Bool(b) => self.emit(format!("{}", b)),
-                                Literal::Nil => self.emit("nil"),
-                            }
-                        }
-                    }
-
-                    self.emit(" {\n");
-                }
-
-                self.indent();
-
-                // Extract bindings
-                if let Some(pattern) = arm.patterns.first()
-                    && let PatternKind::StructDestructor { fields, .. } = &pattern.kind
-                {
-                    for (field_name, field_pattern) in fields {
-                        if let FieldPattern::Bind(binding_name) = field_pattern {
-                            self.emit_indent();
-                            self.emit(format!("{} := ", binding_name));
-                            self.gen_expr(scrutinee_expr);
-                            self.emit(format!(".{}\n", field_name));
-                            self.emit_indent();
-                            self.emit(format!("_ = {}\n", binding_name));
-                        }
-                    }
-                }
-
-                // Emit arm body
-                for arm_stmt in &arm.body.stmts {
-                    self.gen_stmt(arm_stmt);
-                }
-
-                self.dedent();
-                first_arm = false;
-            }
-
-            self.emit_indent();
-            self.emit("}\n");
-            return;
-        }
-
-        self.emit_indent();
-
-        // Check if this is a type switch or value switch
-        // Type switch is needed for soppo enums (which are interface types)
-        // Value switch is used for Go constants
-        let is_type_switch = !is_expression_less
-            && arms.iter().any(|arm| {
-                arm.patterns.iter().any(|p| match &p.kind {
-                    PatternKind::Variant { is_soppo_enum, .. } => is_soppo_enum.get(),
-                    PatternKind::Destructor { .. } | PatternKind::StructDestructor { .. } => true,
-                    _ => false,
-                })
-            });
-
-        // Check if any arm needs the bound variable (Destructor or StructDestructor patterns)
-        let needs_binding = arms.iter().any(|arm| {
-            arm.patterns.iter().any(|p| {
-                matches!(
-                    &p.kind,
-                    PatternKind::Destructor { .. } | PatternKind::StructDestructor { .. }
-                )
-            })
-        });
-
-        if is_expression_less {
-            // Expression-less match: `switch { ... }`
-            self.emit("switch {\n");
-        } else if is_type_switch {
-            if needs_binding {
-                self.emit("switch __v := ");
-            } else {
-                self.emit("switch ");
-            }
-            self.gen_expr(scrutinee.as_ref().unwrap());
-            self.emit(".(type) {\n");
-        } else {
-            self.emit("switch ");
-            self.gen_expr(scrutinee.as_ref().unwrap());
-            self.emit(" {\n");
-        }
+    /// Generate struct matching with if/else chains
+    fn gen_struct_match(&mut self, scrutinee: &TypedExpr, arms: &[TypedArm]) {
+        let mut first_arm = true;
 
         for arm in arms {
-            self.emit_indent();
-
-            // Check if this arm is a default case
             let is_default = arm
                 .patterns
                 .iter()
-                .any(|p| matches!(&p.kind, PatternKind::Default));
+                .any(|p| matches!(&p.kind, TypedPatternKind::Default));
 
+            self.emit_indent();
             if is_default {
-                self.emit("default:\n");
-            } else {
-                self.emit("case ");
+                if first_arm {
+                    self.emit("{\n");
+                } else {
+                    self.emit("} else {\n");
+                }
+            } else if let Some(pattern) = arm.patterns.first()
+                && let TypedPatternKind::StructDestructor { fields, .. } = &pattern.kind
+            {
+                // Collect literal conditions
+                let conditions: Vec<_> = fields
+                    .iter()
+                    .filter_map(|(field_name, field_pattern)| {
+                        if let TypedFieldPattern::Literal(lit) = field_pattern {
+                            Some((field_name.clone(), lit.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                // Emit comma-separated patterns
-                for (i, pattern) in arm.patterns.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
-                    }
-                    self.gen_pattern(pattern);
+                if first_arm {
+                    self.emit("if ");
+                } else {
+                    self.emit("} else if ");
                 }
 
-                self.emit(":\n");
-            }
-            self.indent();
-
-            // Extract pattern bindings for destructor patterns (from first pattern only)
-            if let Some(first_pattern) = arm.patterns.first() {
-                if let PatternKind::Destructor { binding, .. } = &first_pattern.kind {
-                    // __v is already the concrete type from the switch statement
-                    self.emit_indent();
-                    self.emit(format!("{} := __v.Value\n", binding));
-                    // Add blank assignment to avoid unused variable warnings
-                    self.emit_indent();
-                    self.emit(format!("_ = {}\n", binding));
-                }
-
-                // Extract pattern bindings for struct destructor patterns
-                if let PatternKind::StructDestructor { fields, .. } = &first_pattern.kind {
-                    // __v is already the concrete type from the switch statement
-                    for (field_name, field_pattern) in fields {
-                        // Only emit bindings, not literal matches
-                        if let FieldPattern::Bind(binding_name) = field_pattern {
-                            self.emit_indent();
-                            self.emit(format!("{} := __v.{}\n", binding_name, field_name));
-                            // Add blank assignment to avoid unused variable warnings
-                            self.emit_indent();
-                            self.emit(format!("_ = {}\n", binding_name));
+                // Generate condition from literal patterns
+                if conditions.is_empty() {
+                    // No literal conditions - this matches anything (like a default)
+                    self.emit("true");
+                } else {
+                    for (i, (field_name, lit)) in conditions.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(" && ");
+                        }
+                        self.gen_expr(scrutinee);
+                        self.emit(format!(".{} == ", field_name));
+                        match lit {
+                            Literal::Integer(n, fmt) => match fmt {
+                                IntFormat::Decimal => self.emit(format!("{}", n)),
+                                IntFormat::Octal => self.emit(format!("0o{:o}", n)),
+                                IntFormat::Hex => self.emit(format!("0x{:x}", n)),
+                                IntFormat::Binary => self.emit(format!("0b{:b}", n)),
+                            },
+                            Literal::String(s) => self.emit(format!("\"{}\"", s)),
+                            Literal::Bool(b) => self.emit(format!("{}", b)),
+                            Literal::Nil => self.emit("nil"),
                         }
                     }
                 }
+
+                self.emit(" {\n");
             }
 
-            // Emit arm body statements
+            self.indent();
+
+            // Extract bindings
+            if let Some(pattern) = arm.patterns.first()
+                && let TypedPatternKind::StructDestructor { fields, .. } = &pattern.kind
+            {
+                for (field_name, field_pattern) in fields {
+                    if let TypedFieldPattern::Bind(binding_ident, _) = field_pattern {
+                        self.emit_indent();
+                        self.emit(format!("{} := ", binding_ident.name));
+                        self.gen_expr(scrutinee);
+                        self.emit(format!(".{}\n", field_name));
+                        self.emit_indent();
+                        self.emit(format!("_ = {}\n", binding_ident.name));
+                    }
+                }
+            }
+
+            // Emit arm body
             for arm_stmt in &arm.body.stmts {
                 self.gen_stmt(arm_stmt);
             }
 
             self.dedent();
+            first_arm = false;
         }
-
-        // Check if there's a default case
-        let has_default = arms.iter().any(|arm| {
-            arm.patterns
-                .iter()
-                .any(|p| matches!(&p.kind, PatternKind::Default))
-        });
-
-        // Check if all arms diverge (end with return/break/continue/panic)
-        let all_arms_diverge = arms.iter().all(|arm| {
-            arm.body
-                .stmts
-                .last()
-                .map(Self::stmt_diverges)
-                .unwrap_or(false)
-        });
 
         self.emit_indent();
         self.emit("}\n");
-
-        // For type switches without default where all arms return,
-        // add panic("unreachable") for Go compiler (Go doesn't know the switch is exhaustive)
-        if is_type_switch && !has_default && all_arms_diverge {
-            self.emit_indent();
-            self.emit("panic(\"unreachable\")\n");
-        }
     }
 
-    /// Check if a statement diverges (never falls through)
-    fn stmt_diverges(stmt: &Stmt) -> bool {
-        match &stmt.kind {
-            StmtKind::Return { .. } => true,
-            StmtKind::Break | StmtKind::Continue => true,
-            StmtKind::Expr(expr) => {
-                // Check for panic() call
-                if let ExprKind::Call { func, .. } = &expr.kind
-                    && let ExprKind::Ident(name) = &func.kind
-                {
-                    return name == "panic";
-                }
-                false
+    /// Convert an enum pattern name to Go format
+    /// - `Type.Variant` → `Type_Variant`
+    /// - `pkg.Type.Variant` → `pkg.Type_Variant`
+    pub(crate) fn convert_enum_pattern_name(&self, name: &str, type_args: &[Type]) -> String {
+        let type_params_str = if type_args.is_empty() {
+            String::new()
+        } else {
+            let args: Vec<String> = type_args.iter().map(type_to_go_string).collect();
+            format!("[{}]", args.join(", "))
+        };
+
+        let parts: Vec<&str> = name.split('.').collect();
+        match parts.len() {
+            0 | 1 => name.to_string(),
+            2 => {
+                // Type.Variant → Type_Variant
+                format!("{}_{}{}", parts[0], parts[1], type_params_str)
             }
-            _ => false,
+            _ => {
+                // pkg.Type.Variant or pkg.subpkg.Type.Variant
+                // Keep everything except last two parts as prefix
+                let prefix = parts[..parts.len() - 2].join(".");
+                let type_name = parts[parts.len() - 2];
+                let variant = parts[parts.len() - 1];
+                format!("{}.{}_{}{}", prefix, type_name, variant, type_params_str)
+            }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::syntax::{FileId, Parser};
-
-    #[test]
-    fn test_gen_let_statement() {
-        let source = "func test() int { x := 42\nreturn x }";
-        let mut parser = Parser::new(source, FileId(0));
-        let func = parser.parse_func_decl().unwrap();
-
-        let mut codegen = Codegen::new();
-        codegen.gen_func_decl(&func);
-
-        let output = codegen.output();
-        assert!(output.contains("x := 42"));
-        assert!(output.contains("return x"));
     }
 }

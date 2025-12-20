@@ -37,14 +37,14 @@ func ResultErr(value string) Result {
 
 func worker(id int, jobs chan int, results chan Result) {
 	for j := range jobs {
-		fmt.Println(fmt.Sprintf("worker %v processing job %v", id, j))
+		fmt.Println(fmt.Sprintf("worker %d processing job %d", id, j))
 
 		// Simulate some work
 		time.Sleep(time.Millisecond * 100)
 
 		switch {
 		case j % 3 == 0:
-			results <- ResultErr(fmt.Sprintf("job %v failed", j))
+			results <- ResultErr(fmt.Sprintf("job %d failed", j))
 		default:
 			results <- ResultOk(j * 2)
 		}
@@ -79,11 +79,11 @@ func main() {
 		case Result_Ok:
 			value := __v.Value
 			_ = value
-			fmt.Println(fmt.Sprintf("success: %v", value))
+			fmt.Println(fmt.Sprintf("success: %d", value))
 		case Result_Err:
 			msg := __v.Value
 			_ = msg
-			fmt.Println(fmt.Sprintf("error: %v", msg))
+			fmt.Println(fmt.Sprintf("error: %s", msg))
 		}
 	}
 }

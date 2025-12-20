@@ -1,19 +1,23 @@
+mod bonk;
 mod decl;
 mod expr;
 mod pat;
 mod stmt;
 mod unify;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+pub use bonk::bonk_file;
 
 use super::ctx::GlobalCtxt;
-use super::symbols::{SymbolInfo, SymbolKind, SymbolTable};
+use super::sym::{SymbolInfo, SymbolKind, SymbolTable};
 use super::ty::{Nullability, Type};
 use crate::error::{Result, SoppoError};
 use crate::go::{GoCache, Project, SourceLocation, parse_go_type};
 use crate::syntax::{
-    Expr, ExprKind, Import, ModuleId, Span, Symbol, TypeAnnotation as AstType, UnaryOp,
+    Expr, ExprKind, Import, ModuleId, Span, Stmt, StmtKind, Symbol, TypeAnnotation, UnaryOp,
 };
+use crate::types::{TypeDefKind, TypedExpr, TypedStmt};
 
 /// Result of looking up a symbol in a Soppo module.
 /// Contains: (type, definition_span, name_span, doc_comment)
@@ -163,6 +167,15 @@ pub struct Infer {
 
     /// Collected errors (for multi-error reporting)
     errors: Vec<SoppoError>,
+
+    /// Type assertions known to be safe (variant state confirms match)
+    /// Keyed by (byte_start, byte_end) of the TypeAssert expression
+    /// This is flow-sensitive and cannot be recomputed during build
+    pub(super) known_safe_asserts: HashSet<(usize, usize)>,
+
+    /// Expressions that have had type args inferred from context
+    /// Used for error checking: generic variants without explicit type args need inference
+    inferred_type_args_set: HashSet<(usize, usize)>,
 }
 
 impl Infer {
@@ -183,6 +196,8 @@ impl Infer {
             error_companions: HashMap::new(),
             symbols: SymbolTable::new(),
             errors: Vec::new(),
+            known_safe_asserts: HashSet::new(),
+            inferred_type_args_set: HashSet::new(),
         }
     }
 
@@ -242,6 +257,11 @@ impl Infer {
         !self.errors.is_empty()
     }
 
+    /// Get the substitution map (for bonking)
+    pub fn substitutions(&self) -> &HashMap<i32, Type> {
+        &self.substitutions
+    }
+
     /// Take the collected errors, leaving an empty vector
     pub fn take_errors(&mut self) -> Vec<SoppoError> {
         std::mem::take(&mut self.errors)
@@ -252,24 +272,43 @@ impl Infer {
         &self.errors
     }
 
-    /// Infer expression type, emitting error and returning Type::Error on failure.
-    pub fn infer_expr(&mut self, expr: &crate::syntax::Expr) -> Type {
-        match self.infer_expr_inner(expr) {
-            Ok(ty) => ty,
+    /// Infer expression type and return TypedExpr.
+    /// Emits error and returns error TypedExpr on failure.
+    /// Applies nil-state narrowing: if the expression is known non-nil, the type is narrowed.
+    pub fn infer_expr(&mut self, expr: &Expr) -> TypedExpr {
+        let mut typed_expr = match self.infer_expr_inner(expr) {
+            Ok(typed_expr) => typed_expr,
             Err(e) => {
                 self.emit_error(e);
-                Type::error()
+                TypedExpr::error(expr.span)
+            }
+        };
+
+        // Apply nil-state narrowing: if expression is known non-nil, narrow the type
+        if !typed_expr.ty.is_error() && typed_expr.ty.is_nullable() {
+            let nullability = self.get_expr_nullability(expr, &typed_expr.ty);
+            if nullability == Nullability::NonNull {
+                typed_expr.ty = typed_expr.ty.as_non_nullable();
             }
         }
+
+        typed_expr
     }
 
-    /// Infer statement type, emitting error and returning Type::Error on failure.
-    pub fn infer_stmt(&mut self, stmt: &crate::syntax::Stmt) -> Type {
+    /// Infer expression and return just the Type.
+    /// Helper for code that only needs the type, not the full TypedExpr.
+    pub fn infer_expr_ty(&mut self, expr: &Expr) -> Type {
+        self.infer_expr(expr).ty
+    }
+
+    /// Infer a statement and return a TypedStmt.
+    /// Emits errors and returns an error TypedStmt on failure.
+    pub fn infer_stmt(&mut self, stmt: &Stmt) -> TypedStmt {
         match self.infer_stmt_inner(stmt) {
-            Ok(ty) => ty,
+            Ok(typed_stmt) => typed_stmt,
             Err(e) => {
                 self.emit_error(e);
-                Type::error()
+                TypedStmt::error(stmt.span)
             }
         }
     }
@@ -300,7 +339,7 @@ impl Infer {
     /// Record a type annotation as a symbol for LSP hover/goto-definition
     /// This handles type references in declarations like `var x int`, `func(a string)`, etc.
     /// Recursively processes composite types like `*MyType`, `[]MyType`, `map[K]V`, etc.
-    pub(super) fn record_type_annotation(&mut self, ty: &crate::syntax::TypeAnnotation) {
+    pub(super) fn record_type_annotation(&mut self, ty: &TypeAnnotation) {
         let type_name = &ty.name;
 
         // For composite types (pointer, slice, map, channel, variadic, func),
@@ -1255,7 +1294,7 @@ impl Infer {
     }
 
     /// Resolve an AST type to a runtime Type, checking for generic params
-    pub(super) fn resolve_type(&mut self, ast_ty: &AstType) -> Type {
+    pub(super) fn resolve_type(&mut self, ast_ty: &TypeAnnotation) -> Type {
         // Check if the type name is a generic parameter
         if let Some(ty_var) = self.generic_params.get(&ast_ty.name) {
             return ty_var.clone();
@@ -1488,7 +1527,7 @@ impl Infer {
 
     /// Validate that a type annotation refers to a real type.
     /// This catches errors like `Option.None[String]` where `String` isn't a valid Go type.
-    pub(super) fn validate_type_arg(&self, ast_ty: &AstType) -> Result<()> {
+    pub(super) fn validate_type_arg(&self, ast_ty: &TypeAnnotation) -> Result<()> {
         let name = &ast_ty.name;
 
         // Generic parameters are always valid (they're checked elsewhere)
@@ -1954,7 +1993,6 @@ impl Infer {
     /// Check if an expression is a NilAssert or wrapped in parens around a NilAssert
     /// This is used to skip nil-safety checks when the user explicitly asserts non-nil
     pub(super) fn is_nil_asserted(expr: &crate::syntax::Expr) -> bool {
-        use crate::syntax::ExprKind;
         match &expr.kind {
             ExprKind::NilAssert { .. } => true,
             ExprKind::Paren(inner) => Self::is_nil_asserted(inner),
@@ -2146,25 +2184,6 @@ impl Infer {
         }
     }
 
-    /// Infer expression type with nil-state narrowing applied (error-collecting).
-    /// If the expression is known to be non-nil (from flow analysis), a nullable type
-    /// will be converted to non-nullable.
-    /// Always returns a Type (using Type::error() for failures).
-    pub(super) fn infer_expr_narrowed(&mut self, expr: &Expr) -> Type {
-        let ty = self.infer_expr(expr);
-        if ty.is_error() {
-            return ty;
-        }
-
-        // Check if this expression is known to be non-nil
-        let nullability = self.get_expr_nullability(expr, &ty);
-        if nullability == Nullability::NonNull && ty.is_nullable() {
-            ty.as_non_nullable()
-        } else {
-            ty
-        }
-    }
-
     /// Update nil state for a variable after assignment
     pub(super) fn update_nil_state_for_assignment(
         &mut self,
@@ -2257,8 +2276,6 @@ impl Infer {
 
     /// Extract the variable name from a declaration or assignment statement
     pub(super) fn get_assigned_var_name(&self, stmt: &crate::syntax::Stmt) -> Option<String> {
-        use crate::syntax::StmtKind;
-
         match &stmt.kind {
             StmtKind::Decl { ident, .. } => Some(ident.name.clone()),
             StmtKind::Assign { target, .. } => {
@@ -2289,8 +2306,6 @@ impl Infer {
         &mut self,
         expr: &crate::syntax::Expr,
     ) -> Option<(Type, Type)> {
-        use crate::syntax::UnaryOp;
-
         match &expr.kind {
             // Type assertion: x.(T) -> (T, bool)
             ExprKind::TypeAssert {
@@ -2310,9 +2325,9 @@ impl Infer {
                 expr: map_expr,
                 index,
             } => {
-                let map_ty = self.infer_expr(map_expr);
+                let map_ty = self.infer_expr_ty(map_expr);
                 // Also infer the index to mark variables as used
-                let index_ty = self.infer_expr(index);
+                let index_ty = self.infer_expr_ty(index);
 
                 if map_ty.is_error() || index_ty.is_error() {
                     // We don't know if this is a map, so can't say it's comma-ok
@@ -2342,7 +2357,7 @@ impl Infer {
                 op: UnaryOp::Recv,
                 operand,
             } => {
-                let chan_ty = self.infer_expr(operand);
+                let chan_ty = self.infer_expr_ty(operand);
 
                 if chan_ty.is_error() {
                     // We don't know if this is a channel, so can't say it's comma-ok
@@ -2375,102 +2390,28 @@ impl Infer {
         }
     }
 
-    /// Set inferred type args on an expression using the expected type.
-    /// This is needed for codegen to know the concrete type args for generic enum variants.
+    /// Record that type args have been inferred for an expression.
+    /// Used for error checking: generic variants without explicit type args need inference.
     pub(super) fn set_inferred_type_args(&mut self, expr: &Expr, expected_type: &Type) {
-        // Extract type args from the expected type
-        let type_args = if let Type::Con { args, .. } = expected_type {
-            if args.is_empty() {
-                return;
-            }
-            args.iter()
-                .map(|t| self.type_to_string(t))
-                .collect::<Vec<_>>()
-        } else {
-            return;
-        };
-
-        match &expr.kind {
-            // Struct literals like Option.Some{Value: ...}
-            ExprKind::StructLit { ty: Some(ty), .. } => {
-                // Only set if no explicit type args were provided
-                if ty.args.is_empty() && ty.name.contains('.') {
-                    let parts: Vec<&str> = ty.name.split('.').collect();
-                    if !parts.is_empty() {
-                        let base_type = parts[0];
-                        // Check if this is a generic type
-                        if let Some(type_def) = self.global_state.lookup_type(base_type)
-                            && !type_def.generics.is_empty()
-                        {
-                            *expr.inferred_type_args.borrow_mut() = Some(type_args);
-                        }
-                    }
-                }
-            }
-            // Field access like Option.None (unit variant)
-            ExprKind::Field {
-                expr: base_expr, ..
-            } => {
-                // Check if this is accessing a variant on a generic type
-                if let ExprKind::Ident(type_name) = &base_expr.kind
-                    && let Some(type_def) = self.global_state.lookup_type(type_name)
-                    && !type_def.generics.is_empty()
-                {
-                    *expr.inferred_type_args.borrow_mut() = Some(type_args);
-                }
-            }
-            _ => {}
+        // Only mark if we actually have type args to infer
+        if let Type::Con { args, .. } = expected_type
+            && !args.is_empty()
+        {
+            self.inferred_type_args_set
+                .insert((expr.span.byte_start, expr.span.byte_end));
         }
     }
 
-    /// Convert a type to its string representation for codegen
-    fn type_to_string(&self, ty: &Type) -> String {
-        match ty {
-            Type::Con {
-                sym,
-                args,
-                nullable,
-            } => {
-                // For local types, just use the name. For external, include module.
-                let mut s = if sym.module.0.is_empty() {
-                    sym.name.clone()
-                } else {
-                    format!("{}.{}", sym.module.0, sym.name)
-                };
-                if !args.is_empty() {
-                    s.push('[');
-                    for (i, arg) in args.iter().enumerate() {
-                        if i > 0 {
-                            s.push_str(", ");
-                        }
-                        s.push_str(&self.type_to_string(arg));
-                    }
-                    s.push(']');
-                }
-                if *nullable { format!("?{}", s) } else { s }
-            }
-            Type::Var(v) => {
-                // Try to resolve the variable
-                let resolved = self.substitute(Type::Var(*v));
-                if let Type::Var(_) = resolved {
-                    // Still unresolved
-                    format!("T{}", v)
-                } else {
-                    self.type_to_string(&resolved)
-                }
-            }
-            Type::Func { .. } => "func".to_string(),
-            Type::Never => "never".to_string(),
-            Type::Error => "<error>".to_string(),
-        }
+    /// Check if type args were inferred for an expression.
+    fn has_inferred_type_args(&self, expr: &Expr) -> bool {
+        self.inferred_type_args_set
+            .contains(&(expr.span.byte_start, expr.span.byte_end))
     }
 
     /// Check if an expression is a generic enum variant that needs type args.
     /// Returns an error if the expression uses a generic enum variant without
     /// explicit type args and there's no context to infer them from.
     pub(super) fn check_generic_enum_needs_type_args(&self, expr: &Expr) -> Result<()> {
-        use crate::types::ctx::TypeDefKind;
-
         match &expr.kind {
             // Field access like Option.None (unit variant)
             ExprKind::Field {
@@ -2482,7 +2423,7 @@ impl Infer {
                     && let Some(type_def) = self.global_state.lookup_type(type_name)
                     && let TypeDefKind::Enum { .. } = &type_def.kind
                     && !type_def.generics.is_empty()
-                    && expr.inferred_type_args.borrow().is_none()
+                    && !self.has_inferred_type_args(expr)
                 {
                     return Err(SoppoError::GenericUnitVariant {
                         enum_name: type_name.clone(),
@@ -2501,7 +2442,7 @@ impl Infer {
                         if let Some(type_def) = self.global_state.lookup_type(enum_name)
                             && let TypeDefKind::Enum { .. } = &type_def.kind
                             && !type_def.generics.is_empty()
-                            && expr.inferred_type_args.borrow().is_none()
+                            && !self.has_inferred_type_args(expr)
                         {
                             return Err(SoppoError::GenericUnitVariant {
                                 enum_name: enum_name.to_string(),

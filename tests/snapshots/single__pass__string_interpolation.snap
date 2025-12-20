@@ -10,21 +10,21 @@ import "fmt"
 func main() {
 	// Basic string interpolation
 	name := "World"
-	fmt.Println(fmt.Sprintf("Hello, %v!", name))
+	fmt.Println(fmt.Sprintf("Hello, %s!", name))
 
 	// Multiple interpolations
 	x := 10
 	y := 20
-	fmt.Println(fmt.Sprintf("x=%v, y=%v, sum=%v", x, y, x + y))
+	fmt.Println(fmt.Sprintf("x=%d, y=%d, sum=%d", x, y, x + y))
 
 	// Interpolation with method calls
 	nums := []int{1, 2, 3}
-	fmt.Println(fmt.Sprintf("Length: %v", len(nums)))
+	fmt.Println(fmt.Sprintf("Length: %d", len(nums)))
 
 	// Nested expressions
 	a := 5
 	b := 3
-	fmt.Println(fmt.Sprintf("Result: %v", a * b + 2))
+	fmt.Println(fmt.Sprintf("Result: %d", a * b + 2))
 
 	// Escaped braces (double braces)
 	fmt.Println("Use {name} for interpolation")
@@ -34,15 +34,15 @@ func main() {
 
 	// Percent signs in format (should be escaped in output)
 	pct := 50
-	fmt.Println(fmt.Sprintf("%v%% complete", pct))
+	fmt.Println(fmt.Sprintf("%d%% complete", pct))
 
 	// Bool interpolation
 	flag := true
-	fmt.Println(fmt.Sprintf("Flag is %v", flag))
+	fmt.Println(fmt.Sprintf("Flag is %t", flag))
 
 	// Float interpolation
 	pi := 3.14159
-	fmt.Println(fmt.Sprintf("Pi is approximately %v", pi))
+	fmt.Println(fmt.Sprintf("Pi is approximately %g", pi))
 
 	// Format specifiers
 	// Integer formats

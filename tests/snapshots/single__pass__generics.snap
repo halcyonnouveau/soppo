@@ -62,7 +62,7 @@ func ResultErr[T any, E any](value E) Result[T, E] {
 
 func divide(a int, b int) Option[int] {
 	if b == 0 {
-		return Option_None[int]{}
+		return OptionNone[int]()
 	}
 	return Option_Some[int]{Value: a / b}
 }
@@ -79,7 +79,7 @@ func getBuffer(create bool) Option[*bytes.Buffer] {
 	if create {
 		return Option_Some[*bytes.Buffer]{Value: bytes.NewBufferString("hello")}
 	}
-	return Option_None[*bytes.Buffer]{}
+	return OptionNone[*bytes.Buffer]()
 }
 
 func main() {

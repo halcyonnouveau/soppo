@@ -1,17 +1,22 @@
 use super::Infer;
 use crate::error::{Result, SoppoError};
-use crate::syntax::{Block, ConstDecl, EnumVariant, FuncDecl, TypeDecl, TypeKind};
+use crate::syntax::{Block, ConstDecl, Decl, EnumVariant, File, FuncDecl, TypeDecl, TypeKind};
+use crate::types::ast::{
+    TypedBlock, TypedConstDecl, TypedDecl, TypedEnumVariant, TypedFile, TypedFuncDecl, TypedImport,
+    TypedImportKind, TypedInterfaceMethod, TypedParam, TypedTypeDecl, TypedTypeKind, TypedVarDecl,
+};
 use crate::types::ctx::TypeDefKind;
 use crate::types::{SymbolInfo, SymbolKind, Type};
 
 impl Infer {
     /// Infer the type of a function body, adding named return parameters to scope.
     /// Continues checking all statements even if some have errors.
+    /// Returns the TypedBlock for the function body.
     pub fn infer_func_body(
         &mut self,
         block: &Block,
         returns: &[crate::syntax::Param],
-    ) -> Result<Type> {
+    ) -> Result<TypedBlock> {
         self.push_scope();
 
         // Add named return parameters to the body scope
@@ -29,15 +34,12 @@ impl Infer {
             }
         }
 
-        let mut last_ty = Type::unit();
-
         // Check all statements, continuing after errors
-        for stmt in &block.stmts {
-            let ty = self.infer_stmt(stmt);
-            if !ty.is_error() {
-                last_ty = ty;
-            }
-        }
+        let typed_stmts: Vec<_> = block
+            .stmts
+            .iter()
+            .map(|stmt| self.infer_stmt(stmt))
+            .collect();
 
         // Check for unused variables before popping scope
         if let Err(e) = self.check_unused_vars_in_scope() {
@@ -46,28 +48,25 @@ impl Infer {
 
         self.pop_scope();
 
-        Ok(last_ty)
+        Ok(TypedBlock::new(typed_stmts, block.span))
     }
 
     /// Infer the type of a block.
     /// Continues checking all statements even if some have errors.
-    /// Returns the type of the last statement (or unit if empty/all errors).
-    pub fn infer_block(&mut self, block: &Block) -> Type {
+    /// Returns a TypedBlock containing all typed statements.
+    pub fn infer_block(&mut self, block: &Block) -> TypedBlock {
         self.push_scope();
 
-        let mut last_ty = Type::unit();
-
         // Check all statements, continuing after errors
-        for stmt in &block.stmts {
-            let ty = self.infer_stmt(stmt);
-            if !ty.is_error() {
-                last_ty = ty;
-            }
-        }
+        let typed_stmts: Vec<_> = block
+            .stmts
+            .iter()
+            .map(|stmt| self.infer_stmt(stmt))
+            .collect();
 
         self.pop_scope();
 
-        last_ty
+        TypedBlock::new(typed_stmts, block.span)
     }
 
     /// Register a function's signature without checking the body.
@@ -156,17 +155,20 @@ impl Infer {
         Ok(())
     }
 
-    /// Infer and check a function declaration's body.
+    /// Infer and check a function declaration's body, returning a TypedFuncDecl.
     /// The function signature should already be registered via `register_func_signature`.
-    pub fn infer_func_decl(&mut self, func: &FuncDecl) -> Result<()> {
+    pub fn infer_func_decl(&mut self, func: &FuncDecl) -> Result<TypedFuncDecl> {
         self.push_scope();
 
         // Save old generic params and set up new ones for this function
+        // For function declarations, we use Type::simple with the param name (not type variables)
+        // so that codegen outputs the actual parameter name like "T"
         let old_generic_params = std::mem::take(&mut self.generic_params);
         for generic in &func.generics {
-            let ty_var = self.fresh_ty_var();
-            self.generic_params
-                .insert(generic.ident.name.clone(), ty_var);
+            self.generic_params.insert(
+                generic.ident.name.clone(),
+                Type::simple(&generic.ident.name),
+            );
         }
 
         // Set expected return types for this function
@@ -182,9 +184,8 @@ impl Infer {
             );
         }
 
-        // Add receiver parameter to scope (for methods)
-        // Note: enum method validation is done in register_func_signature
-        if let Some(receiver) = &func.receiver {
+        // Build typed receiver
+        let typed_receiver = if let Some(receiver) = &func.receiver {
             let receiver_ty = self.resolve_type(&receiver.ty);
             self.insert_var(
                 receiver.ident.name.clone(),
@@ -196,16 +197,24 @@ impl Infer {
             self.record_type_annotation(&receiver.ty);
 
             // Set nil state for nilable receivers based on nullability
-            // Non-nullable nilable receivers (e.g., *T not ?*T) are trusted to be non-nil
             if Self::is_nilable_type(&receiver_ty) && !receiver_ty.is_nullable() {
                 self.set_nil_state(
                     receiver.ident.name.clone(),
                     crate::types::ty::Nullability::NonNull,
                 );
             }
-        }
 
-        // Add parameters to scope
+            Some(TypedParam {
+                ident: receiver.ident.clone(),
+                ty: receiver_ty,
+                nullable: receiver.ty.nullable,
+            })
+        } else {
+            None
+        };
+
+        // Build typed parameters
+        let mut typed_params = Vec::with_capacity(func.params.len());
         for param in &func.params {
             let param_ty = self.resolve_type(&param.ty);
             self.insert_var(
@@ -218,29 +227,36 @@ impl Infer {
             self.record_type_annotation(&param.ty);
 
             // Set nil state for nilable parameters based on nullability
-            // Non-nullable nilable params are trusted to be non-nil
             if Self::is_nilable_type(&param_ty) && !param_ty.is_nullable() {
                 self.set_nil_state(
                     param.ident.name.clone(),
                     crate::types::ty::Nullability::NonNull,
                 );
             }
+
+            typed_params.push(TypedParam {
+                ident: param.ident.clone(),
+                ty: param_ty,
+                nullable: param.ty.nullable,
+            });
         }
 
-        // Record return type annotations for LSP
-        for ret in &func.returns {
-            self.record_type_annotation(&ret.ty);
-        }
+        // Build typed returns
+        let typed_returns: Vec<_> = func
+            .returns
+            .iter()
+            .map(|ret| {
+                self.record_type_annotation(&ret.ty);
+                TypedParam {
+                    ident: ret.ident.clone(),
+                    ty: self.resolve_type(&ret.ty),
+                    nullable: ret.ty.nullable,
+                }
+            })
+            .collect();
 
-        // Infer body type, passing named returns to add to the body scope
-        let body_ty = self.infer_func_body(&func.body, &func.returns)?;
-
-        // Check against declared return type (for single return)
-        if func.returns.len() == 1 {
-            let declared_ret_ty = self.resolve_type(&func.returns[0].ty);
-            // Point to return type annotation for better error messages
-            self.unify_inner(&body_ty, &declared_ret_ty, &func.returns[0].ty.span)?;
-        }
+        // Infer the function body
+        let typed_body = self.infer_func_body(&func.body, &func.returns)?;
 
         self.pop_scope();
 
@@ -248,27 +264,35 @@ impl Infer {
         self.expected_return_types = old_expected_return;
         self.generic_params = old_generic_params;
 
-        // Note: Function registration is done in register_func_signature
-
-        Ok(())
+        Ok(TypedFuncDecl {
+            receiver: typed_receiver,
+            ident: func.ident.clone(),
+            generics: func.generics.clone(),
+            params: typed_params,
+            returns: typed_returns,
+            body: typed_body,
+            span: func.span,
+            doc_comment: func.doc_comment.clone(),
+        })
     }
 
-    /// Type check a const declaration
-    pub fn infer_const_decl(&mut self, const_decl: &ConstDecl) -> Result<()> {
+    /// Type check a const declaration and return TypedConstDecl.
+    pub fn infer_const_decl(&mut self, const_decl: &ConstDecl) -> TypedConstDecl {
         // Infer the type of the value
-        let value_ty = self.infer_expr(&const_decl.value);
+        let typed_value = self.infer_expr(&const_decl.value);
+        let has_explicit_type = const_decl.ty.is_some();
 
         // Determine the constant's type
-        let const_ty = if value_ty.is_error() {
+        let const_ty = if typed_value.ty.is_error() {
             Type::error()
         } else if let Some(ty) = &const_decl.ty {
             // const X type = value: unify declared with inferred
             let declared_ty = Type::from_ast(ty);
-            self.unify(&declared_ty, &value_ty, &const_decl.value.span);
+            self.unify(&declared_ty, &typed_value.ty, &const_decl.value.span);
             declared_ty
         } else {
             // const X = value: infer from value
-            value_ty
+            typed_value.ty.clone()
         };
 
         // Add constant to the global scope
@@ -289,7 +313,7 @@ impl Infer {
             const_decl.ident.span,
             SymbolInfo {
                 name: const_decl.ident.name.clone(),
-                ty: const_ty,
+                ty: const_ty.clone(),
                 definition_span: Some(const_decl.span),
                 name_span: Some(const_decl.ident.span),
                 kind: SymbolKind::Constant,
@@ -298,29 +322,40 @@ impl Infer {
             },
         );
 
-        Ok(())
+        TypedConstDecl {
+            ident: const_decl.ident.clone(),
+            const_ty,
+            has_explicit_type,
+            value: typed_value,
+            span: const_decl.span,
+            doc_comment: const_decl.doc_comment.clone(),
+        }
     }
 
-    /// Type check a var declaration
-    pub fn infer_var_decl(&mut self, var_decl: &crate::syntax::VarDecl) -> Result<()> {
-        // Determine the variable's type
-        let var_ty = match (&var_decl.ty, &var_decl.value) {
+    /// Type check a var declaration and return TypedVarDecl.
+    pub fn infer_var_decl(&mut self, var_decl: &crate::syntax::VarDecl) -> TypedVarDecl {
+        let has_explicit_type = var_decl.ty.is_some();
+
+        // Determine the variable's type and typed value
+        let (var_ty, typed_value) = match (&var_decl.ty, &var_decl.value) {
             (Some(ty), Some(value)) => {
                 // var X type = value: unify declared with inferred
                 let declared_ty = Type::from_ast(ty);
-                let value_ty = self.infer_expr(value);
-                if !value_ty.is_error() {
-                    self.unify(&declared_ty, &value_ty, &value.span);
+                let typed_val = self.infer_expr(value);
+                if !typed_val.ty.is_error() {
+                    self.unify(&declared_ty, &typed_val.ty, &value.span);
                 }
-                declared_ty
+                (declared_ty, Some(typed_val))
             }
             (Some(ty), None) => {
                 // var X type (zero value)
-                Type::from_ast(ty)
+                (Type::from_ast(ty), None)
             }
             (None, Some(value)) => {
                 // var X = value: infer from value
-                self.infer_expr(value)
+                let typed_val = self.infer_expr(value);
+                let ty = typed_val.ty.clone();
+                (ty, Some(typed_val))
             }
             (None, None) => {
                 // This shouldn't happen - parser should reject it
@@ -328,7 +363,7 @@ impl Infer {
                     message: "var declaration must have type or value".to_string(),
                     span: var_decl.span,
                 });
-                Type::error()
+                (Type::error(), None)
             }
         };
 
@@ -350,7 +385,7 @@ impl Infer {
             var_decl.ident.span,
             SymbolInfo {
                 name: var_decl.ident.name.clone(),
-                ty: var_ty,
+                ty: var_ty.clone(),
                 definition_span: Some(var_decl.span),
                 name_span: Some(var_decl.ident.span),
                 kind: SymbolKind::Variable,
@@ -359,11 +394,17 @@ impl Infer {
             },
         );
 
-        Ok(())
+        TypedVarDecl {
+            ident: var_decl.ident.clone(),
+            var_ty,
+            has_explicit_type,
+            value: typed_value,
+            span: var_decl.span,
+        }
     }
 
-    /// Type check an enum/struct declaration
-    pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> Result<()> {
+    /// Type check an enum/struct declaration and return TypedTypeDecl.
+    pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> Result<TypedTypeDecl> {
         // Record type definition for LSP
         self.record_symbol(
             type_decl.ident.span,
@@ -378,61 +419,77 @@ impl Infer {
             },
         );
 
-        match &type_decl.kind {
-            TypeKind::Alias { .. } => {
+        // Set up generic params for this type declaration
+        // For type declarations, we use Type::simple with the param name (not type variables)
+        // so that codegen outputs the actual parameter name like "T"
+        let old_generic_params = std::mem::take(&mut self.generic_params);
+        for generic in &type_decl.generics {
+            self.generic_params.insert(
+                generic.ident.name.clone(),
+                Type::simple(&generic.ident.name),
+            );
+        }
+
+        let typed_kind = match &type_decl.kind {
+            TypeKind::Alias { target } => {
                 // Type aliases don't need special type checking
-                // Just register the type in global state
                 self.global_state.register_type(type_decl);
-                Ok(())
+                TypedTypeKind::Alias {
+                    target: self.resolve_type(target),
+                }
             }
 
-            TypeKind::Definition { .. } => {
+            TypeKind::Definition { target } => {
                 // Type definitions create new distinct types
-                // Just register the type in global state
                 self.global_state.register_type(type_decl);
-                Ok(())
+                TypedTypeKind::Definition {
+                    target: self.resolve_type(target),
+                }
             }
 
             TypeKind::Enum { variants } => {
                 // Register the enum type in the global state
                 self.global_state.register_type(type_decl);
 
-                // Set up generic params for this type declaration
-                let old_generic_params = std::mem::take(&mut self.generic_params);
-                for generic in &type_decl.generics {
-                    let ty_var = self.fresh_ty_var();
-                    self.generic_params
-                        .insert(generic.ident.name.clone(), ty_var);
-                }
-
-                // Register each variant as a constructor function
-                for variant in variants {
-                    match variant {
+                // Build typed variants and register constructors
+                let typed_variants: Vec<_> = variants
+                    .iter()
+                    .map(|variant| match variant {
                         EnumVariant::Unit { ident, .. } => {
                             // Unit variants are just values of the enum type
-                            // They act like constructors with no arguments
                             let enum_ty = Type::simple(&type_decl.ident.name);
                             if let Some(scope) = self.scopes.first_mut() {
                                 scope
                                     .insert(ident.name.clone(), (enum_ty, Some(ident.span), false));
+                            }
+                            TypedEnumVariant::Unit {
+                                ident: ident.clone(),
                             }
                         }
                         EnumVariant::Single { ident, ty, .. } => {
                             // Single value variants are functions: T -> EnumType
                             let value_ty = self.resolve_type(ty);
                             let enum_ty = Type::simple(&type_decl.ident.name);
-                            let constructor_ty = Type::fun(vec![value_ty], enum_ty);
+                            let constructor_ty = Type::fun(vec![value_ty.clone()], enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
                                 scope.insert(
                                     ident.name.clone(),
                                     (constructor_ty, Some(ident.span), false),
                                 );
                             }
+                            TypedEnumVariant::Single {
+                                ident: ident.clone(),
+                                ty: value_ty,
+                            }
                         }
                         EnumVariant::Struct { ident, fields, .. } => {
                             // Struct variants are functions: (field1, field2, ...) -> EnumType
+                            let field_types: Vec<(String, Type)> = fields
+                                .iter()
+                                .map(|f| (f.ident.name.clone(), self.resolve_type(&f.ty)))
+                                .collect();
                             let field_tys: Vec<Type> =
-                                fields.iter().map(|f| self.resolve_type(&f.ty)).collect();
+                                field_types.iter().map(|(_, ty)| ty.clone()).collect();
                             let enum_ty = Type::simple(&type_decl.ident.name);
                             let constructor_ty = Type::fun(field_tys, enum_ty);
                             if let Some(scope) = self.scopes.first_mut() {
@@ -441,30 +498,33 @@ impl Infer {
                                     (constructor_ty, Some(ident.span), false),
                                 );
                             }
+                            TypedEnumVariant::Struct {
+                                ident: ident.clone(),
+                                fields: field_types,
+                            }
                         }
-                    }
-                }
+                    })
+                    .collect();
 
-                // Restore old generic params
-                self.generic_params = old_generic_params;
-                Ok(())
+                TypedTypeKind::Enum {
+                    variants: typed_variants,
+                }
             }
+
             TypeKind::Struct { fields } => {
                 // Register the struct type with proper field types
                 self.global_state.register_type(type_decl);
 
-                // Set up generic params for this type declaration
-                let old_generic_params = std::mem::take(&mut self.generic_params);
-                for generic in &type_decl.generics {
-                    let ty_var = self.fresh_ty_var();
-                    self.generic_params
-                        .insert(generic.ident.name.clone(), ty_var);
-                }
-
                 // Store field types for later field access validation
-                let field_types: Vec<(String, Type)> = fields
+                let field_types: Vec<(String, Type, Option<String>)> = fields
                     .iter()
-                    .map(|f| (f.ident.name.clone(), self.resolve_type(&f.ty)))
+                    .map(|f| {
+                        (
+                            f.ident.name.clone(),
+                            self.resolve_type(&f.ty),
+                            f.tag.clone(),
+                        )
+                    })
                     .collect();
 
                 // Update the registered type with actual field types
@@ -475,20 +535,175 @@ impl Infer {
                     .get_mut(&type_decl.ident.name)
                 {
                     type_def.kind = TypeDefKind::Struct {
-                        fields: field_types,
+                        fields: field_types
+                            .iter()
+                            .map(|(name, ty, _)| (name.clone(), ty.clone()))
+                            .collect(),
                     };
                 }
 
-                // Restore old generic params
-                self.generic_params = old_generic_params;
-                Ok(())
+                TypedTypeKind::Struct {
+                    fields: field_types,
+                }
             }
-            TypeKind::Interface { .. } => {
+
+            TypeKind::Interface { methods } => {
                 // Interfaces are just type definitions that Go uses for polymorphism
-                // Just register the type, no special type checking needed
                 self.global_state.register_type(type_decl);
-                Ok(())
+
+                let typed_methods: Vec<_> = methods
+                    .iter()
+                    .map(|m| TypedInterfaceMethod {
+                        ident: m.ident.clone(),
+                        params: m
+                            .params
+                            .iter()
+                            .map(|p| TypedParam {
+                                ident: p.ident.clone(),
+                                ty: self.resolve_type(&p.ty),
+                                nullable: p.ty.nullable,
+                            })
+                            .collect(),
+                        returns: m.returns.iter().map(|r| self.resolve_type(r)).collect(),
+                    })
+                    .collect();
+
+                TypedTypeKind::Interface {
+                    methods: typed_methods,
+                }
             }
+        };
+
+        // Restore old generic params
+        self.generic_params = old_generic_params;
+
+        Ok(TypedTypeDecl {
+            ident: type_decl.ident.clone(),
+            generics: type_decl.generics.clone(),
+            kind: typed_kind,
+            span: type_decl.span,
+            doc_comment: type_decl.doc_comment.clone(),
+        })
+    }
+
+    /// Infer a declaration and return the typed version.
+    pub fn infer_decl(&mut self, decl: &Decl) -> TypedDecl {
+        match decl {
+            Decl::Func(func) => {
+                // Signature should already be registered
+                match self.infer_func_decl(func) {
+                    Ok(typed_func) => TypedDecl::Func(typed_func),
+                    Err(e) => {
+                        self.emit_error(e);
+                        // Return a minimal typed func for error recovery
+                        TypedDecl::Func(TypedFuncDecl {
+                            receiver: None,
+                            ident: func.ident.clone(),
+                            generics: func.generics.clone(),
+                            params: vec![],
+                            returns: vec![],
+                            body: TypedBlock::new(vec![], func.body.span),
+                            span: func.span,
+                            doc_comment: func.doc_comment.clone(),
+                        })
+                    }
+                }
+            }
+            Decl::Const(const_decl) => TypedDecl::Const(self.infer_const_decl(const_decl)),
+            Decl::ConstBlock(consts) => {
+                let typed_consts: Vec<_> =
+                    consts.iter().map(|c| self.infer_const_decl(c)).collect();
+                TypedDecl::ConstBlock(typed_consts)
+            }
+            Decl::Var(var_decl) => TypedDecl::Var(self.infer_var_decl(var_decl)),
+            Decl::Type(type_decl) => match self.infer_type_decl(type_decl) {
+                Ok(typed_type) => TypedDecl::Type(typed_type),
+                Err(e) => {
+                    self.emit_error(e);
+                    // Return a minimal typed type for error recovery
+                    TypedDecl::Type(TypedTypeDecl {
+                        ident: type_decl.ident.clone(),
+                        generics: type_decl.generics.clone(),
+                        kind: TypedTypeKind::Alias {
+                            target: Type::error(),
+                        },
+                        span: type_decl.span,
+                        doc_comment: type_decl.doc_comment.clone(),
+                    })
+                }
+            },
+        }
+    }
+
+    /// Infer an entire file and return a TypedFile.
+    /// This performs the two-pass inference: first registering signatures, then inferring bodies.
+    pub fn infer_file(&mut self, file: &File) -> TypedFile {
+        // Build typed imports by looking up import kinds from self.imports
+        // (populated by process_imports called earlier)
+        let typed_imports: Vec<_> = file
+            .imports
+            .iter()
+            .map(|import| {
+                // Look up the import kind from our processed imports
+                let short_name = import.alias.clone().unwrap_or_else(|| {
+                    import
+                        .path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&import.path)
+                        .to_string()
+                });
+
+                let kind = self
+                    .imports
+                    .get(&short_name)
+                    .map(|(_, _, _, k)| match k {
+                        super::ImportKind::Go => TypedImportKind::Go,
+                        super::ImportKind::Soppo(module_id) => {
+                            TypedImportKind::Soppo(module_id.clone())
+                        }
+                    })
+                    .unwrap_or(TypedImportKind::Go);
+
+                TypedImport {
+                    alias: import.alias.clone(),
+                    path: import.path.clone(),
+                    span: import.span,
+                    kind,
+                }
+            })
+            .collect();
+
+        // Pass 1: Register type definitions and function signatures
+        // This allows forward references (functions calling each other, types referencing each other)
+        for decl in &file.decls {
+            match decl {
+                Decl::Type(type_decl) => {
+                    // Register type in global state (but don't build TypedTypeDecl yet)
+                    self.global_state.register_type(type_decl);
+                }
+                Decl::Func(func) => {
+                    if let Err(e) = self.register_func_signature(func) {
+                        self.emit_error(e);
+                    }
+                }
+                // Consts and vars are processed in pass 2 along with their typed versions
+                Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) => {}
+            }
+        }
+
+        // Pass 2: Infer all declarations and build typed versions
+        let typed_decls: Vec<_> = file
+            .decls
+            .iter()
+            .map(|decl| self.infer_decl(decl))
+            .collect();
+
+        TypedFile {
+            package: file.package.clone(),
+            imports: typed_imports,
+            decls: typed_decls,
+            comments: file.comments.clone(),
         }
     }
 }

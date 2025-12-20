@@ -7,7 +7,7 @@ use clap::{Parser as ClapParser, Subcommand};
 use miette::{IntoDiagnostic, NamedSource, Result};
 use soppo::build;
 use soppo::config::{ConfigError, resolve_globs};
-use soppo::format;
+use soppo::fmt;
 use soppo::go::Project;
 use soppo::test::TestConfig;
 
@@ -297,7 +297,7 @@ fn format_files(files: &[PathBuf], write: bool, list: bool, diff: bool) -> Resul
             .map_err(|e| e.context(format!("Failed to read file: {}", file.display())))?;
 
         let filename = file.display().to_string();
-        let formatted = format::format_source(&source).map_err(|e| {
+        let formatted = fmt::format_source(&source).map_err(|e| {
             miette::Report::from(e)
                 .with_source_code(NamedSource::new(filename.clone(), source.clone()))
         })?;

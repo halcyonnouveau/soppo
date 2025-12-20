@@ -5,9 +5,12 @@ use crate::error::{Result, SoppoError};
 use crate::syntax::{
     BinOp, EnumVariant, Expr, ExprKind, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
 };
+use crate::types::ast::{
+    TypedExprKind, TypedSelectCase, TypedSelectCaseKind, TypedStmt, TypedStmtKind,
+};
 use crate::types::ctx::TypeDefKind;
 use crate::types::ty::Nullability;
-use crate::types::{SymbolInfo, SymbolKind, Type};
+use crate::types::{SymbolInfo, SymbolKind, Type, TypedExpr};
 
 /// Result of analysing a nil check condition
 #[derive(Debug)]
@@ -28,6 +31,22 @@ pub(super) fn expr_to_key(expr: &Expr) -> Option<String> {
             expr: base, field, ..
         } => {
             let base_key = expr_to_key(base)?;
+            Some(format!("{}.{}", base_key, field))
+        }
+        _ => None,
+    }
+}
+
+/// Convert a typed expression to a trackable key string
+/// Returns Some(key) for identifiers and field access chains (e.g., "user.profile.address")
+/// Returns None for complex expressions that can't be tracked
+pub(super) fn typed_expr_to_key(expr: &TypedExpr) -> Option<String> {
+    match &expr.kind {
+        TypedExprKind::Ident(name) => Some(name.clone()),
+        TypedExprKind::Field {
+            expr: base, field, ..
+        } => {
+            let base_key = typed_expr_to_key(base)?;
             Some(format!("{}.{}", base_key, field))
         }
         _ => None,
@@ -95,17 +114,17 @@ pub(super) fn extract_nil_checks(expr: &Expr) -> Vec<NilCheck> {
 }
 
 impl Infer {
-    /// Infer the type of a statement (internal version that returns Result).
+    /// Infer a statement and return a TypedStmt directly.
     ///
-    /// **Prefer `infer_stmt`** which collects errors and returns `Type::Error` on failure.
+    /// **Prefer `infer_stmt`** which collects errors and returns an error TypedStmt on failure.
     /// This version should only be used when you need to explicitly check if inference failed.
     ///
-    /// Returns the type of the statement (unit for most, or the type of the expression).
-    pub fn infer_stmt_inner(&mut self, stmt: &Stmt) -> Result<Type> {
-        match &stmt.kind {
+    /// Returns a TypedStmt containing the typed statement kind and its span.
+    pub fn infer_stmt_inner(&mut self, stmt: &Stmt) -> Result<TypedStmt> {
+        let kind = match &stmt.kind {
             StmtKind::Decl { ident, value } => {
-                // Use infer_expr_or_error to collect errors and continue with Type::Error
-                let value_ty = self.infer_expr(value);
+                let typed_value = self.infer_expr(value);
+                let value_ty = typed_value.ty.clone();
                 let value_ty_sub = self.substitute(value_ty.clone());
 
                 // Check for generic enum variants without type args (skip if already error)
@@ -127,7 +146,7 @@ impl Infer {
                     ident.span,
                     SymbolInfo {
                         name: ident.name.clone(),
-                        ty: value_ty,
+                        ty: value_ty.clone(),
                         definition_span: Some(stmt.span),
                         name_span: Some(ident.span),
                         kind: SymbolKind::Variable,
@@ -142,127 +161,76 @@ impl Infer {
                     // Track variant state for enum types
                     self.update_variant_state_for_assignment(&ident.name, value);
                 }
-                Ok(Type::unit())
+                TypedStmtKind::Decl {
+                    ident: ident.clone(),
+                    var_ty: value_ty,
+                    value: typed_value,
+                }
             }
 
             StmtKind::MultiDecl {
                 ident: names,
                 values,
             } => {
-                if values.len() == 1 && names.len() > 1 {
+                // Infer all values first
+                let typed_values: Vec<_> = values.iter().map(|v| self.infer_expr(v)).collect();
+
+                let var_tys = if values.len() == 1 && names.len() > 1 {
                     // a, b := f() (multi-return unpacking)
                     let value = &values[0];
+                    let typed_value = &typed_values[0];
 
                     // Check for comma-ok idiom: v, ok := expr
-                    // Applies to: type assertions, map access, channel receive
-                    if names.len() == 2
-                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)
-                    {
-                        // Check if sub-expression inference failed
-                        if value_ty.is_error() {
-                            for ident in names {
-                                if let Err(e) = self.insert_var(
-                                    ident.name.clone(),
-                                    Type::error(),
-                                    Some(ident.span),
-                                ) {
+                    if names.len() == 2 {
+                        if let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value) {
+                            if value_ty.is_error() {
+                                for ident in names {
+                                    if let Err(e) = self.insert_var(
+                                        ident.name.clone(),
+                                        Type::error(),
+                                        Some(ident.span),
+                                    ) {
+                                        self.emit_error(e);
+                                    }
+                                }
+                                vec![Type::error(); names.len()]
+                            } else {
+                                let vars = vec![
+                                    (names[0].name.clone(), value_ty.clone(), Some(names[0].span)),
+                                    (names[1].name.clone(), ok_ty.clone(), Some(names[1].span)),
+                                ];
+                                if let Err(e) = self.insert_short_decl_vars(&vars) {
                                     self.emit_error(e);
                                 }
+                                vec![value_ty, ok_ty]
                             }
-                            return Ok(Type::unit());
+                        } else {
+                            // Not comma-ok, handle as tuple unpacking below
+                            self.handle_multi_decl_tuple_unpack(names, typed_value, value)
                         }
-                        let vars = vec![
-                            (names[0].name.clone(), value_ty, Some(names[0].span)),
-                            (names[1].name.clone(), ok_ty, Some(names[1].span)),
-                        ];
-                        if let Err(e) = self.insert_short_decl_vars(&vars) {
-                            self.emit_error(e);
-                        }
-                        return Ok(Type::unit());
+                    } else {
+                        // More than 2 names, must be tuple unpacking
+                        self.handle_multi_decl_tuple_unpack(names, typed_value, value)
                     }
-                    // None = not a comma-ok expression, continue to tuple handling
-
-                    let value_ty = self.infer_expr(value);
-
-                    // If expression failed, insert vars with Error type to prevent cascading
-                    if value_ty.is_error() {
-                        for ident in names {
-                            if let Err(e) =
-                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
-                            {
-                                self.emit_error(e);
-                            }
-                        }
-                        return Ok(Type::unit());
-                    }
-
-                    let value_ty = self.substitute(value_ty);
-
-                    // The value should be a tuple type with matching arity
-                    if let Type::Con {
-                        sym: type_name,
-                        args,
-                        ..
-                    } = &value_ty
-                        && type_name.name == "tuple"
-                        && args.len() == names.len()
-                    {
-                        // Use Go's short decl semantics - at least one var must be new
-                        let vars: Vec<_> = names
-                            .iter()
-                            .zip(args.iter())
-                            .map(|(ident, ty)| (ident.name.clone(), ty.clone(), Some(ident.span)))
-                            .collect();
-                        if let Err(e) = self.insert_short_decl_vars(&vars) {
-                            self.emit_error(e);
-                        }
-
-                        // Track error companions: if last return is error, other returns are companions
-                        // This enables narrowing like: `resp, err := f(); if err != nil { return }`
-                        // After the early return, resp is known non-nil.
-                        if let Some(last_ty) = args.last()
-                            && matches!(last_ty, Type::Con { sym, .. } if sym.name == "error" || sym.name == "?error")
-                            && names.len() >= 2
-                        {
-                            let err_name = names.last().unwrap().name.clone();
-                            let companions: Vec<String> = names[..names.len() - 1]
-                                .iter()
-                                .map(|n| n.name.clone())
-                                .collect();
-                            self.error_companions.insert(err_name, companions);
-                        }
-
-                        return Ok(Type::unit());
-                    }
-
-                    // Not a tuple type or wrong arity - emit error but still define vars
-                    self.emit_error(SoppoError::Type {
-                        message: format!(
-                            "Cannot unpack {} values from type `{}`",
-                            names.len(),
-                            value_ty
-                        ),
-                        span: value.span,
-                    });
-                    for ident in names {
-                        if let Err(e) =
-                            self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
-                        {
-                            self.emit_error(e);
-                        }
-                    }
-                    Ok(Type::unit())
                 } else {
                     // a, b := expr1, expr2 (one value per name)
                     let mut vars = Vec::with_capacity(names.len());
-                    for (ident, value) in names.iter().zip(values.iter()) {
-                        let value_ty = self.infer_expr(value);
-                        vars.push((ident.name.clone(), value_ty, Some(ident.span)));
+                    let mut var_tys = Vec::with_capacity(names.len());
+                    for (ident, typed_value) in names.iter().zip(typed_values.iter()) {
+                        let value_ty = typed_value.ty.clone();
+                        vars.push((ident.name.clone(), value_ty.clone(), Some(ident.span)));
+                        var_tys.push(value_ty);
                     }
                     if let Err(e) = self.insert_short_decl_vars(&vars) {
                         self.emit_error(e);
                     }
-                    Ok(Type::unit())
+                    var_tys
+                };
+
+                TypedStmtKind::MultiDecl {
+                    idents: names.clone(),
+                    var_tys,
+                    values: typed_values,
                 }
             }
 
@@ -272,45 +240,41 @@ impl Infer {
                     self.record_type_annotation(t);
                 }
 
-                let (var_ty, init_expr) = match (ty, value) {
+                let has_explicit_type = ty.is_some();
+                let (var_ty, typed_value) = match (ty, value) {
                     (Some(t), Some(expr)) => {
                         // var x type = value: unify declared with inferred
-                        let declared_ty = Type::from_ast(t);
+                        let declared_ty = self.resolve_type(t);
+                        let typed_expr = self.infer_expr(expr);
 
                         // Check: assigning nil to a non-nilable type is an error
-                        if matches!(expr.kind, ExprKind::Nil)
-                            && let Some(err) = Self::check_nil_to_non_nilable(&declared_ty, t.span)
-                        {
-                            self.emit_error(err);
-                            (Type::error(), Some(expr))
-                        } else {
-                            let value_ty = self.infer_expr(expr);
-                            if !value_ty.is_error() {
-                                self.unify(&declared_ty, &value_ty, &expr.span);
+                        if matches!(expr.kind, ExprKind::Nil) {
+                            if let Some(err) = Self::check_nil_to_non_nilable(&declared_ty, t.span)
+                            {
+                                self.emit_error(err);
                             }
-                            (declared_ty, Some(expr))
+                        } else if !typed_expr.ty.is_error() {
+                            self.unify(&declared_ty, &typed_expr.ty, &expr.span);
                         }
+                        (declared_ty, Some(typed_expr))
                     }
                     (Some(t), None) => {
                         // var x type: use declared type (zero value)
-                        let declared_ty = Type::from_ast(t);
+                        let declared_ty = self.resolve_type(t);
 
                         // Check: non-nilable types require initialisation
-                        // Zero value for pointer/slice/map/etc is nil, which violates non-nilable
                         if declared_ty.is_nilable_kind() && !declared_ty.is_nullable() {
                             self.emit_error(SoppoError::NonNilableNoInit {
                                 ty: declared_ty.to_string(),
                                 span: stmt.span,
                             });
-                            (Type::error(), None)
-                        } else {
-                            (declared_ty, None)
                         }
+                        (declared_ty, None)
                     }
                     (None, Some(expr)) => {
                         // var x = value: infer from value
-                        let ty = self.infer_expr(expr);
-                        (ty, Some(expr))
+                        let typed_expr = self.infer_expr(expr);
+                        (typed_expr.ty.clone(), Some(typed_expr))
                     }
                     (None, None) => {
                         // var x: error (should be caught by parser)
@@ -337,7 +301,7 @@ impl Infer {
                     ident.span,
                     SymbolInfo {
                         name: ident.name.clone(),
-                        ty: var_ty,
+                        ty: var_ty.clone(),
                         definition_span: Some(stmt.span),
                         name_span: Some(ident.span),
                         kind: SymbolKind::Variable,
@@ -348,7 +312,7 @@ impl Infer {
 
                 // Track nil state for nilable types (only if not error type)
                 if !var_ty_sub.is_error() {
-                    if let Some(expr) = init_expr {
+                    if let Some(expr) = value {
                         self.update_nil_state_for_assignment(&ident.name, expr, &var_ty_sub);
                     } else if Self::is_nilable_type(&var_ty_sub) {
                         // Zero-initialised nilable types are nil
@@ -358,7 +322,12 @@ impl Infer {
                         );
                     }
                 }
-                Ok(Type::unit())
+                TypedStmtKind::VarDecl {
+                    ident: ident.clone(),
+                    var_ty,
+                    has_explicit_type,
+                    value: typed_value,
+                }
             }
 
             StmtKind::MultiVarDecl {
@@ -371,10 +340,16 @@ impl Infer {
                     self.record_type_annotation(t);
                 }
 
-                if values.is_empty() {
+                let has_explicit_type = ty.is_some();
+                let declared_ty = ty.as_ref().map(|t| self.resolve_type(t));
+
+                // Infer all values
+                let typed_values: Vec<_> = values.iter().map(|v| self.infer_expr(v)).collect();
+
+                let var_ty = if values.is_empty() {
                     // var a, b, c type (zero values)
-                    let declared_ty = match ty.as_ref().map(Type::from_ast) {
-                        Some(t) => t,
+                    match &declared_ty {
+                        Some(t) => t.clone(),
                         None => {
                             self.emit_error(SoppoError::Type {
                                 message:
@@ -384,304 +359,225 @@ impl Infer {
                             });
                             Type::error()
                         }
-                    };
-                    for ident in names {
-                        if let Err(e) = self.insert_var(
-                            ident.name.clone(),
-                            declared_ty.clone(),
-                            Some(ident.span),
-                        ) {
-                            self.emit_error(e);
-                        }
                     }
-                } else if values.len() == 1 && names.len() > 1 {
-                    // var a, b = f() (multi-return unpacking)
-                    let value = &values[0];
-
-                    // Check for comma-ok idiom: v, ok := expr
-                    // Applies to: type assertions, map access, channel receive
-                    if names.len() == 2
-                        && let Some((value_ty, ok_ty)) = self.infer_comma_ok_expr(value)
-                    {
-                        // Check if sub-expression inference failed
-                        if value_ty.is_error() {
-                            for ident in names {
-                                if let Err(e) = self.insert_var(
-                                    ident.name.clone(),
-                                    Type::error(),
-                                    Some(ident.span),
-                                ) {
-                                    self.emit_error(e);
-                                }
-                            }
-                            return Ok(Type::unit());
-                        }
-                        // First variable gets the value type
-                        let var_ty = if let Some(t) = ty {
-                            let declared_ty = Type::from_ast(t);
-                            self.unify(&declared_ty, &value_ty, &value.span);
-                            declared_ty
-                        } else {
-                            value_ty
-                        };
-                        if let Err(e) =
-                            self.insert_var(names[0].name.clone(), var_ty, Some(names[0].span))
-                        {
-                            self.emit_error(e);
-                        }
-                        // Second variable gets the ok type (bool)
-                        if let Err(e) =
-                            self.insert_var(names[1].name.clone(), ok_ty, Some(names[1].span))
-                        {
-                            self.emit_error(e);
-                        }
-                        return Ok(Type::unit());
-                    }
-                    // None = not a comma-ok expression, continue to tuple handling
-
-                    let value_ty = self.infer_expr(value);
-
-                    // If expression failed, insert vars with Error type to prevent cascading
-                    if value_ty.is_error() {
-                        for ident in names {
-                            if let Err(e) =
-                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
-                            {
-                                self.emit_error(e);
-                            }
-                        }
-                        return Ok(Type::unit());
-                    }
-
-                    let value_ty = self.substitute(value_ty);
-
-                    // The value should be a tuple type with matching arity
-                    if let Type::Con {
-                        sym: type_name,
-                        args,
-                        ..
-                    } = &value_ty
-                        && type_name.name == "tuple"
-                        && args.len() == names.len()
-                    {
-                        for (ident, arg_ty) in names.iter().zip(args.iter()) {
-                            let var_ty = if let Some(t) = ty {
-                                let declared_ty = Type::from_ast(t);
-                                self.unify(&declared_ty, arg_ty, &value.span);
-                                declared_ty
-                            } else {
-                                arg_ty.clone()
-                            };
-                            if let Err(e) =
-                                self.insert_var(ident.name.clone(), var_ty, Some(ident.span))
-                            {
-                                self.emit_error(e);
-                            }
-                        }
-                        return Ok(Type::unit());
-                    }
-
-                    // Not a tuple type or wrong arity - emit error but still define vars
-                    self.emit_error(SoppoError::Type {
-                        message: format!(
-                            "Cannot unpack {} values from type `{}`",
-                            names.len(),
-                            value_ty
-                        ),
-                        span: value.span,
-                    });
-                    for ident in names {
-                        if let Err(e) =
-                            self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
-                        {
-                            self.emit_error(e);
-                        }
-                    }
-                } else {
-                    // var a, b = expr1, expr2 or var a, b type = expr1, expr2
-                    for (ident, value) in names.iter().zip(values.iter()) {
-                        let value_ty = self.infer_expr(value);
-                        let var_ty = if value_ty.is_error() {
-                            Type::error()
-                        } else if let Some(t) = ty {
-                            let declared_ty = Type::from_ast(t);
-                            self.unify(&declared_ty, &value_ty, &value.span);
-                            declared_ty
-                        } else {
-                            value_ty
-                        };
-                        if let Err(e) =
-                            self.insert_var(ident.name.clone(), var_ty, Some(ident.span))
-                        {
-                            self.emit_error(e);
-                        }
-                    }
-                }
-                Ok(Type::unit())
-            }
-
-            StmtKind::ConstDecl { ident, ty, value } => {
-                // Infer the type of the value
-                let value_ty = self.infer_expr(value);
-
-                // Determine the constant's type
-                let const_ty = if value_ty.is_error() {
-                    Type::error()
-                } else if let Some(t) = ty {
-                    // const x type = value: unify declared with inferred
-                    let declared_ty = Type::from_ast(t);
-                    self.unify(&declared_ty, &value_ty, &value.span);
+                } else if typed_values.len() == 1 {
+                    // Single value - use its type or declared type
                     declared_ty
+                        .clone()
+                        .unwrap_or_else(|| typed_values[0].ty.clone())
                 } else {
-                    // const x = value: infer from value
-                    value_ty
+                    // Multiple values - use declared type or first value's type
+                    declared_ty
+                        .clone()
+                        .unwrap_or_else(|| typed_values[0].ty.clone())
                 };
 
-                if let Err(e) = self.insert_var(ident.name.clone(), const_ty, Some(ident.span)) {
-                    self.emit_error(e);
-                }
-                Ok(Type::unit())
-            }
-
-            StmtKind::MultiConstDecl { idents, ty, values } => {
-                // const a, b = expr1, expr2 or const a, b type = expr1, expr2
-                for (ident, value) in idents.iter().zip(values.iter()) {
-                    let value_ty = self.infer_expr(value);
-                    let const_ty = if value_ty.is_error() {
-                        Type::error()
-                    } else if let Some(t) = ty {
-                        let declared_ty = Type::from_ast(t);
-                        self.unify(&declared_ty, &value_ty, &value.span);
-                        declared_ty
-                    } else {
-                        value_ty
-                    };
-                    if let Err(e) = self.insert_var(ident.name.clone(), const_ty, Some(ident.span))
+                // Insert variables
+                for ident in names {
+                    if let Err(e) =
+                        self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))
                     {
                         self.emit_error(e);
                     }
                 }
-                Ok(Type::unit())
+
+                TypedStmtKind::MultiVarDecl {
+                    idents: names.clone(),
+                    var_ty,
+                    has_explicit_type,
+                    values: typed_values,
+                }
+            }
+
+            StmtKind::ConstDecl { ident, ty, value } => {
+                let has_explicit_type = ty.is_some();
+                let typed_value = self.infer_expr(value);
+
+                // Determine the constant's type
+                let const_ty = if typed_value.ty.is_error() {
+                    Type::error()
+                } else if let Some(t) = ty {
+                    // const x type = value: unify declared with inferred
+                    let declared_ty = self.resolve_type(t);
+                    self.unify(&declared_ty, &typed_value.ty, &value.span);
+                    declared_ty
+                } else {
+                    // const x = value: infer from value
+                    typed_value.ty.clone()
+                };
+
+                if let Err(e) =
+                    self.insert_var(ident.name.clone(), const_ty.clone(), Some(ident.span))
+                {
+                    self.emit_error(e);
+                }
+                TypedStmtKind::ConstDecl {
+                    ident: ident.clone(),
+                    const_ty,
+                    has_explicit_type,
+                    value: typed_value,
+                }
+            }
+
+            StmtKind::MultiConstDecl { idents, ty, values } => {
+                let has_explicit_type = ty.is_some();
+                let typed_values: Vec<_> = values.iter().map(|v| self.infer_expr(v)).collect();
+
+                // const a, b = expr1, expr2 or const a, b type = expr1, expr2
+                let const_ty = ty
+                    .as_ref()
+                    .map(|t| self.resolve_type(t))
+                    .unwrap_or_else(|| {
+                        typed_values
+                            .first()
+                            .map(|v| v.ty.clone())
+                            .unwrap_or_else(Type::error)
+                    });
+
+                for (ident, typed_value) in idents.iter().zip(typed_values.iter()) {
+                    let var_ty = if typed_value.ty.is_error() {
+                        Type::error()
+                    } else if let Some(t) = ty {
+                        let declared_ty = self.resolve_type(t);
+                        self.unify(&declared_ty, &typed_value.ty, &typed_value.span);
+                        declared_ty
+                    } else {
+                        typed_value.ty.clone()
+                    };
+                    if let Err(e) = self.insert_var(ident.name.clone(), var_ty, Some(ident.span)) {
+                        self.emit_error(e);
+                    }
+                }
+                TypedStmtKind::MultiConstDecl {
+                    idents: idents.clone(),
+                    const_ty,
+                    has_explicit_type,
+                    values: typed_values,
+                }
             }
 
             StmtKind::Assign { target, value } => {
+                let typed_target = self.infer_expr(target);
+                let typed_value = self.infer_expr(value);
+
                 // Special case: blank identifier accepts any type
-                if let ExprKind::Ident(name) = &target.kind
-                    && name == "_"
-                {
-                    // Just infer the value type, don't unify
-                    self.infer_expr(value);
-                    return Ok(Type::unit());
-                }
-                let target_ty = self.infer_expr(target);
-                if target_ty.is_error() {
-                    self.infer_expr(value);
-                    return Ok(Type::unit());
-                }
-                let target_ty_sub = self.substitute(target_ty.clone());
+                let is_blank = matches!(&target.kind, ExprKind::Ident(name) if name == "_");
 
-                // Check: assigning nil to a non-nilable type is an error
-                if matches!(value.kind, ExprKind::Nil)
-                    && let Some(err) = Self::check_nil_to_non_nilable(&target_ty_sub, value.span)
-                {
-                    self.emit_error(err);
-                    return Ok(Type::unit());
-                }
+                if !is_blank && !typed_target.ty.is_error() && !typed_value.ty.is_error() {
+                    let target_ty_sub = self.substitute(typed_target.ty.clone());
 
-                let value_ty = self.infer_expr(value);
-                if !value_ty.is_error() {
-                    let value_ty_sub = self.substitute(value_ty.clone());
-                    self.unify(&target_ty, &value_ty, &stmt.span);
-                    // Update nil state and variant state for reassignment
-                    if let ExprKind::Ident(name) = &target.kind {
-                        self.update_nil_state_for_assignment(name, value, &value_ty_sub);
-                        self.update_variant_state_for_assignment(name, value);
+                    // Check: assigning nil to a non-nilable type is an error
+                    if matches!(value.kind, ExprKind::Nil) {
+                        if let Some(err) =
+                            Self::check_nil_to_non_nilable(&target_ty_sub, value.span)
+                        {
+                            self.emit_error(err);
+                        }
+                    } else {
+                        let value_ty_sub = self.substitute(typed_value.ty.clone());
+                        self.unify(&typed_target.ty, &typed_value.ty, &stmt.span);
+                        // Update nil state and variant state for reassignment
+                        if let ExprKind::Ident(name) = &target.kind {
+                            self.update_nil_state_for_assignment(name, value, &value_ty_sub);
+                            self.update_variant_state_for_assignment(name, value);
+                        }
                     }
                 }
-                Ok(Type::unit())
+                TypedStmtKind::Assign {
+                    target: typed_target,
+                    value: typed_value,
+                }
             }
 
             StmtKind::MultiAssign { targets, values } => {
+                // Infer all targets and values
+                let typed_targets: Vec<_> = targets.iter().map(|t| self.infer_expr(t)).collect();
+                let typed_values: Vec<_> = values.iter().map(|v| self.infer_expr(v)).collect();
+
+                // Perform unification as side effects
                 if values.len() == 1 && targets.len() > 1 {
                     // a, b = f() (multi-return unpacking)
-                    let value = &values[0];
-                    let value_ty = self.infer_expr(value);
-
-                    if value_ty.is_error() {
-                        // Still infer targets for LSP support
-                        for target in targets {
-                            self.infer_expr(target);
-                        }
-                        return Ok(Type::unit());
-                    }
-
-                    let value_ty = self.substitute(value_ty);
-
-                    // The value should be a tuple type with matching arity
-                    if let Type::Con {
-                        sym: type_name,
-                        args,
-                        ..
-                    } = &value_ty
-                        && type_name.name == "tuple"
-                        && args.len() == targets.len()
-                    {
-                        for (target, expected_ty) in targets.iter().zip(args.iter()) {
-                            // Special case: blank identifier accepts any type
-                            if let ExprKind::Ident(name) = &target.kind
-                                && name == "_"
-                            {
-                                continue;
+                    let value_ty = &typed_values[0].ty;
+                    if !value_ty.is_error() {
+                        let value_ty_sub = self.substitute(value_ty.clone());
+                        if let Type::Con {
+                            sym: type_name,
+                            args,
+                            ..
+                        } = &value_ty_sub
+                        {
+                            if type_name.name == "tuple" && args.len() == targets.len() {
+                                for (typed_target, expected_ty) in
+                                    typed_targets.iter().zip(args.iter())
+                                {
+                                    if let ExprKind::Ident(name) = &targets[typed_targets
+                                        .iter()
+                                        .position(|t| t.span == typed_target.span)
+                                        .unwrap_or(0)]
+                                    .kind
+                                        && name == "_"
+                                    {
+                                        continue;
+                                    }
+                                    if !typed_target.ty.is_error() {
+                                        self.unify(
+                                            &typed_target.ty,
+                                            expected_ty,
+                                            &typed_target.span,
+                                        );
+                                    }
+                                }
+                            } else {
+                                self.emit_error(SoppoError::Type {
+                                    message: format!(
+                                        "Cannot unpack {} values from type `{}`",
+                                        targets.len(),
+                                        value_ty_sub
+                                    ),
+                                    span: values[0].span,
+                                });
                             }
-                            let target_ty = self.infer_expr(target);
-                            if !target_ty.is_error() {
-                                self.unify(&target_ty, expected_ty, &target.span);
-                            }
+                        } else {
+                            self.emit_error(SoppoError::Type {
+                                message: format!(
+                                    "Cannot unpack {} values from type `{}`",
+                                    targets.len(),
+                                    value_ty_sub
+                                ),
+                                span: values[0].span,
+                            });
                         }
-                        return Ok(Type::unit());
                     }
-
-                    // Not a tuple type or wrong arity
-                    self.emit_error(SoppoError::Type {
-                        message: format!(
-                            "Cannot unpack {} values from type `{}`",
-                            targets.len(),
-                            value_ty
-                        ),
-                        span: value.span,
-                    });
-                    Ok(Type::unit())
                 } else {
                     // a, b = expr1, expr2 (one value per target)
-                    for (target, value) in targets.iter().zip(values.iter()) {
-                        // Special case: blank identifier accepts any type
-                        if let ExprKind::Ident(name) = &target.kind
-                            && name == "_"
-                        {
-                            self.infer_expr(value);
-                            continue;
-                        }
-                        let target_ty = self.infer_expr(target);
-                        let value_ty = self.infer_expr(value);
-                        if !target_ty.is_error() && !value_ty.is_error() {
-                            self.unify(&target_ty, &value_ty, &target.span);
+                    for (typed_target, typed_value) in typed_targets.iter().zip(typed_values.iter())
+                    {
+                        if !typed_target.ty.is_error() && !typed_value.ty.is_error() {
+                            self.unify(&typed_target.ty, &typed_value.ty, &typed_target.span);
                         }
                     }
-                    Ok(Type::unit())
+                }
+
+                TypedStmtKind::MultiAssign {
+                    targets: typed_targets,
+                    values: typed_values,
                 }
             }
 
             StmtKind::For { condition, body } => {
                 // Check condition is bool
-                let cond_ty = self.infer_expr(condition);
-                if !cond_ty.is_error() {
-                    self.unify(&Type::simple("bool"), &cond_ty, &condition.span);
+                let typed_condition = self.infer_expr(condition);
+                if !typed_condition.ty.is_error() {
+                    self.unify(&Type::simple("bool"), &typed_condition.ty, &condition.span);
                 }
 
                 // Type check body
-                self.infer_block(body);
+                let typed_body = self.infer_block(body);
 
-                Ok(Type::unit())
+                TypedStmtKind::For {
+                    condition: typed_condition,
+                    body: typed_body,
+                }
             }
 
             StmtKind::ForCStyle {
@@ -694,29 +590,35 @@ impl Infer {
                 self.push_scope();
 
                 // Type check init statement if present
-                if let Some(init_stmt) = init {
-                    self.infer_stmt(init_stmt);
-                }
+                let typed_init = init
+                    .as_ref()
+                    .map(|init_stmt| Box::new(self.infer_stmt(init_stmt)));
 
                 // Check condition is bool if present
-                if let Some(cond) = condition {
-                    let cond_ty = self.infer_expr(cond);
-                    if !cond_ty.is_error() {
-                        self.unify(&Type::simple("bool"), &cond_ty, &cond.span);
+                let typed_condition = condition.as_ref().map(|cond| {
+                    let typed_cond = self.infer_expr(cond);
+                    if !typed_cond.ty.is_error() {
+                        self.unify(&Type::simple("bool"), &typed_cond.ty, &cond.span);
                     }
-                }
+                    typed_cond
+                });
 
                 // Type check body
-                self.infer_block(body);
+                let typed_body = self.infer_block(body);
 
                 // Type check post statement if present
-                if let Some(post_stmt) = post {
-                    self.infer_stmt(post_stmt);
-                }
+                let typed_post = post
+                    .as_ref()
+                    .map(|post_stmt| Box::new(self.infer_stmt(post_stmt)));
 
                 self.pop_scope();
 
-                Ok(Type::unit())
+                TypedStmtKind::ForCStyle {
+                    init: typed_init,
+                    condition: typed_condition,
+                    post: typed_post,
+                    body: typed_body,
+                }
             }
 
             StmtKind::ForRange {
@@ -726,8 +628,8 @@ impl Infer {
                 body,
             } => {
                 // Infer collection type
-                let coll_ty = self.infer_expr(collection);
-                let coll_ty = self.substitute(coll_ty);
+                let typed_collection = self.infer_expr(collection);
+                let coll_ty = self.substitute(typed_collection.ty.clone());
 
                 // Determine key and value types based on collection type
                 let (key_ty, value_ty) = if coll_ty.is_error() {
@@ -753,24 +655,34 @@ impl Infer {
                 self.push_scope();
 
                 // Bind the key variable
-                if let Err(e) = self.insert_var(key.name.clone(), key_ty, Some(key.span)) {
+                if let Err(e) = self.insert_var(key.name.clone(), key_ty.clone(), Some(key.span)) {
                     self.emit_error(e);
                 }
 
                 // Bind the value variable if present
                 if let Some(val_ident) = value
-                    && let Err(e) =
-                        self.insert_var(val_ident.name.clone(), value_ty, Some(val_ident.span))
+                    && let Err(e) = self.insert_var(
+                        val_ident.name.clone(),
+                        value_ty.clone(),
+                        Some(val_ident.span),
+                    )
                 {
                     self.emit_error(e);
                 }
 
                 // Type check body
-                self.infer_block(body);
+                let typed_body = self.infer_block(body);
 
                 self.pop_scope();
 
-                Ok(Type::unit())
+                TypedStmtKind::ForRange {
+                    key: key.clone(),
+                    key_ty,
+                    value: value.clone(),
+                    value_ty: value.as_ref().map(|_| value_ty),
+                    collection: typed_collection,
+                    body: typed_body,
+                }
             }
 
             StmtKind::If {
@@ -787,14 +699,14 @@ impl Infer {
                 }
 
                 // Process init statement if present (Go-style: if x := expr; cond { })
-                if let Some(init_stmt) = init {
-                    self.infer_stmt(init_stmt);
-                }
+                let typed_init = init
+                    .as_ref()
+                    .map(|init_stmt| Box::new(self.infer_stmt(init_stmt)));
 
                 // Check condition is bool
-                let cond_ty = self.infer_expr(condition);
-                if !cond_ty.is_error() {
-                    self.unify(&Type::simple("bool"), &cond_ty, &condition.span);
+                let typed_condition = self.infer_expr(condition);
+                if !typed_condition.ty.is_error() {
+                    self.unify(&Type::simple("bool"), &typed_condition.ty, &condition.span);
                 }
 
                 // Extract nil checks from condition for flow-sensitive narrowing
@@ -812,11 +724,12 @@ impl Infer {
                         self.set_nil_state(check.expr_key.clone(), Nullability::Nullable);
                     }
                 }
-                let then_ty = self.infer_block(then_block);
+                let typed_then = self.infer_block(then_block);
+                let then_diverges = typed_then.diverges();
                 self.pop_nil_scope();
 
                 // Type check else block with opposite narrowing
-                let else_ty = if let Some(else_block) = else_block {
+                let (typed_else, else_diverges) = if let Some(else_blk) = else_block {
                     self.push_nil_scope();
                     for check in &nil_checks {
                         if check.is_not_nil {
@@ -827,23 +740,24 @@ impl Infer {
                             self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
                         }
                     }
-                    let ty = self.infer_block(else_block);
+                    let typed_blk = self.infer_block(else_blk);
+                    let diverges = typed_blk.diverges();
                     self.pop_nil_scope();
-                    ty
+                    (Some(typed_blk), diverges)
                 } else {
-                    Type::unit()
+                    (None, false)
                 };
 
                 // Handle early return narrowing:
                 // If then block diverges (returns/breaks) and condition was `x == nil`,
                 // then after the if statement, x is known to be non-nil
                 for check in &nil_checks {
-                    if matches!(then_ty, Type::Never) && !check.is_not_nil {
+                    if then_diverges && !check.is_not_nil {
                         // `if x == nil { return }` - x is non-nil after this point
                         self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
                     }
                     // Similarly, if else block diverges and condition was `x != nil`
-                    if matches!(else_ty, Type::Never) && check.is_not_nil && else_block.is_some() {
+                    if else_diverges && check.is_not_nil && else_block.is_some() {
                         // `if x != nil { ... } else { return }` - x is non-nil after
                         self.set_nil_state(check.expr_key.clone(), Nullability::NonNull);
                     }
@@ -851,7 +765,7 @@ impl Infer {
                     // Handle error companion narrowing:
                     // `if err != nil { return }` - after this, err's companions are non-nil
                     // This is the common Go idiom: `resp, err := f(); if err != nil { return }`
-                    if matches!(then_ty, Type::Never) && check.is_not_nil {
+                    if then_diverges && check.is_not_nil {
                         // check.expr_key is the error variable name
                         if let Some(companions) = self.error_companions.get(&check.expr_key) {
                             for companion in companions.clone() {
@@ -866,27 +780,28 @@ impl Infer {
                     self.pop_scope();
                 }
 
-                // If both branches diverge (return never), the if statement also diverges
-                if matches!(then_ty, Type::Never) && matches!(else_ty, Type::Never) {
-                    Ok(Type::never())
-                } else {
-                    Ok(Type::unit())
+                TypedStmtKind::If {
+                    init: typed_init,
+                    condition: typed_condition,
+                    then_block: typed_then,
+                    else_block: typed_else,
                 }
             }
 
             StmtKind::Return { values } => {
+                // Infer all return values
+                let typed_values: Vec<_> = values.iter().map(|v| self.infer_expr(v)).collect();
+
                 // Check return values against expected return types
-                // Note: return statements always diverge, even if there are type errors
                 if let Some(expected_types) = self.expected_return_types.clone() {
                     // Handle `return f()` where f() returns a tuple matching expected types
-                    // This is the Go idiom: `return someFunc()` when both have same return signature
-                    if values.len() == 1 && expected_types.len() > 1 {
-                        let value_ty = self.infer_expr(&values[0]);
+                    if typed_values.len() == 1 && expected_types.len() > 1 {
+                        let value_ty = &typed_values[0].ty;
                         if !value_ty.is_error() {
-                            let value_ty = self.substitute(value_ty);
+                            let value_ty_sub = self.substitute(value_ty.clone());
 
                             // Check if it's a tuple type with matching arity
-                            if let Type::Con { sym, args, .. } = &value_ty
+                            if let Type::Con { sym, args, .. } = &value_ty_sub
                                 && sym.name == "tuple"
                                 && args.len() == expected_types.len()
                             {
@@ -906,10 +821,7 @@ impl Infer {
                                 });
                             }
                         }
-                        return Ok(Type::never());
-                    }
-
-                    if values.len() != expected_types.len() {
+                    } else if typed_values.len() != expected_types.len() {
                         self.emit_error(SoppoError::Type {
                             message: format!(
                                 "Expected {} return value(s), got {}",
@@ -918,120 +830,47 @@ impl Infer {
                             ),
                             span: stmt.span,
                         });
-                        // Still infer expressions for LSP support, etc.
-                        for expr in values {
-                            self.infer_expr(expr);
-                        }
-                        return Ok(Type::never());
-                    }
-                    for (expr, expected) in values.iter().zip(expected_types.iter()) {
-                        // Check: returning nil to a non-nilable type is an error
-                        if matches!(expr.kind, ExprKind::Nil)
-                            && let Some(err) = Self::check_nil_to_non_nilable(expected, expr.span)
+                    } else {
+                        for (i, (typed_expr, expected)) in
+                            typed_values.iter().zip(expected_types.iter()).enumerate()
                         {
-                            self.emit_error(err);
-                            continue;
-                        }
+                            // Check: returning nil to a non-nilable type is an error
+                            if matches!(values[i].kind, ExprKind::Nil)
+                                && let Some(err) =
+                                    Self::check_nil_to_non_nilable(expected, values[i].span)
+                            {
+                                self.emit_error(err);
+                                continue;
+                            }
 
-                        let value_ty = self.infer_expr(expr);
-                        if !value_ty.is_error() {
-                            self.unify(expected, &value_ty, &expr.span);
-                            // After unification, set inferred type args on expressions that need them
-                            self.set_inferred_type_args(expr, expected);
+                            if !typed_expr.ty.is_error() {
+                                self.unify(expected, &typed_expr.ty, &typed_expr.span);
+                                // After unification, set inferred type args on expressions that need them
+                                self.set_inferred_type_args(&values[i], expected);
+                            }
                         }
-                    }
-                } else if !values.is_empty() {
-                    // Infer types but no expected types to check against
-                    for expr in values {
-                        self.infer_expr(expr);
                     }
                 }
-                // Return statements are diverging - they never produce a value
-                Ok(Type::never())
+                TypedStmtKind::Return {
+                    values: typed_values,
+                }
             }
 
             StmtKind::Match { scrutinee, arms } => {
                 // Expression-less match has no scrutinee
-                let (scrutinee_ty, scrutinee_key) = if let Some(scrutinee) = scrutinee {
-                    let ty = self.infer_expr(scrutinee);
-                    let key = expr_to_key(scrutinee);
-                    if ty.is_error() {
-                        (None, key) // Continue checking arms even if scrutinee failed
+                let (typed_scrutinee, scrutinee_ty, scrutinee_key) =
+                    if let Some(scrutinee_expr) = scrutinee {
+                        let typed_expr = self.infer_expr(scrutinee_expr);
+                        let key = expr_to_key(scrutinee_expr);
+                        if typed_expr.ty.is_error() {
+                            (Some(typed_expr), None, key) // Continue checking arms even if scrutinee failed
+                        } else {
+                            let ty = self.substitute(typed_expr.ty.clone());
+                            (Some(typed_expr), Some(ty), key)
+                        }
                     } else {
-                        (Some(self.substitute(ty)), key)
-                    }
-                } else {
-                    (None, None)
-                };
-
-                // Annotate Variant patterns based on scrutinee type
-                // If scrutinee is a soppo enum, patterns are soppo enums
-                // Otherwise (e.g., byte, int), patterns are Go constants
-                let is_soppo_enum_scrutinee = scrutinee_ty
-                    .as_ref()
-                    .map(|ty| {
-                        if let Type::Con { sym, .. } = ty {
-                            if sym.module.0.is_empty() {
-                                // Local type in current module
-                                self.global_state
-                                    .lookup_type(&sym.name)
-                                    .map(|td| matches!(td.kind, TypeDefKind::Enum { .. }))
-                                    .unwrap_or(false)
-                            } else {
-                                // Cross-package type - use is_soppo_enum which checks both
-                                // soppo imports and Go packages with soppo:enum markers
-                                self.global_state.is_soppo_enum(&sym.module.0, &sym.name)
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-
-                // Set the is_soppo_enum flag on all Variant patterns
-                // Also set inferred type args from scrutinee type
-                let scrutinee_type_args: Vec<String> = scrutinee_ty
-                    .as_ref()
-                    .and_then(|ty| {
-                        if let Type::Con { args, .. } = ty {
-                            if args.is_empty() {
-                                None
-                            } else {
-                                Some(args.iter().map(|t| self.type_to_string(t)).collect())
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default();
-
-                for arm in arms.iter() {
-                    for pattern in &arm.patterns {
-                        match &pattern.kind {
-                            PatternKind::Variant {
-                                is_soppo_enum,
-                                type_args,
-                                ..
-                            } => {
-                                is_soppo_enum.set(is_soppo_enum_scrutinee);
-                                // Set inferred type args if pattern has no explicit args
-                                if type_args.is_empty() && !scrutinee_type_args.is_empty() {
-                                    *pattern.inferred_type_args.borrow_mut() =
-                                        Some(scrutinee_type_args.clone());
-                                }
-                            }
-                            PatternKind::Destructor { type_args, .. }
-                            | PatternKind::StructDestructor { type_args, .. } => {
-                                // Set inferred type args if pattern has no explicit args
-                                if type_args.is_empty() && !scrutinee_type_args.is_empty() {
-                                    *pattern.inferred_type_args.borrow_mut() =
-                                        Some(scrutinee_type_args.clone());
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+                        (None, None, None)
+                    };
 
                 // Check if scrutinee is nilable (for nil narrowing in non-nil arms)
                 let scrutinee_is_nilable = scrutinee_ty
@@ -1039,44 +878,12 @@ impl Infer {
                     .map(|ty| ty.is_nullable())
                     .unwrap_or(false);
 
-                // Track whether all arms diverge (for determining if match diverges)
-                let mut all_arms_diverge = true;
+                // The matched type for building patterns
+                let matched_ty = scrutinee_ty.clone().unwrap_or_else(Type::unit);
+
+                // Build typed arms in a single pass
+                let mut typed_arms = Vec::with_capacity(arms.len());
                 let mut has_default = false;
-
-                // Check enum exhaustiveness upfront
-                let is_exhaustive_enum = if let Some(ref scr_ty) = scrutinee_ty
-                    && let Type::Con { sym: name, .. } = scr_ty
-                    && let Some(type_def) = self.global_state.lookup_type(&name.name)
-                    && let TypeDefKind::Enum { variants } = &type_def.kind
-                {
-                    let covered: HashSet<String> = arms
-                        .iter()
-                        .flat_map(|arm| arm.patterns.iter())
-                        .filter_map(|pattern| match &pattern.kind {
-                            PatternKind::Variant { name, .. } => {
-                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
-                            }
-                            PatternKind::Destructor { name, .. } => {
-                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
-                            }
-                            PatternKind::StructDestructor { name, .. } => {
-                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
-                            }
-                            _ => None,
-                        })
-                        .collect();
-
-                    variants.iter().all(|v| {
-                        let vname = match v {
-                            EnumVariant::Unit { ident, .. } => &ident.name,
-                            EnumVariant::Single { ident, .. } => &ident.name,
-                            EnumVariant::Struct { ident, .. } => &ident.name,
-                        };
-                        covered.contains(vname)
-                    })
-                } else {
-                    false
-                };
 
                 for arm in arms {
                     // Check if this arm has a default pattern
@@ -1087,6 +894,7 @@ impl Infer {
                     {
                         has_default = true;
                     }
+
                     // Create a new scope for pattern bindings
                     self.push_scope();
 
@@ -1167,7 +975,7 @@ impl Infer {
                         // Expression-less match: patterns must be Guard expressions
                         for pattern in &arm.patterns {
                             if let PatternKind::Guard(expr) = &pattern.kind {
-                                let ty = self.infer_expr(expr);
+                                let ty = self.infer_expr_ty(expr);
                                 if !ty.is_error() {
                                     self.unify(&ty, &Type::simple("bool"), &expr.span);
                                 }
@@ -1182,13 +990,15 @@ impl Infer {
                         }
                     }
 
-                    // Type check the arm body
-                    let arm_ty = self.infer_block(&arm.body);
+                    // Build typed patterns
+                    let typed_patterns: Vec<_> = arm
+                        .patterns
+                        .iter()
+                        .map(|p| self.build_typed_pattern(p, &matched_ty))
+                        .collect();
 
-                    // Track if this arm diverges
-                    if !matches!(arm_ty, Type::Never) {
-                        all_arms_diverge = false;
-                    }
+                    // Type check the arm body
+                    let typed_arm_body = self.infer_block(&arm.body);
 
                     // Pop nil scope if we pushed one
                     if needs_nil_narrowing {
@@ -1197,82 +1007,79 @@ impl Infer {
 
                     // Pop the scope after processing the arm
                     self.pop_scope();
+
+                    // Add the typed arm
+                    typed_arms.push(crate::types::ast::TypedArm {
+                        patterns: typed_patterns,
+                        body: typed_arm_body,
+                        span: arm.span,
+                    });
                 }
 
                 // Exhaustiveness check for enum types (only for normal match)
-                if let Some(ref scrutinee_ty) = scrutinee_ty
-                    && let Type::Con { sym: name, .. } = scrutinee_ty
+                if let Some(ref scr_ty) = scrutinee_ty
+                    && let Type::Con { sym: name, .. } = scr_ty
                     && let Some(type_def) = self.global_state.lookup_type(&name.name)
                     && let TypeDefKind::Enum { variants } = &type_def.kind
+                    && !has_default
                 {
-                    // Check if any arm is Default (catch-all)
-                    let has_default = arms.iter().any(|arm| {
-                        arm.patterns
-                            .iter()
-                            .any(|p| matches!(&p.kind, PatternKind::Default))
-                    });
+                    // Collect covered variants from all patterns in all arms
+                    let covered: HashSet<String> = arms
+                        .iter()
+                        .flat_map(|arm| arm.patterns.iter())
+                        .filter_map(|pattern| match &pattern.kind {
+                            PatternKind::Variant { name, .. } => {
+                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
+                            }
+                            PatternKind::Destructor { name, .. } => {
+                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
+                            }
+                            PatternKind::StructDestructor { name, .. } => {
+                                Some(name.rsplit('.').next().unwrap_or(name).to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect();
 
-                    if !has_default {
-                        // Collect covered variants from all patterns in all arms
-                        let covered: HashSet<String> = arms
-                            .iter()
-                            .flat_map(|arm| arm.patterns.iter())
-                            .filter_map(|pattern| match &pattern.kind {
-                                PatternKind::Variant { name, .. } => {
-                                    // Extract variant name from qualified name like "Colour.Red"
-                                    Some(name.rsplit('.').next().unwrap_or(name).to_string())
-                                }
-                                PatternKind::Destructor { name, .. } => {
-                                    Some(name.rsplit('.').next().unwrap_or(name).to_string())
-                                }
-                                PatternKind::StructDestructor { name, .. } => {
-                                    Some(name.rsplit('.').next().unwrap_or(name).to_string())
-                                }
-                                _ => None,
-                            })
-                            .collect();
+                    // Find missing variants
+                    let missing: Vec<String> = variants
+                        .iter()
+                        .filter_map(|v| {
+                            let vname = match v {
+                                EnumVariant::Unit { ident, .. } => &ident.name,
+                                EnumVariant::Single { ident, .. } => &ident.name,
+                                EnumVariant::Struct { ident, .. } => &ident.name,
+                            };
+                            if !covered.contains(vname) {
+                                Some(vname.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-                        // Find missing variants
-                        let missing: Vec<String> = variants
-                            .iter()
-                            .filter_map(|v| {
-                                let vname = match v {
-                                    EnumVariant::Unit { ident, .. } => &ident.name,
-                                    EnumVariant::Single { ident, .. } => &ident.name,
-                                    EnumVariant::Struct { ident, .. } => &ident.name,
-                                };
-                                if !covered.contains(vname) {
-                                    Some(vname.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        if !missing.is_empty() {
-                            self.emit_error(SoppoError::NonExhaustive {
-                                missing,
-                                span: stmt.span,
-                            });
-                        }
+                    if !missing.is_empty() {
+                        self.emit_error(SoppoError::NonExhaustive {
+                            missing,
+                            span: stmt.span,
+                        });
                     }
                 }
 
-                // If all arms diverge and the match is exhaustive, the whole match diverges
-                if all_arms_diverge && (has_default || is_exhaustive_enum) {
-                    Ok(Type::Never)
-                } else {
-                    Ok(Type::unit())
+                TypedStmtKind::Match {
+                    scrutinee: typed_scrutinee,
+                    scrutinee_ty,
+                    arms: typed_arms,
                 }
             }
 
             StmtKind::Send { channel, value } => {
                 // ch <- value: channel must be chan T, value must be T
-                let channel_ty = self.infer_expr(channel);
-                let value_ty = self.infer_expr(value);
+                let typed_channel = self.infer_expr(channel);
+                let typed_value = self.infer_expr(value);
 
-                if !channel_ty.is_error() && !value_ty.is_error() {
-                    let channel_ty = self.substitute(channel_ty);
+                if !typed_channel.ty.is_error() && !typed_value.ty.is_error() {
+                    let channel_ty = self.substitute(typed_channel.ty.clone());
                     let is_nil = matches!(value.kind, ExprKind::Nil);
 
                     // Extract element type from channel and check nil safety
@@ -1283,242 +1090,299 @@ impl Infer {
                         {
                             self.emit_error(err);
                         } else {
-                            self.unify(&elem_ty, &value_ty, &value.span);
+                            self.unify(&elem_ty, &typed_value.ty, &value.span);
                         }
                     }
                 }
 
-                Ok(Type::unit())
+                TypedStmtKind::Send {
+                    channel: typed_channel,
+                    value: typed_value,
+                }
             }
 
             StmtKind::Select { cases } => {
-                for case in cases {
-                    self.push_scope();
+                let typed_cases: Vec<_> = cases
+                    .iter()
+                    .map(|case| {
+                        self.push_scope();
 
-                    match &case.kind {
-                        SelectCaseKind::Recv { channel } => {
-                            // <-ch: just infer the channel type
-                            self.infer_expr(channel);
-                        }
-                        SelectCaseKind::RecvDecl { ident, channel } => {
-                            // v := <-ch: infer channel type, declare v with element type
-                            let channel_ty = self.infer_expr(channel);
-                            let elem_ty = if channel_ty.is_error() {
-                                Type::error()
-                            } else {
-                                let channel_ty = self.substitute(channel_ty);
-                                Self::extract_channel_element(&channel_ty)
-                                    .unwrap_or_else(|| self.fresh_ty_var())
-                            };
-
-                            if let Err(e) =
-                                self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))
-                            {
-                                self.emit_error(e);
-                            }
-                        }
-                        SelectCaseKind::RecvDeclOk {
-                            ident,
-                            ok_ident,
-                            channel,
-                        } => {
-                            // v, ok := <-ch: infer channel type, declare v and ok
-                            let channel_ty = self.infer_expr(channel);
-                            let elem_ty = if channel_ty.is_error() {
-                                Type::error()
-                            } else {
-                                let channel_ty = self.substitute(channel_ty);
-                                Self::extract_channel_element(&channel_ty)
-                                    .unwrap_or_else(|| self.fresh_ty_var())
-                            };
-
-                            if let Err(e) =
-                                self.insert_var(ident.name.clone(), elem_ty, Some(ident.span))
-                            {
-                                self.emit_error(e);
-                            }
-                            if let Err(e) = self.insert_var(
-                                ok_ident.name.clone(),
-                                Type::simple("bool"),
-                                Some(ok_ident.span),
-                            ) {
-                                self.emit_error(e);
-                            }
-                        }
-                        SelectCaseKind::Send { channel, value } => {
-                            // ch <- value: same as Send statement
-                            let channel_ty = self.infer_expr(channel);
-                            let value_ty = self.infer_expr(value);
-                            let is_nil = matches!(value.kind, ExprKind::Nil);
-
-                            if !channel_ty.is_error() && !value_ty.is_error() {
-                                let channel_ty = self.substitute(channel_ty);
-                                if let Some(elem_ty) = Self::extract_channel_element(&channel_ty) {
-                                    // Check nil safety
-                                    if is_nil
-                                        && let Some(err) =
-                                            Self::check_nil_to_non_nilable(&elem_ty, value.span)
-                                    {
-                                        self.emit_error(err);
-                                    } else {
-                                        self.unify(&elem_ty, &value_ty, &value.span);
-                                    }
+                        let typed_kind = match &case.kind {
+                            SelectCaseKind::Recv { channel } => {
+                                // <-ch: infer the channel type
+                                let typed_channel = self.infer_expr(channel);
+                                let recv_ty = if typed_channel.ty.is_error() {
+                                    Type::error()
+                                } else {
+                                    let channel_ty = self.substitute(typed_channel.ty.clone());
+                                    Self::extract_channel_element(&channel_ty)
+                                        .unwrap_or_else(|| self.fresh_ty_var())
+                                };
+                                TypedSelectCaseKind::Recv {
+                                    channel: typed_channel,
+                                    recv_ty,
                                 }
                             }
+                            SelectCaseKind::RecvDecl { ident, channel } => {
+                                // v := <-ch: infer channel type, declare v with element type
+                                let typed_channel = self.infer_expr(channel);
+                                let recv_ty = if typed_channel.ty.is_error() {
+                                    Type::error()
+                                } else {
+                                    let channel_ty = self.substitute(typed_channel.ty.clone());
+                                    Self::extract_channel_element(&channel_ty)
+                                        .unwrap_or_else(|| self.fresh_ty_var())
+                                };
+
+                                if let Err(e) = self.insert_var(
+                                    ident.name.clone(),
+                                    recv_ty.clone(),
+                                    Some(ident.span),
+                                ) {
+                                    self.emit_error(e);
+                                }
+
+                                TypedSelectCaseKind::RecvDecl {
+                                    ident: ident.clone(),
+                                    channel: typed_channel,
+                                    recv_ty,
+                                }
+                            }
+                            SelectCaseKind::RecvDeclOk {
+                                ident,
+                                ok_ident,
+                                channel,
+                            } => {
+                                // v, ok := <-ch: infer channel type, declare v and ok
+                                let typed_channel = self.infer_expr(channel);
+                                let recv_ty = if typed_channel.ty.is_error() {
+                                    Type::error()
+                                } else {
+                                    let channel_ty = self.substitute(typed_channel.ty.clone());
+                                    Self::extract_channel_element(&channel_ty)
+                                        .unwrap_or_else(|| self.fresh_ty_var())
+                                };
+
+                                if let Err(e) = self.insert_var(
+                                    ident.name.clone(),
+                                    recv_ty.clone(),
+                                    Some(ident.span),
+                                ) {
+                                    self.emit_error(e);
+                                }
+                                if let Err(e) = self.insert_var(
+                                    ok_ident.name.clone(),
+                                    Type::simple("bool"),
+                                    Some(ok_ident.span),
+                                ) {
+                                    self.emit_error(e);
+                                }
+
+                                TypedSelectCaseKind::RecvDeclOk {
+                                    ident: ident.clone(),
+                                    ok_ident: ok_ident.clone(),
+                                    channel: typed_channel,
+                                    recv_ty,
+                                }
+                            }
+                            SelectCaseKind::Send { channel, value } => {
+                                // ch <- value: same as Send statement
+                                let typed_channel = self.infer_expr(channel);
+                                let typed_value = self.infer_expr(value);
+                                let is_nil = matches!(value.kind, ExprKind::Nil);
+
+                                if !typed_channel.ty.is_error() && !typed_value.ty.is_error() {
+                                    let channel_ty = self.substitute(typed_channel.ty.clone());
+                                    if let Some(elem_ty) =
+                                        Self::extract_channel_element(&channel_ty)
+                                    {
+                                        // Check nil safety
+                                        if is_nil
+                                            && let Some(err) =
+                                                Self::check_nil_to_non_nilable(&elem_ty, value.span)
+                                        {
+                                            self.emit_error(err);
+                                        } else {
+                                            self.unify(&elem_ty, &typed_value.ty, &value.span);
+                                        }
+                                    }
+                                }
+
+                                TypedSelectCaseKind::Send {
+                                    channel: typed_channel,
+                                    value: typed_value,
+                                }
+                            }
+                            SelectCaseKind::Default => TypedSelectCaseKind::Default,
+                        };
+
+                        // Infer body
+                        let typed_body = self.infer_block(&case.body);
+
+                        self.pop_scope();
+
+                        TypedSelectCase {
+                            kind: typed_kind,
+                            body: typed_body,
+                            span: case.span,
                         }
-                        SelectCaseKind::Default => {
-                            // default: nothing to infer
-                        }
-                    }
+                    })
+                    .collect();
 
-                    // Infer body
-                    self.infer_block(&case.body);
-
-                    self.pop_scope();
-                }
-
-                Ok(Type::unit())
+                TypedStmtKind::Select { cases: typed_cases }
             }
 
             StmtKind::Go(expr) => {
                 // go expr: expr should be a function call
-                self.infer_expr(expr);
-                Ok(Type::unit())
+                let typed_expr = self.infer_expr(expr);
+                TypedStmtKind::Go(typed_expr)
             }
 
             StmtKind::DeferStmt(expr) => {
                 // defer expr: expr should be a function call
-                self.infer_expr(expr);
-                Ok(Type::unit())
+                let typed_expr = self.infer_expr(expr);
+                TypedStmtKind::DeferStmt(typed_expr)
             }
 
-            StmtKind::Break | StmtKind::Continue => {
-                // break/continue diverge from normal control flow
-                Ok(Type::Never)
-            }
+            StmtKind::Break => TypedStmtKind::Break,
 
-            StmtKind::Expr(expr) => Ok(self.infer_expr(expr)),
+            StmtKind::Continue => TypedStmtKind::Continue,
 
-            StmtKind::CompoundAssign {
-                target,
-                op: _,
-                value,
-            } => {
+            StmtKind::Expr(expr) => TypedStmtKind::Expr(self.infer_expr(expr)),
+
+            StmtKind::CompoundAssign { target, op, value } => {
                 // Compound assignment: x += value
                 // Check that target and value types are compatible
-                let target_ty = self.infer_expr(target);
-                let value_ty = self.infer_expr(value);
-                if !target_ty.is_error() && !value_ty.is_error() {
-                    self.unify(&target_ty, &value_ty, &value.span);
+                let typed_target = self.infer_expr(target);
+                let typed_value = self.infer_expr(value);
+                if !typed_target.ty.is_error() && !typed_value.ty.is_error() {
+                    self.unify(&typed_target.ty, &typed_value.ty, &value.span);
                 }
-                Ok(Type::unit())
+                TypedStmtKind::CompoundAssign {
+                    target: typed_target,
+                    op: *op,
+                    value: typed_value,
+                }
             }
 
-            StmtKind::IncDec { target, is_inc: _ } => {
+            StmtKind::IncDec { target, is_inc } => {
                 // Increment/decrement: x++ or x--
                 // Just infer the target type (should be numeric)
-                self.infer_expr(target);
-                Ok(Type::unit())
+                let typed_target = self.infer_expr(target);
+                TypedStmtKind::IncDec {
+                    target: typed_target,
+                    is_inc: *is_inc,
+                }
             }
 
             StmtKind::TryStmt {
                 stmt: inner_stmt,
                 error_name,
                 handler,
-                discard_count,
-                ..
+                try_span,
             } => {
-                // Infer inner statement and extract expression type + span
+                // Build the typed inner statement and track types for the ? operator
                 // For ? operator, we need to strip the error from tuple types
-                let (expr_ty, expr_span) = match &inner_stmt.kind {
-                    StmtKind::Decl { ident, value } => {
-                        let value_ty = self.infer_expr(value);
-                        if value_ty.is_error() {
-                            // Still define the variable with error type
-                            if let Err(e) =
-                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
-                            {
-                                self.emit_error(e);
-                            }
-                            return Ok(Type::unit());
-                        }
-                        let value_ty_sub = self.substitute(value_ty.clone());
+                // Returns: (typed_inner_stmt, discard_count, discard_types, expr_ty, expr_span)
+                let (typed_inner_stmt, discard_count, discard_types, expr_ty, expr_span) =
+                    match &inner_stmt.kind {
+                        StmtKind::Decl { ident, value } => {
+                            let typed_value = self.infer_expr(value);
+                            let value_ty = typed_value.ty.clone();
 
-                        // If expression returns only `error`, can't assign to a variable with `?`
-                        // The `?` strips the error, leaving nothing to assign
-                        if self.is_error_type(&value_ty_sub) {
-                            self.emit_error(SoppoError::TryCapturesError { span: ident.span });
-                            if let Err(e) =
-                                self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
-                            {
-                                self.emit_error(e);
-                            }
-                            return Ok(Type::unit());
-                        }
-
-                        // Strip error from tuple type for the variable
-                        let var_ty = self.strip_error_from_tuple(&value_ty_sub);
-                        if let Err(e) =
-                            self.insert_var(ident.name.clone(), var_ty.clone(), Some(ident.span))
-                        {
-                            self.emit_error(e);
-                        }
-                        self.update_nil_state_for_assignment(&ident.name, value, &var_ty);
-
-                        // Record variable definition for LSP
-                        self.record_symbol(
-                            ident.span,
-                            SymbolInfo {
-                                name: ident.name.clone(),
-                                ty: var_ty,
-                                definition_span: Some(stmt.span),
-                                name_span: Some(ident.span),
-                                kind: SymbolKind::Variable,
-                                doc_comment: None,
-                                go_location: None,
-                            },
-                        );
-
-                        (value_ty_sub, value.span)
-                    }
-                    StmtKind::MultiDecl {
-                        ident: names,
-                        values,
-                    } if values.len() == 1 => {
-                        let value_ty = self.infer_expr(&values[0]);
-                        if value_ty.is_error() {
-                            // Still define the variables with error type
-                            for var_ident in names {
+                            if value_ty.is_error() {
+                                // Still define the variable with error type
                                 if let Err(e) = self.insert_var(
-                                    var_ident.name.clone(),
+                                    ident.name.clone(),
                                     Type::error(),
-                                    Some(var_ident.span),
+                                    Some(ident.span),
                                 ) {
                                     self.emit_error(e);
                                 }
+                                let inner = TypedStmt::new(
+                                    TypedStmtKind::Decl {
+                                        ident: ident.clone(),
+                                        var_ty: Type::error(),
+                                        value: typed_value,
+                                    },
+                                    inner_stmt.span,
+                                );
+                                (inner, 0, vec![], Type::error(), value.span)
+                            } else {
+                                let value_ty_sub = self.substitute(value_ty.clone());
+
+                                // If expression returns only `error`, can't assign to a variable
+                                if self.is_error_type(&value_ty_sub) {
+                                    self.emit_error(SoppoError::TryCapturesError {
+                                        span: ident.span,
+                                    });
+                                    if let Err(e) = self.insert_var(
+                                        ident.name.clone(),
+                                        Type::error(),
+                                        Some(ident.span),
+                                    ) {
+                                        self.emit_error(e);
+                                    }
+                                    let inner = TypedStmt::new(
+                                        TypedStmtKind::Decl {
+                                            ident: ident.clone(),
+                                            var_ty: Type::error(),
+                                            value: typed_value,
+                                        },
+                                        inner_stmt.span,
+                                    );
+                                    (inner, 0, vec![], value_ty_sub, value.span)
+                                } else {
+                                    // Strip error from tuple type for the variable
+                                    let var_ty = self.strip_error_from_tuple(&value_ty_sub);
+                                    if let Err(e) = self.insert_var(
+                                        ident.name.clone(),
+                                        var_ty.clone(),
+                                        Some(ident.span),
+                                    ) {
+                                        self.emit_error(e);
+                                    }
+                                    self.update_nil_state_for_assignment(
+                                        &ident.name,
+                                        value,
+                                        &var_ty,
+                                    );
+
+                                    // Record variable definition for LSP
+                                    self.record_symbol(
+                                        ident.span,
+                                        SymbolInfo {
+                                            name: ident.name.clone(),
+                                            ty: var_ty.clone(),
+                                            definition_span: Some(stmt.span),
+                                            name_span: Some(ident.span),
+                                            kind: SymbolKind::Variable,
+                                            doc_comment: None,
+                                            go_location: None,
+                                        },
+                                    );
+
+                                    let inner = TypedStmt::new(
+                                        TypedStmtKind::Decl {
+                                            ident: ident.clone(),
+                                            var_ty,
+                                            value: typed_value,
+                                        },
+                                        inner_stmt.span,
+                                    );
+                                    (inner, 0, vec![], value_ty_sub, value.span)
+                                }
                             }
-                            return Ok(Type::unit());
                         }
-                        let value_ty_sub = self.substitute(value_ty.clone());
+                        StmtKind::MultiDecl {
+                            ident: names,
+                            values,
+                        } if values.len() == 1 => {
+                            let typed_value = self.infer_expr(&values[0]);
+                            let value_ty = typed_value.ty.clone();
 
-                        // For multi-return, the type is a tuple
-                        // Unpack and assign to each name, excluding the error
-                        if let Type::Con {
-                            sym: tname, args, ..
-                        } = &value_ty_sub
-                            && tname.name == "tuple"
-                        {
-                            // Exclude the last element (error) when assigning
-                            let non_error_count = args.len().saturating_sub(1);
-
-                            // Error if user provides more names than non-error values
-                            // e.g., `result, err := foo() ?` when foo returns (T, error)
-                            // The `?` already handles the error, so capturing it is wrong
-                            if names.len() > non_error_count {
-                                self.emit_error(SoppoError::TryCapturesError {
-                                    span: names[non_error_count].span,
-                                });
-                                // Still define all variables with error type
+                            if value_ty.is_error() {
+                                // Still define the variables with error type
                                 for var_ident in names {
                                     if let Err(e) = self.insert_var(
                                         var_ident.name.clone(),
@@ -1528,96 +1392,147 @@ impl Infer {
                                         self.emit_error(e);
                                     }
                                 }
-                                return Ok(Type::unit());
-                            }
+                                let inner = TypedStmt::new(
+                                    TypedStmtKind::MultiDecl {
+                                        idents: names.clone(),
+                                        var_tys: vec![Type::error(); names.len()],
+                                        values: vec![typed_value],
+                                    },
+                                    inner_stmt.span,
+                                );
+                                (inner, 0, vec![], Type::error(), values[0].span)
+                            } else {
+                                let value_ty_sub = self.substitute(value_ty.clone());
+                                let mut var_tys = Vec::new();
 
-                            for (i, var_ident) in names.iter().enumerate() {
-                                if i < non_error_count
-                                    && let Some(ty) = args.get(i)
+                                // For multi-return, the type is a tuple
+                                if let Type::Con {
+                                    sym: tname, args, ..
+                                } = &value_ty_sub
+                                    && tname.name == "tuple"
                                 {
-                                    if let Err(e) = self.insert_var(
-                                        var_ident.name.clone(),
-                                        ty.clone(),
-                                        Some(var_ident.span),
-                                    ) {
-                                        self.emit_error(e);
-                                    }
+                                    // Exclude the last element (error) when assigning
+                                    let non_error_count = args.len().saturating_sub(1);
 
-                                    // Record variable definition for LSP
-                                    self.record_symbol(
-                                        var_ident.span,
-                                        SymbolInfo {
-                                            name: var_ident.name.clone(),
-                                            ty: ty.clone(),
-                                            definition_span: Some(stmt.span),
-                                            name_span: Some(var_ident.span),
-                                            kind: SymbolKind::Variable,
-                                            doc_comment: None,
-                                            go_location: None,
-                                        },
-                                    );
+                                    if names.len() > non_error_count {
+                                        self.emit_error(SoppoError::TryCapturesError {
+                                            span: names[non_error_count].span,
+                                        });
+                                        for var_ident in names {
+                                            if let Err(e) = self.insert_var(
+                                                var_ident.name.clone(),
+                                                Type::error(),
+                                                Some(var_ident.span),
+                                            ) {
+                                                self.emit_error(e);
+                                            }
+                                        }
+                                        var_tys = vec![Type::error(); names.len()];
+                                    } else {
+                                        for (i, var_ident) in names.iter().enumerate() {
+                                            if i < non_error_count
+                                                && let Some(ty) = args.get(i)
+                                            {
+                                                if let Err(e) = self.insert_var(
+                                                    var_ident.name.clone(),
+                                                    ty.clone(),
+                                                    Some(var_ident.span),
+                                                ) {
+                                                    self.emit_error(e);
+                                                }
+                                                var_tys.push(ty.clone());
+
+                                                self.record_symbol(
+                                                    var_ident.span,
+                                                    SymbolInfo {
+                                                        name: var_ident.name.clone(),
+                                                        ty: ty.clone(),
+                                                        definition_span: Some(stmt.span),
+                                                        name_span: Some(var_ident.span),
+                                                        kind: SymbolKind::Variable,
+                                                        doc_comment: None,
+                                                        go_location: None,
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
+
+                                let inner = TypedStmt::new(
+                                    TypedStmtKind::MultiDecl {
+                                        idents: names.clone(),
+                                        var_tys,
+                                        values: vec![typed_value],
+                                    },
+                                    inner_stmt.span,
+                                );
+                                (inner, 0, vec![], value_ty_sub, values[0].span)
                             }
                         }
-                        (value_ty_sub, values[0].span)
-                    }
-                    StmtKind::Assign { target, value } => {
-                        let value_ty = self.infer_expr(value);
-                        let target_ty = self.infer_expr(target);
+                        StmtKind::Assign { target, value } => {
+                            let typed_target = self.infer_expr(target);
+                            let typed_value = self.infer_expr(value);
+                            let value_ty_sub = self.substitute(typed_value.ty.clone());
 
-                        if value_ty.is_error() || target_ty.is_error() {
-                            return Ok(Type::unit());
+                            if !typed_value.ty.is_error() && !typed_target.ty.is_error() {
+                                // Strip error from tuple and strip nilability - within a try statement,
+                                // if the error is nil, the other values are assumed non-nil
+                                let expected_ty =
+                                    self.strip_error_from_tuple(&value_ty_sub).as_non_nullable();
+                                self.unify(&typed_target.ty, &expected_ty, &inner_stmt.span);
+                            }
+
+                            let inner = TypedStmt::new(
+                                TypedStmtKind::Assign {
+                                    target: typed_target,
+                                    value: typed_value.clone(),
+                                },
+                                inner_stmt.span,
+                            );
+                            (inner, 0, vec![], value_ty_sub, value.span)
                         }
+                        StmtKind::Expr(expr) => {
+                            let typed_expr = self.infer_expr(expr);
+                            let expr_ty_sub = self.substitute(typed_expr.ty.clone());
 
-                        let value_ty_sub = self.substitute(value_ty.clone());
-                        // For assignment, we expect the target to already have the non-error type
-                        let expected_ty = self.strip_error_from_tuple(&value_ty_sub);
-                        self.unify(&target_ty, &expected_ty, &inner_stmt.span);
-                        (value_ty_sub, value.span)
-                    }
-                    StmtKind::Expr(expr) => {
-                        let expr_ty = self.infer_expr(expr);
-                        if expr_ty.is_error() {
-                            return Ok(Type::unit());
+                            // For expression statements, all non-error values are discarded
+                            let (count, types) = if let Type::Con { sym, args, .. } = &expr_ty_sub
+                                && sym.name == "tuple"
+                            {
+                                let non_error: Vec<_> = args
+                                    .iter()
+                                    .filter(|t| {
+                                        !matches!(t, Type::Con { sym, .. } if sym.name == "error" || sym.name == "?error")
+                                    })
+                                    .cloned()
+                                    .collect();
+                                (non_error.len(), non_error)
+                            } else {
+                                (0, vec![])
+                            };
+
+                            let inner =
+                                TypedStmt::new(TypedStmtKind::Expr(typed_expr), inner_stmt.span);
+                            (inner, count, types, expr_ty_sub, expr.span)
                         }
-                        let expr_ty_sub = self.substitute(expr_ty);
-
-                        // Calculate how many non-error values to discard
-                        // For tuple[T, error] -> 1, for tuple[T, U, error] -> 2, for error -> 0
-                        let count = if let Type::Con {
-                            sym: name, args, ..
-                        } = &expr_ty_sub
-                            && name.name == "tuple"
-                        {
-                            // Count non-error args (all except the last one which is error)
-                            args.len().saturating_sub(1)
-                        } else {
-                            // Single error return
-                            0
-                        };
-                        discard_count.set(count);
-
-                        (expr_ty_sub, expr.span)
-                    }
-                    _ => {
-                        self.emit_error(SoppoError::Type {
-                            message: "`?` can only be used with declarations, assignments, or expression statements".to_string(),
-                            span: inner_stmt.span,
-                        });
-                        return Ok(Type::unit());
-                    }
-                };
-
-                let expr_ty_sub = self.substitute(expr_ty.clone());
+                        _ => {
+                            self.emit_error(SoppoError::Type {
+                                message: "`?` can only be used with declarations, assignments, or expression statements".to_string(),
+                                span: inner_stmt.span,
+                            });
+                            let inner = TypedStmt::error(inner_stmt.span);
+                            (inner, 0, vec![], Type::error(), inner_stmt.span)
+                        }
+                    };
 
                 // Verify expression returns error
-                if !self.returns_error(&expr_ty_sub) {
+                if !expr_ty.is_error() && !self.returns_error(&expr_ty) {
                     self.emit_error(SoppoError::TryExprNoError { span: expr_span });
-                    // Continue to check handler if present
                 }
 
                 // If handler present, infer it with error_name in scope
-                if let Some(block) = handler {
+                let typed_handler = if let Some(block) = handler {
                     self.push_scope();
                     if let Some(name) = error_name {
                         if let Err(e) =
@@ -1625,15 +1540,16 @@ impl Infer {
                         {
                             self.emit_error(e);
                         }
-                        // Error is known to be non-nil in the handler (handler only runs on error)
                         self.set_nil_state(name.clone(), Nullability::NonNull);
                     }
-                    self.infer_block(block);
+                    let typed_block = self.infer_block(block);
                     self.pop_scope();
-                }
+                    Some(typed_block)
+                } else {
+                    None
+                };
 
-                // Mark assigned nilable variables as non-null (success implies valid result)
-                // Use lookup_var_type to avoid marking the variable as "used"
+                // Mark assigned nilable variables as non-null
                 if let Some(var_name) = self.get_assigned_var_name(inner_stmt)
                     && let Some(var_type) = self.lookup_var_type(&var_name)
                 {
@@ -1643,16 +1559,186 @@ impl Infer {
                     }
                 }
 
-                Ok(Type::unit())
+                TypedStmtKind::TryStmt {
+                    stmt: Box::new(typed_inner_stmt),
+                    error_name: error_name.clone(),
+                    handler: typed_handler,
+                    try_span: *try_span,
+                    discard_count,
+                    discard_types,
+                }
             }
 
             StmtKind::LocalTypeDecl(type_decl) => {
                 // Register the local type in the current module
-                // This reuses the same type inference as top-level type declarations
                 self.infer_type_decl(type_decl)?;
-                Ok(Type::unit())
+
+                // Convert TypeKind to TypedTypeKind
+                let typed_kind = match &type_decl.kind {
+                    crate::syntax::TypeKind::Alias { target } => {
+                        crate::types::ast::TypedTypeKind::Alias {
+                            target: self.resolve_type(target),
+                        }
+                    }
+                    crate::syntax::TypeKind::Definition { target } => {
+                        crate::types::ast::TypedTypeKind::Definition {
+                            target: self.resolve_type(target),
+                        }
+                    }
+                    crate::syntax::TypeKind::Enum { variants } => {
+                        let typed_variants = variants
+                            .iter()
+                            .map(|v| match v {
+                                EnumVariant::Unit { ident } => {
+                                    crate::types::ast::TypedEnumVariant::Unit {
+                                        ident: ident.clone(),
+                                    }
+                                }
+                                EnumVariant::Single { ident, ty } => {
+                                    crate::types::ast::TypedEnumVariant::Single {
+                                        ident: ident.clone(),
+                                        ty: self.resolve_type(ty),
+                                    }
+                                }
+                                EnumVariant::Struct { ident, fields } => {
+                                    crate::types::ast::TypedEnumVariant::Struct {
+                                        ident: ident.clone(),
+                                        fields: fields
+                                            .iter()
+                                            .map(|f| {
+                                                (f.ident.name.clone(), self.resolve_type(&f.ty))
+                                            })
+                                            .collect(),
+                                    }
+                                }
+                            })
+                            .collect();
+                        crate::types::ast::TypedTypeKind::Enum {
+                            variants: typed_variants,
+                        }
+                    }
+                    crate::syntax::TypeKind::Struct { fields } => {
+                        let typed_fields = fields
+                            .iter()
+                            .map(|f| {
+                                (
+                                    f.ident.name.clone(),
+                                    self.resolve_type(&f.ty),
+                                    f.tag.clone(),
+                                )
+                            })
+                            .collect();
+                        crate::types::ast::TypedTypeKind::Struct {
+                            fields: typed_fields,
+                        }
+                    }
+                    crate::syntax::TypeKind::Interface { methods } => {
+                        let typed_methods = methods
+                            .iter()
+                            .map(|m| crate::types::ast::TypedInterfaceMethod {
+                                ident: m.ident.clone(),
+                                params: m
+                                    .params
+                                    .iter()
+                                    .map(|p| crate::types::ast::TypedParam {
+                                        ident: p.ident.clone(),
+                                        ty: self.resolve_type(&p.ty),
+                                        nullable: false,
+                                    })
+                                    .collect(),
+                                returns: m.returns.iter().map(|r| self.resolve_type(r)).collect(),
+                            })
+                            .collect();
+                        crate::types::ast::TypedTypeKind::Interface {
+                            methods: typed_methods,
+                        }
+                    }
+                };
+
+                TypedStmtKind::LocalTypeDecl(crate::types::ast::TypedTypeDecl {
+                    ident: type_decl.ident.clone(),
+                    generics: type_decl.generics.clone(),
+                    kind: typed_kind,
+                    span: type_decl.span,
+                    doc_comment: type_decl.doc_comment.clone(),
+                })
+            }
+        };
+        Ok(TypedStmt::new(kind, stmt.span))
+    }
+
+    /// Helper for multi-decl tuple unpacking
+    fn handle_multi_decl_tuple_unpack(
+        &mut self,
+        names: &[crate::syntax::Ident],
+        typed_value: &TypedExpr,
+        value: &Expr,
+    ) -> Vec<Type> {
+        let value_ty = typed_value.ty.clone();
+
+        // If expression failed, insert vars with Error type
+        if value_ty.is_error() {
+            for ident in names {
+                if let Err(e) = self.insert_var(ident.name.clone(), Type::error(), Some(ident.span))
+                {
+                    self.emit_error(e);
+                }
+            }
+            return vec![Type::error(); names.len()];
+        }
+
+        let value_ty = self.substitute(value_ty);
+
+        // The value should be a tuple type with matching arity
+        if let Type::Con {
+            sym: type_name,
+            args,
+            ..
+        } = &value_ty
+            && type_name.name == "tuple"
+            && args.len() == names.len()
+        {
+            // Use Go's short decl semantics - at least one var must be new
+            let vars: Vec<_> = names
+                .iter()
+                .zip(args.iter())
+                .map(|(ident, ty)| (ident.name.clone(), ty.clone(), Some(ident.span)))
+                .collect();
+            if let Err(e) = self.insert_short_decl_vars(&vars) {
+                self.emit_error(e);
+            }
+
+            // Track error companions
+            if let Some(last_ty) = args.last()
+                && matches!(last_ty, Type::Con { sym, .. } if sym.name == "error" || sym.name == "?error")
+                && names.len() >= 2
+            {
+                let err_name = names.last().unwrap().name.clone();
+                let companions: Vec<String> = names[..names.len() - 1]
+                    .iter()
+                    .map(|n| n.name.clone())
+                    .collect();
+                self.error_companions.insert(err_name, companions);
+            }
+
+            return args.clone();
+        }
+
+        // Not a tuple type or wrong arity - emit error but still define vars
+        self.emit_error(SoppoError::Type {
+            message: format!(
+                "Cannot unpack {} values from type `{}`",
+                names.len(),
+                value_ty
+            ),
+            span: value.span,
+        });
+        for ident in names {
+            if let Err(e) = self.insert_var(ident.name.clone(), Type::error(), Some(ident.span)) {
+                self.emit_error(e);
             }
         }
+        vec![Type::error(); names.len()]
     }
 }
 

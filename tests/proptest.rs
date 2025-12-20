@@ -130,7 +130,7 @@ fn arb_expr() -> impl Strategy<Value = Expr> {
                         ExprKind::Field {
                             expr: Box::new(expr),
                             field,
-                            field_span: Span::dummy(),
+                            span: Span::dummy(),
                         },
                         Span::dummy(),
                     )
@@ -156,23 +156,19 @@ fn arb_pattern() -> impl Strategy<Value = Pattern> {
         Just(Pattern {
             kind: PatternKind::Default,
             span: Span::dummy(),
-            inferred_type_args: std::cell::RefCell::new(None),
         }),
         // Variant pattern
         arb_type_name().prop_map(|name| Pattern {
             kind: PatternKind::Variant {
                 name,
                 type_args: Vec::new(),
-                is_soppo_enum: std::cell::Cell::new(true),
             },
             span: Span::dummy(),
-            inferred_type_args: std::cell::RefCell::new(None),
         }),
         // Literal pattern
         arb_literal().prop_map(|lit| Pattern {
             kind: PatternKind::Literal(lit),
             span: Span::dummy(),
-            inferred_type_args: std::cell::RefCell::new(None),
         }),
         // Destructor pattern
         (arb_type_name(), arb_ident()).prop_map(|(name, binding)| Pattern {
@@ -182,7 +178,6 @@ fn arb_pattern() -> impl Strategy<Value = Pattern> {
                 binding,
             },
             span: Span::dummy(),
-            inferred_type_args: std::cell::RefCell::new(None),
         }),
     ]
 }
@@ -371,7 +366,6 @@ mod compiler_properties {
     use std::process::Command;
 
     use soppo::build::compile;
-    use soppo::codegen::Codegen;
     use soppo::types::Infer;
 
     use super::*;
@@ -392,14 +386,6 @@ mod compiler_properties {
     }
 
     proptest! {
-        /// Codegen on generated files shouldn't panic (may produce invalid Go, but shouldn't crash)
-        #[test]
-        fn codegen_file_doesnt_panic(file in arb_file()) {
-            let mut codegen = Codegen::new();
-            // Just verify it doesn't panic - output may or may not be valid Go
-            let _ = codegen.gen_file(&file);
-        }
-
         /// Compiling valid-looking source shouldn't panic (errors are fine, panics are not)
         #[test]
         fn compile_doesnt_panic(

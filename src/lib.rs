@@ -6,7 +6,7 @@ pub mod config;
 pub mod deps;
 pub mod doctest;
 pub mod error;
-pub mod format;
+pub mod fmt;
 pub mod go;
 pub mod syntax;
 pub mod test;

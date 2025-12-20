@@ -472,12 +472,13 @@ impl GlobalCtxt {
 
     /// Check if pkg.Type refers to a Soppo enum (either from Soppo imports or Go packages)
     pub fn is_soppo_enum(&self, pkg: &str, type_name: &str) -> bool {
-        // Check Soppo imports first
+        // Check Soppo imports
         if let Some(module_id) = self.soppo_imports.get(pkg)
             && let Some(type_def) = self.lookup_type_in(module_id, type_name)
         {
             return matches!(type_def.kind, TypeDefKind::Enum { .. });
         }
+
         // Check Go package enums (from //soppo:enum markers)
         if let Some(types) = self.go_soppo_types.get(pkg) {
             return types.get(type_name) == Some(&GoSoppoKind::Enum);
