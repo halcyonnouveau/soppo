@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use miette::Diagnostic as MietteDiagnostic;
 use soppo::build::{typecheck, typecheck_with_symbols, typecheck_workspace};
-use soppo::error::SoppoError;
+use soppo::error::{SoppoError, SoppoErrors};
 use soppo::format::format_source;
 use soppo::go::SourceLocation;
 use soppo::syntax::{FileId, FileRegistry, Span};
@@ -135,6 +135,26 @@ pub fn soppo_error_to_diagnostics(err: &SoppoError) -> Vec<Diagnostic> {
             format!("type `{}` does not satisfy constraint `{}`", ty, constraint),
             Some(*span),
         ),
+        SoppoError::ShadowsImport { name, span } => (
+            format!("variable `{}` shadows imported package", name),
+            Some(*span),
+        ),
+        SoppoError::Redeclared { name, span, .. } => (
+            format!("variable `{}` redeclared in this block", name),
+            Some(*span),
+        ),
+        SoppoError::UnusedImport { name, span, .. } => (
+            format!("imported package `{}` is not used", name),
+            Some(*span),
+        ),
+        SoppoError::UnusedVariable { name, span } => (
+            format!("variable `{}` is declared but not used", name),
+            Some(*span),
+        ),
+        SoppoError::TryCapturesError { span } => (
+            "cannot capture error with `?` operator".to_string(),
+            Some(*span),
+        ),
         _ => (err.to_string(), None),
     };
 
@@ -154,7 +174,15 @@ pub fn check_document(text: &str, filename: &str) -> Vec<Diagnostic> {
     match typecheck(text, filename) {
         Ok(()) => vec![],
         Err(report) => {
-            // First try to downcast to SoppoError for rich diagnostics
+            // First try to downcast to MultiError for multiple diagnostics
+            if let Some(multi_err) = report.downcast_ref::<SoppoErrors>() {
+                return multi_err
+                    .iter()
+                    .flat_map(soppo_error_to_diagnostics)
+                    .collect();
+            }
+
+            // Try to downcast to single SoppoError
             if let Some(err) = report.downcast_ref::<SoppoError>() {
                 return soppo_error_to_diagnostics(err);
             }
@@ -248,6 +276,8 @@ struct Workspace {
     global_ctxt: GlobalCtxt,
     /// Symbol tables per file for LSP features
     symbol_tables: HashMap<FileId, SymbolTable>,
+    /// Diagnostics per file (type errors, unused variables, etc.)
+    diagnostics: HashMap<FileId, Vec<SoppoError>>,
 }
 
 #[derive(Debug)]
@@ -320,14 +350,23 @@ impl Backend {
             Ok(result) => {
                 let mut ws = self.workspace.write().await;
                 *ws = Some(Workspace {
-                    project_root: start_dir.to_path_buf(),
+                    project_root: result.project_root,
                     file_registry: result.file_registry,
                     global_ctxt: result.global_ctxt,
                     symbol_tables: result.symbol_tables,
+                    diagnostics: result.diagnostics,
                 });
                 true
             }
-            Err(_) => false,
+            Err(e) => {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("Failed to initialise workspace: {}", e),
+                    )
+                    .await;
+                false
+            }
         }
     }
 
@@ -347,10 +386,11 @@ impl Backend {
             Ok(result) => {
                 let mut ws = self.workspace.write().await;
                 *ws = Some(Workspace {
-                    project_root,
+                    project_root: result.project_root,
                     file_registry: result.file_registry,
                     global_ctxt: result.global_ctxt,
                     symbol_tables: result.symbol_tables,
+                    diagnostics: result.diagnostics,
                 });
                 Ok(())
             }
@@ -413,21 +453,31 @@ impl Backend {
     }
 
     /// Publish diagnostics for all files in the workspace.
-    /// Called when workspace typecheck succeeds - clears all diagnostics.
-    /// When workspace typecheck fails, we fall back to single-file mode which shows the error.
     async fn publish_workspace_diagnostics(&self) {
         let ws_guard = self.workspace.read().await;
         let Some(ws) = ws_guard.as_ref() else {
             return;
         };
 
-        // Workspace typechecked successfully - clear diagnostics for all files
-        for path in ws.file_registry.file_ids() {
-            if let Some(file_path) = ws.file_registry.get_path(path)
-                && let Ok(uri) = Url::from_file_path(file_path)
-            {
-                self.client.publish_diagnostics(uri, vec![], None).await;
-            }
+        // Publish diagnostics for each file
+        for file_id in ws.file_registry.file_ids() {
+            let Some(file_path) = ws.file_registry.get_path(file_id) else {
+                continue;
+            };
+            let Ok(uri) = Url::from_file_path(file_path) else {
+                continue;
+            };
+
+            // Get diagnostics for this file, or empty vec if none
+            let diagnostics = ws
+                .diagnostics
+                .get(&file_id)
+                .map(|errors| errors.iter().flat_map(soppo_error_to_diagnostics).collect())
+                .unwrap_or_default();
+
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
         }
     }
 

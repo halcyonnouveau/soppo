@@ -6,6 +6,7 @@ use miette::{IntoDiagnostic, NamedSource, Result};
 
 use crate::codegen::Codegen;
 use crate::deps::DepGraph;
+use crate::error::SoppoError;
 use crate::go::Project;
 use crate::syntax::{Decl, File, FileId, FileRegistry, ModuleId, Parser};
 use crate::types::{GlobalCtxt, Infer, SymbolTable};
@@ -16,12 +17,16 @@ pub type BuildResult = Vec<(String, String)>;
 /// Result of type-checking a workspace - used by the LSP
 #[derive(Debug)]
 pub struct WorkspaceResult {
+    /// The discovered project root (where go.mod is)
+    pub project_root: PathBuf,
     /// Registry mapping FileId to file paths
     pub file_registry: FileRegistry,
     /// Global type context with all modules
     pub global_ctxt: GlobalCtxt,
     /// Symbol tables per file for LSP features
     pub symbol_tables: HashMap<FileId, SymbolTable>,
+    /// Diagnostics per file
+    pub diagnostics: HashMap<FileId, Vec<SoppoError>>,
 }
 
 /// Build a project from a directory containing go.mod.
@@ -319,13 +324,11 @@ fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Resul
     }
 
     if infer.has_errors() {
-        let mut errors = infer.take_errors();
+        let errors = infer.take_errors();
         let source_code = NamedSource::new(filename, source.to_string());
 
-        if errors.len() == 1 {
-            return Err(miette::Report::from(errors.remove(0)).with_source_code(source_code));
-        } else if let Some(multi_err) = crate::error::MultiError::new(errors) {
-            return Err(miette::Report::from(multi_err).with_source_code(source_code));
+        if let Some(errs) = crate::error::SoppoErrors::new(errors) {
+            return Err(miette::Report::from(errs).with_source_code(source_code));
         }
     }
 
@@ -367,53 +370,6 @@ fn infer_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::Result<()> 
     Ok(())
 }
 
-fn register_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
-    let add_source = |e| {
-        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
-    };
-
-    match decl {
-        Decl::Const(const_decl) => {
-            // Consts are fully processed in pass 1 since they don't have bodies
-            infer.infer_const_decl(const_decl).map_err(add_source)?;
-        }
-        Decl::ConstBlock(consts) => {
-            // Process each const in the block
-            for const_decl in consts {
-                infer.infer_const_decl(const_decl).map_err(add_source)?;
-            }
-        }
-        Decl::Type(type_decl) => {
-            // Types are fully processed in pass 1
-            infer.infer_type_decl(type_decl).map_err(add_source)?;
-        }
-        Decl::Var(var_decl) => {
-            infer.infer_var_decl(var_decl).map_err(add_source)?;
-        }
-        Decl::Func(func) => {
-            // Only register the signature, don't check the body yet
-            infer.register_func_signature(func).map_err(add_source)?;
-        }
-    }
-    Ok(())
-}
-
-fn infer_decl(infer: &mut Infer, decl: &Decl, source: &str, filename: &str) -> Result<()> {
-    let add_source = |e| {
-        miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
-    };
-
-    match decl {
-        // Consts, vars, and types were fully processed in pass 1
-        Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) | Decl::Type(_) => {}
-        // Only functions need body checking in pass 2
-        Decl::Func(func) => {
-            infer.infer_func_decl(func).map_err(add_source)?;
-        }
-    }
-    Ok(())
-}
-
 /// Type-check an entire workspace, returning the FileRegistry, GlobalCtxt, and SymbolTables.
 /// Used by the LSP for cross-file features like go-to-definition.
 ///
@@ -427,9 +383,11 @@ pub fn typecheck_workspace(
 
     if sources.is_empty() {
         return Ok(WorkspaceResult {
+            project_root: project.root,
             file_registry: FileRegistry::new(),
             global_ctxt: GlobalCtxt::new(),
             symbol_tables: HashMap::new(),
+            diagnostics: HashMap::new(),
         });
     }
 
@@ -440,6 +398,7 @@ pub fn typecheck_workspace(
     let mut file_registry = FileRegistry::new();
     let mut global_ctxt = GlobalCtxt::new();
     let mut symbol_tables = HashMap::new();
+    let mut diagnostics: HashMap<FileId, Vec<SoppoError>> = HashMap::new();
 
     for source_path in &ordered_sources {
         // Register the file and get its FileId
@@ -468,7 +427,7 @@ pub fn typecheck_workspace(
             .filter(|s| !s.is_empty())
             .unwrap_or("main");
 
-        // Parse with correct FileId
+        // Parse with correct FileId - parse errors are fatal
         let mut parser = Parser::new(&source, file_id);
         let file = parser.parse_file().map_err(|e| {
             miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
@@ -480,18 +439,27 @@ pub fn typecheck_workspace(
         let mut infer = Infer::with_global_state_and_project(global_ctxt, project.clone())?;
         infer.process_imports(&file.imports);
 
-        // Two-pass type checking
+        // Two-pass type checking - collect errors instead of failing immediately
         for decl in &file.decls {
-            register_decl(&mut infer, decl, &source, filename)?;
+            if let Err(e) = register_decl_inner(&mut infer, decl) {
+                infer.emit_error(e);
+            }
         }
         for decl in &file.decls {
-            infer_decl(&mut infer, decl, &source, filename)?;
+            if let Err(e) = infer_decl_inner(&mut infer, decl) {
+                infer.emit_error(e);
+            }
         }
 
         // Check for unused imports
-        infer.check_unused_imports().map_err(|e| {
-            miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
-        })?;
+        if let Err(e) = infer.check_unused_imports() {
+            infer.emit_error(e);
+        }
+
+        // Collect errors for this file
+        if infer.has_errors() {
+            diagnostics.insert(file_id, infer.take_errors());
+        }
 
         // Finalise symbol table (adds Soppo imports for cross-file completion)
         infer.finalise_symbols();
@@ -503,9 +471,11 @@ pub fn typecheck_workspace(
     }
 
     Ok(WorkspaceResult {
+        project_root: project.root,
         file_registry,
         global_ctxt,
         symbol_tables,
+        diagnostics,
     })
 }
 

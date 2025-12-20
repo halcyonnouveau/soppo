@@ -242,64 +242,60 @@ pub type Result<T> = std::result::Result<T, SoppoError>;
 
 /// Multiple errors collected during type checking.
 #[derive(Debug)]
-pub struct MultiError {
-    first: SoppoError,
-    rest: Vec<SoppoError>,
-}
+pub struct SoppoErrors(Vec<SoppoError>);
 
-impl std::fmt::Display for MultiError {
+impl std::fmt::Display for SoppoErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Display as the first error's message
-        write!(f, "{}", self.first)
+        write!(f, "{}", self.0[0])
     }
 }
 
-impl std::error::Error for MultiError {
+impl std::error::Error for SoppoErrors {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }
 }
 
-impl Diagnostic for MultiError {
+impl Diagnostic for SoppoErrors {
     fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
-        // Use the first error's code
-        self.first.code()
+        self.0.first().and_then(|e| e.code())
     }
 
     fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
-        self.first.labels()
+        self.0.first().and_then(|e| e.labels())
     }
 
     fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
-        self.first.help()
+        self.0.first().and_then(|e| e.help())
     }
 
     fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
-        if self.rest.is_empty() {
+        if self.0.len() <= 1 {
             None
         } else {
-            Some(Box::new(self.rest.iter().map(|e| e as &dyn Diagnostic)))
+            Some(Box::new(self.0[1..].iter().map(|e| e as &dyn Diagnostic)))
         }
     }
 }
 
-impl MultiError {
-    pub fn new(mut errors: Vec<SoppoError>) -> Option<Self> {
+impl SoppoErrors {
+    pub fn new(errors: Vec<SoppoError>) -> Option<Self> {
         if errors.is_empty() {
-            return None;
+            None
+        } else {
+            Some(Self(errors))
         }
-        let first = errors.remove(0);
-        Some(MultiError {
-            first,
-            rest: errors,
-        })
     }
 
     pub fn len(&self) -> usize {
-        1 + self.rest.len()
+        self.0.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        false // MultiError always has at least one error
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &SoppoError> {
+        self.0.iter()
     }
 }
