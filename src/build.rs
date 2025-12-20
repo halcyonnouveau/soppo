@@ -493,6 +493,9 @@ pub fn typecheck_workspace(
             miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
         })?;
 
+        // Finalise symbol table (adds Soppo imports for cross-file completion)
+        infer.finalise_symbols();
+
         // Extract results
         let symbols = infer.symbols().clone();
         global_ctxt = infer.into_global_state();
@@ -595,6 +598,32 @@ func main() {
             .get(&main_file_id)
             .expect("Should have symbols for main file");
 
+        // Verify Soppo imports are in the symbol table (for completion)
+        assert!(
+            main_symbols.imports().contains_key("helpers"),
+            "Should have 'helpers' in symbol table imports"
+        );
+
+        // Verify the "helpers" package name has a symbol for hover/goto
+        let helpers_symbol = main_symbols
+            .all_symbols()
+            .values()
+            .find(|s| s.name == "helpers" && s.kind == crate::types::SymbolKind::Package);
+        assert!(
+            helpers_symbol.is_some(),
+            "Should have 'helpers' package symbol for hover/goto. Symbols: {:?}",
+            main_symbols
+                .all_symbols()
+                .values()
+                .map(|s| (&s.name, &s.kind))
+                .collect::<Vec<_>>()
+        );
+        let helpers_symbol = helpers_symbol.unwrap();
+        assert!(
+            helpers_symbol.definition_span.is_some(),
+            "helpers package symbol should have definition_span"
+        );
+
         // Look for the "Add" symbol (from helpers.Add call)
         let add_symbol = main_symbols
             .all_symbols()
@@ -610,6 +639,76 @@ func main() {
         assert_eq!(
             def_span.file, helpers_file_id,
             "Add symbol definition should point to helpers file"
+        );
+    }
+
+    #[test]
+    fn test_receiver_method_symbol() {
+        // Test that calling a method on a local receiver records a symbol
+        let source = r#"
+package main
+
+type Config struct {
+    path string
+}
+
+func (c *Config) SaveTo(path string) error {
+    return nil
+}
+
+func (c *Config) Save() error {
+    return c.SaveTo("/tmp/config")
+}
+"#;
+
+        let symbols = typecheck_with_symbols(source, "test.sop").expect("Should typecheck");
+
+        // Debug: print all symbols with their spans
+        eprintln!("All symbols:");
+        for ((start, end), sym) in symbols.all_symbols() {
+            eprintln!(
+                "  ({}, {}) -> {} ({:?}) - source: {:?}",
+                start,
+                end,
+                sym.name,
+                sym.kind,
+                &source[*start..*end]
+            );
+        }
+
+        // Find the call site: "c.SaveTo" is at around position 161 in the source
+        // The method definition is at (72, 78), call site should be different
+        let call_site_pos = source.find("return c.SaveTo").expect("Find call site");
+        let call_site_saveto_start = call_site_pos + "return c.".len();
+        eprintln!(
+            "Call site SaveTo starts at: {} (source: {:?})",
+            call_site_saveto_start,
+            &source[call_site_saveto_start..call_site_saveto_start + 6]
+        );
+
+        // Look for SaveTo symbols - there should be TWO:
+        // 1. The method definition
+        // 2. The call site
+        let save_to_symbols: Vec<_> = symbols
+            .all_symbols()
+            .iter()
+            .filter(|(_, s)| s.name == "SaveTo")
+            .collect();
+
+        eprintln!("SaveTo symbols found: {}", save_to_symbols.len());
+        for ((start, end), sym) in &save_to_symbols {
+            eprintln!("  ({}, {}) -> {:?}", start, end, sym.kind);
+        }
+
+        // We should have at least 2 SaveTo symbols (definition + call)
+        assert!(
+            save_to_symbols.len() >= 2,
+            "Should have SaveTo symbol at BOTH definition AND call site. Found {} symbols: {:?}",
+            save_to_symbols.len(),
+            save_to_symbols
+                .iter()
+                .map(|((start, end), s)| (start, end, &s.kind))
+                .collect::<Vec<_>>()
         );
     }
 }

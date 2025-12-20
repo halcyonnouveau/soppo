@@ -279,6 +279,16 @@ impl Infer {
         &self.symbols
     }
 
+    /// Finalise the symbol table by copying Soppo imports into it.
+    /// Call this before extracting symbols when you also need the global state.
+    pub fn finalise_symbols(&mut self) {
+        for (alias, (_, _, _, kind)) in &self.imports {
+            if let ImportKind::Soppo(module_id) = kind {
+                self.symbols.add_import(alias.clone(), module_id.clone());
+            }
+        }
+    }
+
     /// Record a symbol at the given span
     ///
     /// - `span`: The span of the symbol reference (where it's used)
@@ -588,10 +598,18 @@ impl Infer {
 
         // Convert Go signature to Soppo Type
         // Apply module to parameter types as well for proper unification
-        let param_types: Vec<Type> = func_def
+        // Include parameter names for better hover display
+        let param_types: Vec<(Option<String>, Type)> = func_def
             .params
             .iter()
-            .map(|p| Self::parse_go_type_with_module(&p.ty, package_name))
+            .map(|p| {
+                let name = if p.name.is_empty() {
+                    None
+                } else {
+                    Some(p.name.clone())
+                };
+                (name, Self::parse_go_type_with_module(&p.ty, package_name))
+            })
             .collect();
 
         let return_type = if func_def.return_type.is_empty() {
@@ -602,7 +620,7 @@ impl Infer {
         };
 
         Some((
-            Type::fun(param_types, return_type),
+            Type::fun_named(param_types, return_type),
             func_def.location.clone(),
             func_def.doc_comment.clone(),
         ))
@@ -832,13 +850,13 @@ impl Infer {
     }
 
     /// Look up a method on a Go type
-    /// Returns the method type as a function type
+    /// Returns (type, location, doc_comment) if found
     pub(super) fn lookup_go_method(
         &mut self,
         package_name: &str,
         type_name: &str,
         method_name: &str,
-    ) -> Option<Type> {
+    ) -> Option<(Type, Option<SourceLocation>, Option<String>)> {
         let (import_path, _, _, _) = self.imports.get(package_name)?;
         let import_path = import_path.clone();
         self.mark_import_used(package_name);
@@ -856,10 +874,18 @@ impl Infer {
         let method = methods.iter().find(|m| m.name == method_name)?;
 
         // Build the function type with module info preserved
-        let param_tys: Vec<Type> = method
+        // Include parameter names for better hover display
+        let param_tys: Vec<(Option<String>, Type)> = method
             .params
             .iter()
-            .map(|p| Self::parse_go_type_with_module(&p.ty, package_name))
+            .map(|p| {
+                let name = if p.name.is_empty() {
+                    None
+                } else {
+                    Some(p.name.clone())
+                };
+                (name, Self::parse_go_type_with_module(&p.ty, package_name))
+            })
             .collect();
         let return_ty = if method.return_type.is_empty() {
             Type::unit()
@@ -867,7 +893,11 @@ impl Infer {
             Self::parse_go_type_with_module(&method.return_type, package_name)
         };
 
-        Some(Type::fun(param_tys, return_ty))
+        Some((
+            Type::fun_named(param_tys, return_ty),
+            method.location.clone(),
+            method.doc_comment.clone(),
+        ))
     }
 
     /// Check if a name refers to an imported Go package
@@ -1351,6 +1381,28 @@ impl Infer {
                     sym: Symbol {
                         module: ModuleId::empty(),
                         name: format!("*{}", type_name),
+                        span: ast_ty.span,
+                    },
+                    args: vec![inner_ty],
+                    nullable: ast_ty.nullable,
+                };
+            } else {
+                // Simple pointer type: *T (local type, no package qualifier)
+                let inner_ty = Type::Con {
+                    sym: Symbol {
+                        module: ModuleId::empty(),
+                        name: inner_name.to_string(),
+                        span: ast_ty.span,
+                    },
+                    args: vec![],
+                    nullable: false,
+                };
+
+                // Create pointer type with inner type in args
+                return Type::Con {
+                    sym: Symbol {
+                        module: ModuleId::empty(),
+                        name: format!("*{}", inner_name),
                         span: ast_ty.span,
                     },
                     args: vec![inner_ty],

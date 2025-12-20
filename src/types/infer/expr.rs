@@ -1255,8 +1255,22 @@ impl Infer {
 
         // Check if this is a method call on a Go package type
         if let (Some(struct_name), Some(module_name)) = (&struct_name, &module_name)
-            && let Some(method_ty) = self.lookup_go_method(module_name, struct_name, field)
+            && let Some((method_ty, go_location, doc_comment)) =
+                self.lookup_go_method(module_name, struct_name, field)
         {
+            // Record symbol for go-to-definition (with Go source location)
+            self.record_symbol(
+                *field_span,
+                SymbolInfo {
+                    name: field.to_string(),
+                    ty: method_ty.clone(),
+                    definition_span: None,
+                    name_span: None,
+                    kind: SymbolKind::Method,
+                    doc_comment,
+                    go_location,
+                },
+            );
             return Ok(method_ty);
         }
 
@@ -1275,7 +1289,22 @@ impl Infer {
                     1 => method.return_types[0].clone(),
                     _ => Type::generic("tuple", method.return_types.clone()),
                 };
-                return Ok(Type::fun(param_tys, ret_ty));
+                let method_ty = Type::fun(param_tys, ret_ty);
+
+                // Record symbol for go-to-definition
+                self.record_symbol(
+                    *field_span,
+                    SymbolInfo {
+                        name: field.to_string(),
+                        ty: method_ty.clone(),
+                        definition_span: method.span,
+                        name_span: method.name_span,
+                        kind: SymbolKind::Method,
+                        doc_comment: method.doc_comment.clone(),
+                        go_location: None,
+                    },
+                );
+                return Ok(method_ty);
             }
         }
 
@@ -1347,14 +1376,7 @@ impl Infer {
                     );
                     return Ok(field_ty.clone());
                 } else {
-                    // Field not found - check if it might be a method
-                    // If we can find a function with this name, return a type variable
-                    // and let the Call handler deal with it
-                    if self.global_state.lookup_function(field).is_some() {
-                        return Ok(self.fresh_ty_var());
-                    }
-
-                    // Field not found in struct - check if it's a method
+                    // Field not found in struct - check if it's a method first
                     if let Some(method) = self.global_state.lookup_method(struct_name, field) {
                         // Build function type from method signature
                         let param_tys: Vec<Type> =
@@ -1364,7 +1386,29 @@ impl Infer {
                             1 => method.return_types[0].clone(),
                             _ => Type::generic("tuple", method.return_types.clone()),
                         };
-                        return Ok(Type::fun(param_tys, ret_ty));
+                        let method_ty = Type::fun(param_tys, ret_ty);
+
+                        // Record symbol for go-to-definition
+                        self.record_symbol(
+                            *field_span,
+                            SymbolInfo {
+                                name: field.to_string(),
+                                ty: method_ty.clone(),
+                                definition_span: method.span,
+                                name_span: method.name_span,
+                                kind: SymbolKind::Method,
+                                doc_comment: method.doc_comment.clone(),
+                                go_location: None,
+                            },
+                        );
+                        return Ok(method_ty);
+                    }
+
+                    // Not a method - check if it might be a UFCS function call
+                    // If we can find a function with this name, return a type variable
+                    // and let the Call handler deal with it
+                    if self.global_state.lookup_function(field).is_some() {
+                        return Ok(self.fresh_ty_var());
                     }
 
                     return Err(SoppoError::Type {
@@ -1382,7 +1426,22 @@ impl Infer {
                     1 => method.return_types[0].clone(),
                     _ => Type::generic("tuple", method.return_types.clone()),
                 };
-                return Ok(Type::fun(param_tys, ret_ty));
+                let method_ty = Type::fun(param_tys, ret_ty);
+
+                // Record symbol for go-to-definition
+                self.record_symbol(
+                    *field_span,
+                    SymbolInfo {
+                        name: field.to_string(),
+                        ty: method_ty.clone(),
+                        definition_span: method.span,
+                        name_span: method.name_span,
+                        kind: SymbolKind::Method,
+                        doc_comment: method.doc_comment.clone(),
+                        go_location: None,
+                    },
+                );
+                return Ok(method_ty);
             }
         }
 
@@ -1824,6 +1883,23 @@ impl Infer {
             && let ExprKind::Ident(pkg_name) = &pkg_expr.kind
             && self.is_imported_package(pkg_name)
         {
+            // Record symbol for the package name itself (e.g., "helpers" in helpers.Add)
+            // Go-to-definition on the package name goes to the import statement
+            if let Some((import_path, import_span)) = self.get_import_info(pkg_name) {
+                self.record_symbol(
+                    pkg_expr.span,
+                    SymbolInfo {
+                        name: pkg_name.to_string(),
+                        ty: Type::simple(import_path),
+                        definition_span: Some(import_span),
+                        name_span: None,
+                        kind: SymbolKind::Package,
+                        doc_comment: Some(format!("import \"{}\"", import_path)),
+                        go_location: None,
+                    },
+                );
+            }
+
             // For Soppo imports, look up the function from GlobalCtxt
             if self.is_soppo_import(pkg_name) {
                 // Mark the import as used
