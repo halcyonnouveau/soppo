@@ -8,10 +8,10 @@ type Profile struct {
 
 type User struct {
     name    string
-    profile *Profile
+    profile ?*Profile
 }
 
-func getUser() *User {
+func getUser() ?*User {
     return nil
 }
 

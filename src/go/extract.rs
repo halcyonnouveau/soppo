@@ -733,12 +733,23 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "field_declaration_list" {
-            let mut inner_cursor = child.walk();
-            for field_decl in child.children(&mut inner_cursor) {
+            // Collect all children of the field_declaration_list
+            let children: Vec<_> = {
+                let mut c = child.walk();
+                child.children(&mut c).collect()
+            };
+
+            // Process children, looking for field_declarations and their trailing comments
+            let mut i = 0;
+            while i < children.len() {
+                let field_decl = children[i];
                 if field_decl.kind() == "field_declaration" {
                     let mut names = Vec::new();
                     let mut ty = String::new();
                     let mut nullable = false;
+
+                    // Get the line number of this field declaration for matching trailing comment
+                    let field_end_line = field_decl.end_position().row;
 
                     let mut field_cursor = field_decl.walk();
                     for field_child in field_decl.children(&mut field_cursor) {
@@ -747,7 +758,7 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                                 names.push(node_text(field_child, source).to_string());
                             }
                             "comment" => {
-                                // Check for //soppo:nilable marker
+                                // Check for //soppo:nilable marker (inline comment within declaration)
                                 let comment_text = node_text(field_child, source);
                                 if comment_text.contains("soppo:nilable") {
                                     nullable = true;
@@ -757,6 +768,18 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                                 ty = extract_type_string(field_child, source);
                             }
                             _ => {}
+                        }
+                    }
+
+                    // Check if the next sibling is a comment on the same line
+                    // (trailing comment like `Email *string //soppo:nilable`)
+                    if i + 1 < children.len() {
+                        let next = children[i + 1];
+                        if next.kind() == "comment" && next.start_position().row == field_end_line {
+                            let comment_text = node_text(next, source);
+                            if comment_text.contains("soppo:nilable") {
+                                nullable = true;
+                            }
                         }
                     }
 
@@ -777,6 +800,7 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                         }
                     }
                 }
+                i += 1;
             }
         }
     }

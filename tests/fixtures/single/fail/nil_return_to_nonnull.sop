@@ -4,7 +4,7 @@ type User struct {
     name string
 }
 
-func getUser(id int) *User {
+func getUser(id int) ?*User {
     if id == 1 {
         return &User{name: "Alice"}
     }

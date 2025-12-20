@@ -661,9 +661,11 @@ impl Parser {
 
             Token::LBracket => {
                 // Slice literal: []type{elements}
+                // Slice type conversion: []type(expr)
                 // Array literal: [size]type{elements}
                 if self.consume(&Token::RBracket) {
                     // []type{elements} - slice literal
+                    // or []type(expr) - type conversion
                     let elem_ty = self.parse_type()?;
                     // Create a slice type with [] prefix
                     let slice_ty = TypeAnnotation {
@@ -674,6 +676,25 @@ impl Parser {
                     };
 
                     self.skip_terminators();
+
+                    // Check for type conversion: []type(expr)
+                    if self.consume(&Token::LParen) {
+                        let args = self.parse_argument_list()?;
+                        let end_span = self.expect(Token::RParen)?;
+
+                        // Create a "function" expression from the slice type name
+                        let type_expr = Expr::new(ExprKind::Ident(slice_ty.name), slice_ty.span);
+
+                        return Ok(Expr::new(
+                            ExprKind::Call {
+                                func: Box::new(type_expr),
+                                type_args: vec![],
+                                args,
+                            },
+                            self.merge_spans(span, end_span),
+                        ));
+                    }
+
                     self.expect(Token::LBrace)?;
                     self.skip_terminators();
 

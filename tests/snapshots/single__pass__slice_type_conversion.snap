@@ -1,0 +1,33 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+// Test []type(value) type conversions
+func main() {
+	// String to byte slice conversion
+	str := "hello"
+	bytes := []byte(str)
+	fmt.Println(len(bytes))
+
+	// Byte slice back to string
+	str2 := string(bytes)
+	fmt.Println(str2)
+
+	// String to rune slice conversion
+	runes := []rune(str)
+	fmt.Println(len(runes))
+
+	// Empty string conversion
+	empty := []byte("")
+	fmt.Println(len(empty))
+
+	// Conversion in expression context
+	if len([]byte("test")) == 4 {
+		fmt.Println("correct length")
+	}
+}

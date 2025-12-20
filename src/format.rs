@@ -1322,14 +1322,31 @@ impl Formatter {
                 args,
             } => {
                 let mut result = self.format_expr(func);
-                if !type_args.is_empty() {
+
+                // Special handling for make/new: type goes inside () not []
+                let is_make_or_new =
+                    matches!(&func.kind, ExprKind::Ident(name) if name == "make" || name == "new");
+
+                if !type_args.is_empty() && !is_make_or_new {
                     result.push('[');
                     let targs: Vec<_> =
                         type_args.iter().map(Self::format_type_annotation).collect();
                     result.push_str(&targs.join(", "));
                     result.push(']');
                 }
+
                 result.push('(');
+
+                // For make/new, type_args go first inside ()
+                if is_make_or_new && !type_args.is_empty() {
+                    let targs: Vec<_> =
+                        type_args.iter().map(Self::format_type_annotation).collect();
+                    result.push_str(&targs.join(", "));
+                    if !args.is_empty() {
+                        result.push_str(", ");
+                    }
+                }
+
                 let arg_strs: Vec<_> = args
                     .iter()
                     .map(|(name, val, spread)| {

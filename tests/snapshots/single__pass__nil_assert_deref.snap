@@ -1,0 +1,36 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "fmt"
+
+type Config struct {
+	value *string
+}
+
+//soppo:nilable : 0
+func getConfig() *Config {
+	v := "test"
+	return (&Config{value: (&v)})
+}
+
+// Test that dereferencing after .(!nil) doesn't trigger nil-pointer warning
+func main() {
+	// Basic nil assert dereference
+	config := getConfig()
+	val := (*(config.value))
+	fmt.Println(val)
+
+	// Without parentheses (if precedence allows)
+	config2 := getConfig()
+	val2 := (*config2.value)
+	fmt.Println(val2)
+
+	// Chained field access after nil assert
+	config3 := getConfig()
+	ptr := config3.value
+	fmt.Println((*ptr))
+}

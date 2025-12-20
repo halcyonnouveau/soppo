@@ -2,18 +2,6 @@
 source: tests/single.rs
 expression: result.unwrap_err()
 ---
-Error: soppo::nil_to_non_nilable
-
-  × Cannot assign `nil` to non-nilable type `*User`
-    ╭─[nil_nested_no_check.sop:15:12]
- 14 │ func getUser() *User {
- 15 │     return nil
-    ·            ─┬─
-    ·             ╰── cannot be nil
- 16 │ }
-    ╰────
-  help: use `?*User` for a nilable type
-
 Error: soppo::nil_pointer
 
   × Potential nil pointer dereference

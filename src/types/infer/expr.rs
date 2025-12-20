@@ -1188,7 +1188,10 @@ impl Infer {
         // Check for nil dereference on field access
         // If the expression is a nilable type, verify it's not nullable
         // Skip check if expression is a NilAssert - that explicitly makes it non-null
-        if Self::is_nilable_type(&expr_ty) && !matches!(field_expr.kind, ExprKind::NilAssert { .. })
+        // Skip if type is non-nullable in Soppo (*T vs ?*T) - non-nullable types can't be nil
+        if Self::is_nilable_type(&expr_ty)
+            && expr_ty.is_nullable()
+            && !matches!(field_expr.kind, ExprKind::NilAssert { .. })
         {
             // Convert expression to a trackable key (supports identifiers and field chains)
             let expr_key = super::stmt::expr_to_key(field_expr);
@@ -1851,8 +1854,11 @@ impl Infer {
         }
 
         // Check if this is a type conversion: TypeName(value) or pkg.TypeName(value)
+        // Also handles slice type conversions like []byte(str)
         if let ExprKind::Ident(type_name) = &func.kind
-            && (self.global_state.has_type(type_name) || Type::is_builtin_type(type_name))
+            && (self.global_state.has_type(type_name)
+                || Type::is_builtin_type(type_name)
+                || Self::is_slice_type_conversion(type_name))
         {
             // This is a type conversion, not a function call
             // Type conversions take exactly one argument
@@ -2418,7 +2424,12 @@ impl Infer {
                 let operand_ty = self.substitute(operand_ty);
 
                 // Check for nil pointer dereference (only pointers can be dereferenced)
-                if Self::is_pointer_type(&operand_ty) {
+                // Skip if operand is a NilAssert - that explicitly asserts non-nil
+                // Skip if type is non-nullable in Soppo (*T vs ?*T) - non-nullable types can't be nil
+                if Self::is_pointer_type(&operand_ty)
+                    && operand_ty.is_nullable()
+                    && !Self::is_nil_asserted(operand)
+                {
                     // Get a key for the expression (works for identifiers and field chains)
                     let expr_key = super::stmt::expr_to_key(operand);
 
@@ -2430,9 +2441,14 @@ impl Infer {
 
                     if is_nullable {
                         let name_for_error = expr_key.unwrap_or_else(|| "expression".to_string());
+                        // Use a more specific span: for field access, point to just the field name
+                        let error_span = match &operand.kind {
+                            ExprKind::Field { field_span, .. } => *field_span,
+                            _ => operand.span,
+                        };
                         self.emit_error(SoppoError::NilPointer {
                             name: name_for_error,
-                            span: operand.span,
+                            span: error_span,
                         });
                     }
                 }

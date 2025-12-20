@@ -6,7 +6,7 @@ type User struct {
     name string
 }
 
-func getUser(id int) *User {
+func getUser(id int) ?*User {
     return nil
 }
 

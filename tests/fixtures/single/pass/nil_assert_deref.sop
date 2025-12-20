@@ -1,0 +1,30 @@
+package main
+
+import "fmt"
+
+type Config struct {
+	value *string
+}
+
+func getConfig() ?*Config {
+	v := "test"
+	return &Config{value: &v}
+}
+
+// Test that dereferencing after .(!nil) doesn't trigger nil-pointer warning
+func main() {
+	// Basic nil assert dereference
+	config := getConfig().(!nil)
+	val := *(config.value.(!nil))
+	fmt.Println(val)
+
+	// Without parentheses (if precedence allows)
+	config2 := getConfig().(!nil)
+	val2 := *config2.value.(!nil)
+	fmt.Println(val2)
+
+	// Chained field access after nil assert
+	config3 := getConfig().(!nil)
+	ptr := config3.value.(!nil)
+	fmt.Println(*ptr)
+}

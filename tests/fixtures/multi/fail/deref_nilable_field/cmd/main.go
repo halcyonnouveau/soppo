@@ -1,0 +1,13 @@
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/deref_nilable/models"
+
+func main() {
+	user := models.User{Name: "Test"}
+
+	// This should fail - Email is nilable, can't deref without nil check
+	fmt.Println((*user.Email))
+}
+

@@ -1951,6 +1951,17 @@ impl Infer {
         matches!(ty, Type::Con { sym, .. } if sym.name.starts_with('*') || sym.name == "ptr")
     }
 
+    /// Check if an expression is a NilAssert or wrapped in parens around a NilAssert
+    /// This is used to skip nil-safety checks when the user explicitly asserts non-nil
+    pub(super) fn is_nil_asserted(expr: &crate::syntax::Expr) -> bool {
+        use crate::syntax::ExprKind;
+        match &expr.kind {
+            ExprKind::NilAssert { .. } => true,
+            ExprKind::Paren(inner) => Self::is_nil_asserted(inner),
+            _ => false,
+        }
+    }
+
     /// Check if a type is a slice type ([]T)
     pub(super) fn is_slice_type(ty: &Type) -> bool {
         matches!(ty, Type::Con { sym, .. } if sym.name.starts_with("[]"))
@@ -1964,6 +1975,16 @@ impl Infer {
     /// Check if a type is a channel type (chan T)
     pub(super) fn is_channel_type(ty: &Type) -> bool {
         matches!(ty, Type::Con { sym, .. } if sym.name.starts_with("chan "))
+    }
+
+    /// Check if a name is a valid slice type conversion (e.g., []byte, []rune, []int)
+    pub(super) fn is_slice_type_conversion(name: &str) -> bool {
+        if let Some(elem) = name.strip_prefix("[]") {
+            // Check if element type is a valid builtin type
+            Type::is_builtin_type(elem)
+        } else {
+            false
+        }
     }
 
     /// Extract element type from a channel type (chan T -> T)

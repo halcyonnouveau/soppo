@@ -2,24 +2,12 @@
 source: tests/single.rs
 expression: result.unwrap_err()
 ---
-Error: soppo::nil_to_non_nilable
-
-  × Cannot assign `nil` to non-nilable type `*User`
-    ╭─[nil_access_wrong_branch.sop:10:12]
-  9 │ func findUser(id int) *User {
- 10 │     return nil
-    ·            ─┬─
-    ·             ╰── cannot be nil
- 11 │ }
-    ╰────
-  help: use `?*User` for a nilable type
-
 Error: soppo::nil_pointer
 
   × Potential nil pointer dereference
-    ╭─[nil_access_wrong_branch.sop:18:21]
+    ╭─[nil_access_wrong_branch.sop:18:15]
  17 │     if user == nil {
- 18 │         fmt.Println(user.name)  // Error: user is nil here!
+ 18 │         fmt.Println(user.name) // Error: user is nil here!
     ·                     ──┬─
     ·                       ╰── this pointer may be nil
  19 │     }
