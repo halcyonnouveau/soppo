@@ -26,13 +26,24 @@ impl Infer {
             ExprKind::Rune(_) => Ok(Type::simple("rune")),
 
             ExprKind::StringInterpolation(parts) => {
-                // Type check each interpolated expression
+                // Type check each interpolated expression and validate format specifiers
                 let mut had_error = false;
                 for part in parts {
-                    if let crate::syntax::StringPart::Expr(expr) = part {
-                        // Any type can be interpolated - it will be converted to string
+                    if let crate::syntax::StringPart::Expr { expr, format } = part {
                         let ty = self.infer_expr(expr);
                         if ty.is_error() {
+                            had_error = true;
+                            continue;
+                        }
+
+                        // Validate format specifier against the expression type
+                        if let Some(fmt) = format
+                            && let Err(msg) = validate_format_specifier(fmt, &ty)
+                        {
+                            self.emit_error(SoppoError::Type {
+                                message: msg,
+                                span: expr.span,
+                            });
                             had_error = true;
                         }
                     }
@@ -2500,6 +2511,164 @@ impl Infer {
 
         Some(fields)
     }
+}
+
+/// Validate a format specifier against an expression type.
+/// Returns Ok(()) if valid, Err(message) if invalid.
+fn validate_format_specifier(format: &str, ty: &Type) -> std::result::Result<(), String> {
+    // Extract the base verb from the format (e.g., "d" from "010d", "f" from ".2f")
+    let base_verb = extract_base_verb(format);
+
+    // Check if the type is compatible with the format verb
+    match base_verb {
+        // Integer verbs
+        "d" | "b" | "o" | "x" | "X" | "c" => {
+            if !is_integer_type(ty) && !is_rune_type(ty) {
+                return Err(format!(
+                    "format `%{}` requires integer type, found `{}`",
+                    format, ty
+                ));
+            }
+        }
+        // Float verbs
+        "f" | "F" | "e" | "E" | "g" | "G" => {
+            if !is_float_type(ty) {
+                return Err(format!(
+                    "format `%{}` requires float type, found `{}`",
+                    format, ty
+                ));
+            }
+        }
+        // String verbs
+        "s" => {
+            // %s works with string, []byte, and any type that implements Stringer
+            // For simplicity, we allow string, []byte, and any interface
+            if !is_string_type(ty) && !is_byte_slice_type(ty) && !is_interface_type(ty) {
+                return Err(format!(
+                    "format `%{}` requires string or []byte, found `{}`",
+                    format, ty
+                ));
+            }
+        }
+        "q" => {
+            // %q works with string, []byte, and rune
+            if !is_string_type(ty) && !is_byte_slice_type(ty) && !is_rune_type(ty) {
+                return Err(format!(
+                    "format `%{}` requires string, []byte, or rune, found `{}`",
+                    format, ty
+                ));
+            }
+        }
+        // Bool verb
+        "t" => {
+            if !is_bool_type(ty) {
+                return Err(format!(
+                    "format `%{}` requires bool, found `{}`",
+                    format, ty
+                ));
+            }
+        }
+        // Pointer verb
+        "p" => {
+            if !is_pointer_type(ty) && !is_slice_type(ty) && !is_map_type(ty) {
+                return Err(format!(
+                    "format `%{}` requires pointer, slice, or map, found `{}`",
+                    format, ty
+                ));
+            }
+        }
+        // Universal verbs - always valid
+        "v" | "+v" | "#v" => {}
+        // Unknown verb
+        _ => {
+            return Err(format!("unknown format verb `%{}`", format));
+        }
+    }
+
+    Ok(())
+}
+
+/// Extract the base verb from a format specifier.
+/// E.g., "d" from "010d", "f" from ".2f", "x" from "#x"
+fn extract_base_verb(format: &str) -> &str {
+    // Handle special cases for +v and #v
+    if format == "+v" || format == "#v" {
+        return format;
+    }
+
+    // Find the last character that is a letter - that's the verb
+    let verb_start = format.rfind(|c: char| c.is_ascii_alphabetic()).unwrap_or(0);
+    &format[verb_start..]
+}
+
+fn get_type_name(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Con { sym, .. } => Some(&sym.name),
+        _ => None,
+    }
+}
+
+fn is_integer_type(ty: &Type) -> bool {
+    matches!(
+        get_type_name(ty),
+        Some(
+            "int"
+                | "int8"
+                | "int16"
+                | "int32"
+                | "int64"
+                | "uint"
+                | "uint8"
+                | "uint16"
+                | "uint32"
+                | "uint64"
+                | "uintptr"
+                | "byte"
+        )
+    )
+}
+
+fn is_rune_type(ty: &Type) -> bool {
+    matches!(get_type_name(ty), Some("rune"))
+}
+
+fn is_float_type(ty: &Type) -> bool {
+    matches!(get_type_name(ty), Some("float32" | "float64"))
+}
+
+fn is_string_type(ty: &Type) -> bool {
+    matches!(get_type_name(ty), Some("string"))
+}
+
+fn is_bool_type(ty: &Type) -> bool {
+    matches!(get_type_name(ty), Some("bool"))
+}
+
+fn is_byte_slice_type(ty: &Type) -> bool {
+    if let Type::Con { sym, args, .. } = ty
+        && sym.name == "slice"
+        && args.len() == 1
+    {
+        return matches!(get_type_name(&args[0]), Some("byte" | "uint8"));
+    }
+    false
+}
+
+fn is_slice_type(ty: &Type) -> bool {
+    matches!(ty, Type::Con { sym, .. } if sym.name == "slice")
+}
+
+fn is_map_type(ty: &Type) -> bool {
+    matches!(ty, Type::Con { sym, .. } if sym.name == "map")
+}
+
+fn is_pointer_type(ty: &Type) -> bool {
+    matches!(ty, Type::Con { sym, .. } if sym.name == "ptr")
+}
+
+fn is_interface_type(ty: &Type) -> bool {
+    matches!(ty, Type::Con { sym, .. } if sym.name == "interface")
+        || matches!(get_type_name(ty), Some("error" | "any"))
 }
 
 #[cfg(test)]

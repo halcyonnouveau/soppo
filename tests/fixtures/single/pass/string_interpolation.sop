@@ -38,4 +38,45 @@ func main() {
     // Float interpolation
     pi := 3.14159
     fmt.Println("Pi is approximately {pi}")
+
+    // Format specifiers
+    // Integer formats
+    num := 255
+    fmt.Println("Decimal: {num:d}")
+    fmt.Println("Binary: {num:b}")
+    fmt.Println("Octal: {num:o}")
+    fmt.Println("Hex lowercase: {num:x}")
+    fmt.Println("Hex uppercase: {num:X}")
+    fmt.Println("Hex with prefix: {num:#x}")
+    fmt.Println("Zero-padded: {num:08d}")
+
+    // Float formats
+    price := 19.99
+    fmt.Println("Float default: {price:f}")
+    fmt.Println("Float precision: {price:.2f}")
+    fmt.Println("Scientific: {price:e}")
+
+    // String format
+    greeting := "hello"
+    fmt.Println("String: {greeting:s}")
+
+    // Bool format
+    active := true
+    fmt.Println("Bool: {active:t}")
+
+    // Generic %v format (works with any type)
+    fmt.Println("Value: {nums:v}")
+    fmt.Println("Go syntax: {nums:#v}")
+
+    // Format with expressions
+    fmt.Println("Sum: {x + y:d}")
+    fmt.Println("Product: {float64(x) * 2.5:.1f}")
+
+    // Format with slice access (colon in expression via slice syntax)
+    arr := []int{10, 20, 30}
+    fmt.Println("Array element: {arr[0]:d}")
+
+    // Ternary-like with format
+    val := 42
+    fmt.Println("Result: {val:x}")
 }

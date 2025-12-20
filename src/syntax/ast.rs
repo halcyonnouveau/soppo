@@ -390,8 +390,12 @@ impl PartialEq for Expr {
 pub enum StringPart {
     /// Literal text segment
     Literal(String),
-    /// Interpolated expression: {expr}
-    Expr(Box<Expr>),
+    /// Interpolated expression: {expr} or {expr:format}
+    /// The format is the Go format verb without the % (e.g., "s", "d", ".2f", "#x")
+    Expr {
+        expr: Box<Expr>,
+        format: Option<String>,
+    },
 }
 
 /// Format of an integer literal for preserving source representation

@@ -1,0 +1,9 @@
+package main
+
+import "fmt"
+
+func main() {
+    // Using float format with integer - should fail
+    x := 42
+    fmt.Println("Value: {x:.2f}")
+}

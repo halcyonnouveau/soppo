@@ -50,8 +50,13 @@ impl Codegen {
                             // Escape % characters for fmt.Sprintf
                             self.emit(s.replace('%', "%%"));
                         }
-                        crate::syntax::StringPart::Expr(expr) => {
-                            self.emit("%v");
+                        crate::syntax::StringPart::Expr { expr, format } => {
+                            // Use explicit format if provided, otherwise use type-based default
+                            let fmt = format
+                                .as_deref()
+                                .map(|f| format!("%{}", f))
+                                .unwrap_or_else(|| default_format_for_expr(expr));
+                            self.emit(&fmt);
                             exprs.push(expr);
                         }
                     }
@@ -807,6 +812,24 @@ impl Codegen {
         }
         // Default: use normal expression generation
         self.gen_expr(expr);
+    }
+}
+
+/// Determine the default format specifier based on expression kind.
+/// Returns a format string like "%s", "%d", etc.
+fn default_format_for_expr(expr: &crate::syntax::Expr) -> String {
+    use crate::syntax::ExprKind;
+
+    match &expr.kind {
+        // Literals with known types
+        ExprKind::String(_) | ExprKind::RawString(_) => "%s".to_string(),
+        ExprKind::Integer(_, _) => "%d".to_string(),
+        ExprKind::Bool(_) => "%t".to_string(),
+        ExprKind::Rune(_) => "%c".to_string(),
+        // Float keeps %v (better formatting than %f)
+        ExprKind::Float(_) => "%v".to_string(),
+        // Everything else uses %v
+        _ => "%v".to_string(),
     }
 }
 

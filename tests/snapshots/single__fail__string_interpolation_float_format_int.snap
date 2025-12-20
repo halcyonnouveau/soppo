@@ -1,0 +1,14 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: format `%.2f` requires float type, found `int`
+   ╭─[string_interpolation_float_format_int.sop:8:26]
+ 7 │     x := 42
+ 8 │     fmt.Println("Value: {x:.2f}")
+   ·                          ┬
+   ·                          ╰── error occurred here
+ 9 │ }
+   ╰────

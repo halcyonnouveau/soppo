@@ -1,0 +1,14 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::type_error
+
+  × Type error: format `%d` requires integer type, found `string`
+   ╭─[string_interpolation_bad_format.sop:8:25]
+ 7 │     name := "Alice"
+ 8 │     fmt.Println("Name: {name:d}")
+   ·                         ──┬─
+   ·                           ╰── error occurred here
+ 9 │ }
+   ╰────

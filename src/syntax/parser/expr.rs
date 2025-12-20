@@ -953,7 +953,7 @@ impl Parser {
         }
     }
 
-    /// Parse a string with interpolation: "Hello, {name}!"
+    /// Parse a string with interpolation: "Hello, {name}!" or "Price: {cost:.2f}"
     /// Returns a vector of StringPart
     fn parse_string_interpolation(&mut self, s: &str, span: Span) -> Result<Vec<StringPart>> {
         let mut parts = Vec::new();
@@ -981,22 +981,22 @@ impl Parser {
                 // Track where the expression starts (after the '{')
                 let expr_start_byte = string_content_byte_start + byte_pos + 1;
 
-                // Extract the expression inside {}
-                let mut expr_str = String::new();
+                // Extract the content inside {} (expression + optional format)
+                let mut content = String::new();
                 let mut brace_depth = 1;
 
                 for (_, inner_ch) in char_indices.by_ref() {
                     if inner_ch == '{' {
                         brace_depth += 1;
-                        expr_str.push(inner_ch);
+                        content.push(inner_ch);
                     } else if inner_ch == '}' {
                         brace_depth -= 1;
                         if brace_depth == 0 {
                             break;
                         }
-                        expr_str.push(inner_ch);
+                        content.push(inner_ch);
                     } else {
-                        expr_str.push(inner_ch);
+                        content.push(inner_ch);
                     }
                 }
 
@@ -1007,9 +1007,12 @@ impl Parser {
                     });
                 }
 
+                // Split content into expression and optional format specifier
+                // The format delimiter is ':' at nesting depth 0
+                let (expr_str, format) = split_interpolation_content(&content);
+
                 // Parse the expression with byte offset so errors point to correct location
-                let mut expr_parser =
-                    Parser::new_with_offset(&expr_str, self.file, expr_start_byte);
+                let mut expr_parser = Parser::new_with_offset(expr_str, self.file, expr_start_byte);
                 let expr = expr_parser.parse_expr().map_err(|e| {
                     // Remap parse errors to parent string span as fallback
                     match e {
@@ -1017,7 +1020,10 @@ impl Parser {
                         other => other,
                     }
                 })?;
-                parts.push(StringPart::Expr(Box::new(expr)));
+                parts.push(StringPart::Expr {
+                    expr: Box::new(expr),
+                    format: format.map(|s| s.to_string()),
+                });
             } else if ch == '}' {
                 // Check for escaped brace: }}
                 if char_indices.peek().map(|(_, c)| *c) == Some('}') {
@@ -1039,6 +1045,41 @@ impl Parser {
 
         Ok(parts)
     }
+}
+
+/// Split interpolation content into expression and optional format specifier.
+/// The format delimiter is ':' at nesting depth 0 (outside brackets, braces, parens, strings).
+/// Returns (expression_str, Option<format_str>).
+fn split_interpolation_content(content: &str) -> (&str, Option<&str>) {
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut string_char = '"';
+    let mut prev_char = '\0';
+
+    for (i, ch) in content.char_indices() {
+        // Handle string literals
+        if !in_string && (ch == '"' || ch == '\'' || ch == '`') {
+            in_string = true;
+            string_char = ch;
+        } else if in_string && ch == string_char && prev_char != '\\' {
+            in_string = false;
+        } else if !in_string {
+            // Track nesting depth
+            match ch {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth = depth.saturating_sub(1),
+                ':' if depth == 0 => {
+                    // Found format delimiter at depth 0
+                    return (&content[..i], Some(&content[i + 1..]));
+                }
+                _ => {}
+            }
+        }
+        prev_char = ch;
+    }
+
+    // No format specifier found
+    (content, None)
 }
 
 #[cfg(test)]

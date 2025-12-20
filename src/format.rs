@@ -1391,9 +1391,13 @@ impl Formatter {
                 for part in parts {
                     match part {
                         StringPart::Literal(s) => result.push_str(s),
-                        StringPart::Expr(e) => {
+                        StringPart::Expr { expr, format } => {
                             result.push('{');
-                            result.push_str(&self.format_expr(e));
+                            result.push_str(&self.format_expr(expr));
+                            if let Some(fmt) = format {
+                                result.push(':');
+                                result.push_str(fmt);
+                            }
                             result.push('}');
                         }
                     }

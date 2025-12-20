@@ -43,4 +43,45 @@ func main() {
 	// Float interpolation
 	pi := 3.14159
 	fmt.Println(fmt.Sprintf("Pi is approximately %v", pi))
+
+	// Format specifiers
+	// Integer formats
+	num := 255
+	fmt.Println(fmt.Sprintf("Decimal: %d", num))
+	fmt.Println(fmt.Sprintf("Binary: %b", num))
+	fmt.Println(fmt.Sprintf("Octal: %o", num))
+	fmt.Println(fmt.Sprintf("Hex lowercase: %x", num))
+	fmt.Println(fmt.Sprintf("Hex uppercase: %X", num))
+	fmt.Println(fmt.Sprintf("Hex with prefix: %#x", num))
+	fmt.Println(fmt.Sprintf("Zero-padded: %08d", num))
+
+	// Float formats
+	price := 19.99
+	fmt.Println(fmt.Sprintf("Float default: %f", price))
+	fmt.Println(fmt.Sprintf("Float precision: %.2f", price))
+	fmt.Println(fmt.Sprintf("Scientific: %e", price))
+
+	// String format
+	greeting := "hello"
+	fmt.Println(fmt.Sprintf("String: %s", greeting))
+
+	// Bool format
+	active := true
+	fmt.Println(fmt.Sprintf("Bool: %t", active))
+
+	// Generic %v format (works with any type)
+	fmt.Println(fmt.Sprintf("Value: %v", nums))
+	fmt.Println(fmt.Sprintf("Go syntax: %#v", nums))
+
+	// Format with expressions
+	fmt.Println(fmt.Sprintf("Sum: %d", x + y))
+	fmt.Println(fmt.Sprintf("Product: %.1f", float64(x) * 2.5))
+
+	// Format with slice access (colon in expression via slice syntax)
+	arr := []int{10, 20, 30}
+	fmt.Println(fmt.Sprintf("Array element: %d", arr[0]))
+
+	// Ternary-like with format
+	val := 42
+	fmt.Println(fmt.Sprintf("Result: %x", val))
 }
