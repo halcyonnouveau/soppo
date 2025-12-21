@@ -412,8 +412,6 @@ fn show_diff(file: &Path, original: &str, formatted: &str) -> Result<()> {
 
 /// Lint files for code quality issues
 fn sniff_files(files: &[PathBuf], config: &LintConfig) -> Result<()> {
-    let mut total_warnings = 0;
-
     for file in files {
         let source = fs::read_to_string(file)
             .into_diagnostic()
@@ -436,19 +434,10 @@ fn sniff_files(files: &[PathBuf], config: &LintConfig) -> Result<()> {
 
         // Run lints
         let warnings = sniff::lint_file(&typed_file, filename, &source, config);
-        let warning_count = warnings.len();
 
         for warning in warnings {
             eprintln!("{:?}", miette::Report::new(warning));
         }
-
-        total_warnings += warning_count;
-    }
-
-    if total_warnings > 0 {
-        println!("\n⚠ Found {} warning(s)", total_warnings);
-    } else {
-        println!("✓ No lint warnings");
     }
 
     Ok(())
