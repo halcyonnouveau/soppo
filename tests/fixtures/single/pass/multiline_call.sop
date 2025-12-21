@@ -1,0 +1,29 @@
+package main
+
+import (
+	"log/slog"
+	"os"
+)
+
+// Helper to test named args with newlines
+func withOptions(handler slog.Handler, level slog.Level) *slog.Logger {
+	return slog.New(handler).(!nil)
+}
+
+func main() {
+	// Newline after opening paren should be allowed
+	logger := slog.New(slog.NewTextHandler(
+		os.Stderr,
+		&slog.HandlerOptions{Level: slog.LevelDebug},
+	))
+	slog.SetDefault(logger)
+
+	// Named arguments with newlines
+	logger2 := withOptions(
+		handler: slog.NewTextHandler(os.Stderr, nil),
+		level: slog.LevelDebug,
+	)
+	slog.SetDefault(logger2)
+
+	slog.Debug("test")
+}

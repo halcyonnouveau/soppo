@@ -225,6 +225,9 @@ impl Parser {
     fn parse_argument_list(&mut self) -> SoppoResult<Vec<ParsedArg>> {
         let mut args = Vec::new();
 
+        // Skip newlines after opening paren
+        self.skip_terminators();
+
         if !matches!(self.peek(), Some(Token::RParen)) {
             loop {
                 // Check for named argument: Ident followed by Colon
@@ -244,9 +247,21 @@ impl Parser {
                 args.push((name, value, spread));
 
                 if !self.consume(&Token::Comma) {
+                    // Check for missing trailing comma before newline
+                    if matches!(self.peek(), Some(Token::Newline)) {
+                        return Err(SoppoError::Parse {
+                            message: "Missing trailing comma after argument".to_string(),
+                            span: self.peek_span(),
+                        });
+                    }
                     break;
                 }
                 self.skip_terminators();
+
+                // Handle trailing comma before closing paren
+                if matches!(self.peek(), Some(Token::RParen)) {
+                    break;
+                }
             }
         }
 
