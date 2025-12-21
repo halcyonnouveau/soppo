@@ -1323,6 +1323,8 @@ impl Infer {
                                     ) {
                                         self.emit_error(e);
                                     }
+                                    // Mark as used to suppress cascading unused variable error
+                                    self.mark_var_used(&ident.name);
                                     let inner = TypedStmt::new(
                                         TypedStmtKind::Decl {
                                             ident: ident.clone(),
@@ -1418,7 +1420,7 @@ impl Infer {
                                         self.emit_error(SoppoError::TryCapturesError {
                                             span: names[non_error_count].span,
                                         });
-                                        for var_ident in names {
+                                        for var_ident in names.iter() {
                                             if let Err(e) = self.insert_var(
                                                 var_ident.name.clone(),
                                                 Type::error(),
@@ -1426,6 +1428,8 @@ impl Infer {
                                             ) {
                                                 self.emit_error(e);
                                             }
+                                            // Mark as used to suppress cascading unused variable error
+                                            self.mark_var_used(&var_ident.name);
                                         }
                                         var_tys = vec![Type::error(); names.len()];
                                     } else {
