@@ -44,3 +44,27 @@ result := doSomething() ?
 ```
 
 See the [Error Handling section](guide.md#error-handling--operator) in the language guide.
+
+### `shadow`
+
+Warns when a variable declaration shadows a variable from an outer scope.
+
+```go
+x := 1
+if condition {
+    x := 2  // warning: `x` shadows a variable from an outer scope
+    fmt.Println(x)
+}
+```
+
+Shadowing can lead to subtle bugs where you accidentally use the wrong variable. Consider using a different name:
+
+```go
+x := 1
+if condition {
+    innerX := 2
+    fmt.Println(innerX)
+}
+```
+
+Error types are allowed to shadow (reusing `err` is idiomatic). Import shadowing is a compile error, not a lint warning.

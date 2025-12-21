@@ -1,0 +1,14 @@
+package main
+
+import "fmt"
+
+func main() {
+	x := 1
+	fmt.Println(x)
+
+	if true {
+		//sniff:ignore shadow
+		x := 2  // ignored
+		fmt.Println(x)
+	}
+}

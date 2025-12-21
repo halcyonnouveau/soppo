@@ -1678,7 +1678,7 @@ impl Formatter {
             ExprKind::FuncLit {
                 params,
                 returns,
-                body: _,
+                body,
             } => {
                 let mut result = String::from("func(");
                 result.push_str(&self.format_params(params));
@@ -1708,10 +1708,14 @@ impl Formatter {
                         result.push(')');
                     }
                 }
-                result.push_str(" { ");
-                // For simple bodies, inline; otherwise would need multi-line
-                // This is a simplification - proper formatting would be more complex
-                result.push_str("... }");
+                // Format body using a temporary formatter
+                result.push_str(" {\n");
+                let mut tmp = Formatter::new();
+                tmp.indent_level = indent + 1;
+                tmp.format_block_contents(body);
+                result.push_str(&tmp.output);
+                result.push_str(&"\t".repeat(indent));
+                result.push('}');
                 result
             }
             ExprKind::Block(_) => {

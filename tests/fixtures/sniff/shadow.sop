@@ -1,0 +1,50 @@
+package main
+
+import "fmt"
+
+func main() {
+	x := 1
+	fmt.Println(x) // use outer x
+
+	if true {
+		x := 2 // should warn: shadows outer x
+		fmt.Println(x)
+	}
+
+	for i := 0; i < 10; i++ {
+		i := i * 2 // should warn: shadows loop variable i
+		fmt.Println(i)
+	}
+
+	f := func(x int) int {
+		b := 2
+		return b
+	}
+	fmt.Println(f(1))
+}
+
+func noShadow() {
+	x := 1
+	y := 2
+	fmt.Println(x, y)
+}
+
+// Error types are allowed to shadow - reusing `err` is idiomatic
+func errorShadowAllowed() error {
+	x := foo() ? err {
+		fmt.Println(x, err)
+		y := bar() ? err {
+			fmt.Println(y, err)
+		}
+	}
+
+	return nil
+}
+
+func foo() (int, error) {
+	return 1, nil
+}
+
+func bar() (int, error) {
+	return 2, nil
+}

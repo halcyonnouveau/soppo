@@ -1,0 +1,35 @@
+---
+source: tests/sniff.rs
+expression: output
+---
+  ⚠ `x` shadows a variable from an outer scope
+    ╭─[shadow.sop:10:3]
+  9 │     if true {
+ 10 │         x := 2 // should warn: shadows outer x
+    ·         ┬
+    ·         ╰── shadows outer variable
+ 11 │         fmt.Println(x)
+    ╰────
+  help: consider using a different name
+
+
+  ⚠ `i` shadows a variable from an outer scope
+    ╭─[shadow.sop:15:3]
+ 14 │     for i := 0; i < 10; i++ {
+ 15 │         i := i * 2 // should warn: shadows loop variable i
+    ·         ┬
+    ·         ╰── shadows outer variable
+ 16 │         fmt.Println(i)
+    ╰────
+  help: consider using a different name
+
+
+  ⚠ `x` shadows a variable from an outer scope
+    ╭─[shadow.sop:19:12]
+ 18 │ 
+ 19 │     f := func(x int) int {
+    ·               ┬
+    ·               ╰── shadows outer variable
+ 20 │         b := 2
+    ╰────
+  help: consider using a different name
