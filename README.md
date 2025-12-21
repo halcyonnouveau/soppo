@@ -17,7 +17,7 @@ Soppo is not production ready.
 - **Go interop:** Use any Go library directly
 - **Batteries included:** LSP, formatter, test runner with doctests
 
-See [docs/design.md](docs/design.md) for language design.
+See [docs/guide.md](docs/guide.md) for the language guide.
 
 ## Installation
 

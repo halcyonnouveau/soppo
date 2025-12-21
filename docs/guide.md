@@ -1,6 +1,6 @@
-# Soppo Language Design
+# Soppo Language Guide
 
-This document describes the design of Soppo - the principles that guide development and the features it provides. It's intended for contributors and anyone wanting to understand why Soppo works the way it does.
+This guide covers Soppo's features, syntax, and tooling. It's intended for anyone learning or using the language.
 
 ## Principles
 
