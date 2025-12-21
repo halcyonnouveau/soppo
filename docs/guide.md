@@ -345,3 +345,12 @@ sop test -v                      # Verbose output
 sop test -run TestAdd            # Filter by pattern
 sop test -- -cover               # Pass flags to go test
 ```
+
+## Linting
+
+Sniff catches common issues and suggests improvements. See [sniff.md](sniff.md) for configuration and available rules.
+
+```bash
+sop sniff                        # Lint all project files
+sop sniff --disable try_operator # Disable specific rules
+```
