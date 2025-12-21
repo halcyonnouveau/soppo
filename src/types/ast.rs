@@ -83,10 +83,27 @@ pub enum TypedExprKind {
         ty: Type,
     },
 
+    /// Struct field access: `point.x`, `person.name`
     Field {
         expr: Box<TypedExpr>,
         field: String,
         span: Span,
+    },
+
+    /// Package member access: `fmt.Println`, `helpers.Point`
+    PackageMember {
+        /// The package alias/name
+        pkg: String,
+        /// The member being accessed (function, type, constant)
+        member: String,
+    },
+
+    /// Enum variant access: `Option.Some`, `Colour.Red`
+    EnumVariant {
+        /// The full enum type (with type args if applicable)
+        enum_ty: Type,
+        /// The variant name
+        variant: String,
     },
 
     Index {

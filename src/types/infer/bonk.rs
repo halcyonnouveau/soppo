@@ -442,6 +442,14 @@ fn bonk_expr(expr: &mut TypedExpr, subs: &HashMap<i32, Type>) {
             bonk_type(ty, subs);
         }
 
+        TypedExprKind::PackageMember { .. } => {
+            // No child expressions to bonk
+        }
+
+        TypedExprKind::EnumVariant { enum_ty, .. } => {
+            bonk_type(enum_ty, subs);
+        }
+
         TypedExprKind::Field { expr, .. } => {
             bonk_expr(expr, subs);
         }

@@ -11,6 +11,25 @@ use crate::types::ctx::TypeDefKind;
 use crate::types::sym::{SymbolInfo, SymbolKind};
 use crate::types::ty::Nullability;
 
+/// Result of inferring a field access expression.
+/// Used internally to distinguish package member, enum variant, and regular field access.
+enum FieldAccessResult {
+    /// Package member access: `fmt.Println`, `helpers.Point`
+    PackageMember {
+        pkg: String,
+        member: String,
+        ty: Type,
+    },
+    /// Enum variant access: `Option.Some`, `Colour.Red`
+    EnumVariant {
+        enum_ty: Type,
+        variant: String,
+        ty: Type,
+    },
+    /// Regular field/method access on a struct: `point.x`, `user.Name()`
+    Field { ty: Type },
+}
+
 impl Infer {
     /// Infer the type of an expression and return a TypedExpr.
     ///
@@ -451,19 +470,10 @@ impl Infer {
                                 || Type::is_builtin_type(name)
                                 || Self::is_slice_type_conversion(name)
                         }
-                        TypedExprKind::Field { expr, field, .. } => {
+                        TypedExprKind::PackageMember { pkg, member } => {
                             // pkg.Type(value) case
-                            if let TypedExprKind::Ident(pkg_name) = &expr.kind {
-                                if self.is_imported_package(pkg_name) {
-                                    // Check if it's a type in the package
-                                    self.lookup_soppo_type(pkg_name, field).is_some()
-                                        || self.lookup_go_type(pkg_name, field).is_some()
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
+                            self.lookup_soppo_type(pkg, member).is_some()
+                                || self.lookup_go_type(pkg, member).is_some()
                         }
                         _ => false,
                     }
@@ -474,19 +484,14 @@ impl Infer {
                     let (_, typed_value, _) = typed_args.into_iter().next().unwrap();
                     let target_ty = match &typed_func.kind {
                         TypedExprKind::Ident(name) => Type::simple(name),
-                        TypedExprKind::Field { expr, field, .. } => {
-                            if let TypedExprKind::Ident(pkg_name) = &expr.kind {
-                                // Look up the actual type from the package
-                                if let Some((ty, ..)) = self.lookup_soppo_type(pkg_name, field) {
-                                    ty
-                                } else if let Some((ty, ..)) = self.lookup_go_type(pkg_name, field)
-                                {
-                                    ty
-                                } else {
-                                    Type::simple(&format!("{}.{}", pkg_name, field))
-                                }
+                        TypedExprKind::PackageMember { pkg, member } => {
+                            // Look up the actual type from the package
+                            if let Some((ty, ..)) = self.lookup_soppo_type(pkg, member) {
+                                ty
+                            } else if let Some((ty, ..)) = self.lookup_go_type(pkg, member) {
+                                ty
                             } else {
-                                Type::error()
+                                Type::simple(&format!("{}.{}", pkg, member))
                             }
                         }
                         _ => Type::error(),
@@ -562,19 +567,30 @@ impl Infer {
                 field,
                 span: field_span,
             } => {
-                // Infer field returns the result type - we wrap in TypedExpr
+                // Infer field access - returns a FieldAccessResult indicating the kind
                 let typed_inner = self.infer_expr(field_expr);
-                let result_ty = self.infer_field_type(&typed_inner, field, field_span)?;
+                let result = self.infer_field_access(&typed_inner, field, field_span)?;
 
-                Ok(TypedExpr::new(
-                    TypedExprKind::Field {
-                        expr: Box::new(typed_inner),
-                        field: field.clone(),
-                        span: *field_span,
-                    },
-                    result_ty,
-                    span,
-                ))
+                let (kind, result_ty) = match result {
+                    FieldAccessResult::PackageMember { pkg, member, ty } => {
+                        (TypedExprKind::PackageMember { pkg, member }, ty)
+                    }
+                    FieldAccessResult::EnumVariant {
+                        enum_ty,
+                        variant,
+                        ty,
+                    } => (TypedExprKind::EnumVariant { enum_ty, variant }, ty),
+                    FieldAccessResult::Field { ty } => (
+                        TypedExprKind::Field {
+                            expr: Box::new(typed_inner),
+                            field: field.clone(),
+                            span: *field_span,
+                        },
+                        ty,
+                    ),
+                };
+
+                Ok(TypedExpr::new(kind, result_ty, span))
             }
 
             ExprKind::Index {
@@ -967,6 +983,8 @@ impl Infer {
                 // struct_ty and expr_ty are the same
                 let result_ty = if let Some((pkg_name, type_name)) = ty.name.split_once('.') {
                     // Qualified type: pkg.Type
+                    self.mark_import_used(pkg_name);
+
                     Type::Con {
                         sym: Symbol {
                             module: ModuleId::new(pkg_name),
@@ -1386,7 +1404,12 @@ impl Infer {
     }
 
     /// Infer the type of a field access expression (returns just the Type)
-    fn infer_field_type(&mut self, expr: &TypedExpr, field: &str, span: &Span) -> Result<Type> {
+    fn infer_field_access(
+        &mut self,
+        expr: &TypedExpr,
+        field: &str,
+        span: &Span,
+    ) -> Result<FieldAccessResult> {
         // Check if this is accessing something from an imported package
         // e.g., fmt.Println, strings.HasPrefix, or helpers.Add (sop: import)
         if let TypedExprKind::Ident(pkg_name) = &expr.kind
@@ -1430,7 +1453,11 @@ impl Infer {
                             go_location: None,
                         },
                     );
-                    return Ok(func_ty);
+                    return Ok(FieldAccessResult::PackageMember {
+                        pkg: pkg_name.clone(),
+                        member: field.to_string(),
+                        ty: func_ty,
+                    });
                 }
 
                 // Try to look up as a type
@@ -1450,7 +1477,11 @@ impl Infer {
                             go_location: None,
                         },
                     );
-                    return Ok(ty);
+                    return Ok(FieldAccessResult::PackageMember {
+                        pkg: pkg_name.clone(),
+                        member: field.to_string(),
+                        ty,
+                    });
                 }
 
                 // Try to look up as a constant
@@ -1470,7 +1501,11 @@ impl Infer {
                             go_location: None,
                         },
                     );
-                    return Ok(ty);
+                    return Ok(FieldAccessResult::PackageMember {
+                        pkg: pkg_name.clone(),
+                        member: field.to_string(),
+                        ty,
+                    });
                 }
 
                 // Not found
@@ -1497,7 +1532,11 @@ impl Infer {
                         go_location,
                     },
                 );
-                return Ok(func_ty);
+                return Ok(FieldAccessResult::PackageMember {
+                    pkg: pkg_name.clone(),
+                    member: field.to_string(),
+                    ty: func_ty,
+                });
             }
             // Try to look up as a type or constant
             if let Some((ty, go_location, doc_comment)) = self.lookup_go_type(pkg_name, field) {
@@ -1514,7 +1553,11 @@ impl Infer {
                         go_location,
                     },
                 );
-                return Ok(ty);
+                return Ok(FieldAccessResult::PackageMember {
+                    pkg: pkg_name.clone(),
+                    member: field.to_string(),
+                    ty,
+                });
             }
             // Couldn't find it - error
             return Err(SoppoError::Type {
@@ -1567,19 +1610,19 @@ impl Infer {
 
                 if variant_name == field {
                     // Build the return type with type arguments: Option[int]
-                    let return_ty = Type::generic(type_name, type_args.clone());
+                    let enum_ty = Type::generic(type_name, type_args.clone());
 
-                    return match variant {
+                    let result_ty = match variant {
                         EnumVariant::Unit { .. } => {
                             // Unit variant with type args: Option[int].None
-                            Ok(return_ty)
+                            enum_ty.clone()
                         }
                         EnumVariant::Single { ty, .. } => {
                             // Single variant: Option[int].Some -> fn(int) -> Option[int]
                             let ty_simple = Type::simple(&ty.name);
                             let param_ty =
                                 Self::instantiate_generic_type(&ty_simple, &generic_subst);
-                            Ok(Type::fun(vec![param_ty], return_ty))
+                            Type::fun(vec![param_ty], enum_ty.clone())
                         }
                         EnumVariant::Struct { fields, .. } => {
                             // Struct variant with type args
@@ -1590,9 +1633,15 @@ impl Infer {
                                     Self::instantiate_generic_type(&ty_simple, &generic_subst)
                                 })
                                 .collect();
-                            Ok(Type::fun(param_tys, return_ty))
+                            Type::fun(param_tys, enum_ty.clone())
                         }
                     };
+
+                    return Ok(FieldAccessResult::EnumVariant {
+                        enum_ty,
+                        variant: field.to_string(),
+                        ty: result_ty,
+                    });
                 }
             }
 
@@ -1616,8 +1665,8 @@ impl Infer {
                         .map(|g| (g.name.clone(), self.fresh_ty_var()))
                         .collect();
 
-                    // Build the return type - use generic type for generic enums
-                    let return_ty = if type_def.generics.is_empty() {
+                    // Build the enum type - use generic type for generic enums
+                    let enum_ty = if type_def.generics.is_empty() {
                         Type::simple(type_name)
                     } else {
                         // Generic enum: return Type::generic with fresh type vars
@@ -1639,12 +1688,12 @@ impl Infer {
                         };
 
                         if variant_name == field {
-                            // Found the variant
-                            return match variant {
+                            // Found the variant - determine result type
+                            let result_ty = match variant {
                                 EnumVariant::Unit { .. } => {
                                     // Unit variant: return the enum type
                                     // For generic enums, the type vars will be inferred from context
-                                    Ok(return_ty)
+                                    enum_ty.clone()
                                 }
                                 EnumVariant::Single { ty, .. } => {
                                     // Single variant: returns a constructor function
@@ -1653,7 +1702,7 @@ impl Infer {
                                     let ty_simple = Type::simple(&ty.name);
                                     let param_ty =
                                         Self::instantiate_generic_type(&ty_simple, &generic_subst);
-                                    Ok(Type::fun(vec![param_ty], return_ty))
+                                    Type::fun(vec![param_ty], enum_ty.clone())
                                 }
                                 EnumVariant::Struct { fields, .. } => {
                                     // Struct variant: returns a constructor function
@@ -1668,21 +1717,29 @@ impl Infer {
                                             )
                                         })
                                         .collect();
-                                    Ok(Type::fun(param_tys, return_ty))
+                                    Type::fun(param_tys, enum_ty.clone())
                                 }
                             };
+
+                            return Ok(FieldAccessResult::EnumVariant {
+                                enum_ty,
+                                variant: field.to_string(),
+                                ty: result_ty,
+                            });
                         }
                     }
                 }
                 // Not an enum, but still a type - might be for other purposes
-                return Ok(Type::simple(type_name));
+                return Ok(FieldAccessResult::Field {
+                    ty: Type::simple(type_name),
+                });
             }
         }
 
         // Otherwise it's a regular field access
         let expr_ty = expr.ty.clone();
         if expr_ty.is_error() {
-            return Ok(Type::error());
+            return Ok(FieldAccessResult::Field { ty: Type::error() });
         }
         let expr_ty = self.substitute(expr_ty);
 
@@ -1718,7 +1775,9 @@ impl Infer {
             && field == "Error"
         {
             // error.Error() returns string
-            return Ok(Type::fun(vec![], Type::simple("string")));
+            return Ok(FieldAccessResult::Field {
+                ty: Type::fun(vec![], Type::simple("string")),
+            });
         }
 
         // Look up the struct type to validate field access
@@ -1754,7 +1813,7 @@ impl Infer {
         if let (Some(struct_name), Some(module_name)) = (&struct_name, &module_name)
             && let Some(field_ty) = self.lookup_go_struct_field(module_name, struct_name, field)
         {
-            return Ok(field_ty);
+            return Ok(FieldAccessResult::Field { ty: field_ty });
         }
 
         // Check if this is a method call on a Go package type
@@ -1775,7 +1834,7 @@ impl Infer {
                     go_location,
                 },
             );
-            return Ok(method_ty);
+            return Ok(FieldAccessResult::Field { ty: method_ty });
         }
 
         // Check if this is a method call on a type from another Soppo module
@@ -1808,7 +1867,7 @@ impl Infer {
                         go_location: None,
                     },
                 );
-                return Ok(method_ty);
+                return Ok(FieldAccessResult::Field { ty: method_ty });
             }
         }
 
@@ -1845,7 +1904,9 @@ impl Infer {
                             if let Some(fields) = v_fields
                                 && let Some((_, field_ty)) = fields.iter().find(|(f, _)| f == field)
                             {
-                                return Ok(field_ty.clone());
+                                return Ok(FieldAccessResult::Field {
+                                    ty: field_ty.clone(),
+                                });
                             }
                             return Err(SoppoError::Type {
                                 message: format!(
@@ -1880,7 +1941,9 @@ impl Infer {
                             go_location: None,
                         },
                     );
-                    return Ok(field_ty.clone());
+                    return Ok(FieldAccessResult::Field {
+                        ty: field_ty.clone(),
+                    });
                 } else {
                     // Field not found in struct - check if it's a method first
                     if let Some(method) = self.global_state.lookup_method(struct_name, field) {
@@ -1907,14 +1970,16 @@ impl Infer {
                                 go_location: None,
                             },
                         );
-                        return Ok(method_ty);
+                        return Ok(FieldAccessResult::Field { ty: method_ty });
                     }
 
                     // Not a method - check if it might be a UFCS function call
                     // If we can find a function with this name, return a type variable
                     // and let the Call handler deal with it
                     if self.global_state.lookup_function(field).is_some() {
-                        return Ok(self.fresh_ty_var());
+                        return Ok(FieldAccessResult::Field {
+                            ty: self.fresh_ty_var(),
+                        });
                     }
 
                     return Err(SoppoError::Type {
@@ -1947,13 +2012,15 @@ impl Infer {
                         go_location: None,
                     },
                 );
-                return Ok(method_ty);
+                return Ok(FieldAccessResult::Field { ty: method_ty });
             }
         }
 
         // If we can't determine the struct type, return a type variable
         // (this allows field access on generic/unknown types)
-        Ok(self.fresh_ty_var())
+        Ok(FieldAccessResult::Field {
+            ty: self.fresh_ty_var(),
+        })
     }
 
     /// Infer the type of a function call expression (returns just the Type)
@@ -1968,51 +2035,92 @@ impl Infer {
         let arg_ty = |i: usize| args[i].1.ty.clone();
         let arg_span = |i: usize| args[i].1.span;
 
-        // Handle generic unit variant calls: Option.None[int]
-        // Must be handled BEFORE infer_expr(func) since bare generic unit variants are invalid
-        if let TypedExprKind::Field {
-            expr: type_expr,
-            field: variant_name,
-            ..
+        // Handle generic enum variant calls: Option.None[int](), Result.Ok[int, string](1)
+        if let TypedExprKind::EnumVariant {
+            enum_ty,
+            variant: variant_name,
         } = &func.kind
-            && let TypedExprKind::Ident(type_name) = &type_expr.kind
-            && let Some(type_def) = self.global_state.lookup_type(type_name).cloned()
-            && let TypeDefKind::Enum { variants } = &type_def.kind
         {
-            // Check if this is a unit variant of a generic enum
-            for variant in variants {
-                if let EnumVariant::Unit { ident, .. } = variant
-                    && ident.name == *variant_name
+            // Extract the enum type name
+            if let Type::Con { sym, .. } = enum_ty {
+                let type_name = &sym.name;
+                if let Some(type_def) = self.global_state.lookup_type(type_name).cloned()
+                    && let TypeDefKind::Enum { variants } = &type_def.kind
                     && !type_def.generics.is_empty()
                 {
-                    // This is a generic unit variant call
-                    if type_args.is_empty() {
-                        return Err(SoppoError::GenericUnitVariant {
-                            enum_name: type_name.clone(),
-                            variant_name: variant_name.clone(),
-                            span: func.span,
-                        });
-                    }
+                    // Validate type arg constraints if provided
+                    if !type_args.is_empty() {
+                        for (generic_param, type_arg) in
+                            type_def.generics.iter().zip(type_args.iter())
+                        {
+                            // Validate the type argument is a real type
+                            self.validate_type_arg(type_arg)?;
 
-                    // Validate type arg constraints
-                    for (generic_param, type_arg) in type_def.generics.iter().zip(type_args.iter())
-                    {
-                        // Validate the type argument is a real type
-                        self.validate_type_arg(type_arg)?;
-
-                        let concrete_ty = self.resolve_type(type_arg);
-                        if !generic_param.satisfies(&concrete_ty) {
-                            return Err(SoppoError::ConstraintNotSatisfied {
-                                ty: concrete_ty.to_string(),
-                                constraint: generic_param.constraint.clone(),
-                                hint: Self::constraint_hint(&generic_param.constraint),
-                                span: type_arg.span,
-                            });
+                            let concrete_ty = self.resolve_type(type_arg);
+                            if !generic_param.satisfies(&concrete_ty) {
+                                return Err(SoppoError::ConstraintNotSatisfied {
+                                    ty: concrete_ty.to_string(),
+                                    constraint: generic_param.constraint.clone(),
+                                    hint: Self::constraint_hint(&generic_param.constraint),
+                                    span: type_arg.span,
+                                });
+                            }
                         }
                     }
 
-                    // Return the enum type - args are handled by codegen
-                    return Ok(Type::simple(type_name));
+                    // Check which variant this is
+                    for variant in variants {
+                        let v_name = match variant {
+                            EnumVariant::Unit { ident, .. } => &ident.name,
+                            EnumVariant::Single { ident, .. } => &ident.name,
+                            EnumVariant::Struct { ident, .. } => &ident.name,
+                        };
+
+                        if v_name == variant_name {
+                            // Build the return type with explicit type args if provided
+                            let return_ty = if !type_args.is_empty() {
+                                let resolved_args: Vec<Type> =
+                                    type_args.iter().map(|ta| self.resolve_type(ta)).collect();
+                                Type::generic(type_name, resolved_args)
+                            } else {
+                                enum_ty.clone()
+                            };
+
+                            return match variant {
+                                EnumVariant::Unit { .. } => {
+                                    // Unit variant call: Option.None[int]()
+                                    if !args.is_empty() {
+                                        self.emit_error(SoppoError::Type {
+                                            message: format!(
+                                                "Unit variant `{}.{}` takes no arguments",
+                                                type_name, variant_name
+                                            ),
+                                            span: expr_span,
+                                        });
+                                    }
+                                    Ok(return_ty)
+                                }
+                                EnumVariant::Single { .. } => {
+                                    // Single variant call: Result.Ok[int, string](1)
+                                    if args.len() != 1 {
+                                        self.emit_error(SoppoError::Type {
+                                            message: format!(
+                                                "Variant `{}.{}` requires exactly 1 argument",
+                                                type_name, variant_name
+                                            ),
+                                            span: expr_span,
+                                        });
+                                    }
+                                    Ok(return_ty)
+                                }
+                                EnumVariant::Struct { .. } => {
+                                    // Struct variant should use struct literal syntax
+                                    // This path shouldn't normally be hit
+                                    Ok(return_ty)
+                                }
+                            };
+                        }
+                    }
                 }
             }
         }
@@ -2385,31 +2493,11 @@ impl Infer {
         }
 
         // Check if this is a call on an imported package: pkg.Func(args) or pkg.Type(value)
-        if let TypedExprKind::Field {
-            expr: pkg_expr,
-            field: name,
-            span: field_span,
+        if let TypedExprKind::PackageMember {
+            pkg: pkg_name,
+            member: name,
         } = &func.kind
-            && let TypedExprKind::Ident(pkg_name) = &pkg_expr.kind
-            && self.is_imported_package(pkg_name)
         {
-            // Record symbol for the package name itself (e.g., "helpers" in helpers.Add)
-            // Go-to-definition on the package name goes to the import statement
-            if let Some((import_path, import_span)) = self.get_import_info(pkg_name) {
-                self.record_symbol(
-                    pkg_expr.span,
-                    SymbolInfo {
-                        name: pkg_name.to_string(),
-                        ty: Type::simple(import_path),
-                        definition_span: Some(import_span),
-                        name_span: None,
-                        kind: SymbolKind::Package,
-                        doc_comment: Some(format!("import \"{}\"", import_path)),
-                        go_location: None,
-                    },
-                );
-            }
-
             // For Soppo imports, look up the function from GlobalCtxt
             if self.is_soppo_import(pkg_name) {
                 // Mark the import as used
@@ -2420,7 +2508,7 @@ impl Infer {
                 {
                     // Record symbol for go-to-definition
                     self.record_symbol(
-                        *field_span,
+                        func.span,
                         SymbolInfo {
                             name: name.clone(),
                             ty: func_ty.clone(),
@@ -2484,7 +2572,7 @@ impl Infer {
                 {
                     // Record symbol for go-to-definition
                     self.record_symbol(
-                        *field_span,
+                        func.span,
                         SymbolInfo {
                             name: name.clone(),
                             ty: ty.clone(),
@@ -2522,7 +2610,7 @@ impl Infer {
             if let Some((ty, go_location, doc_comment)) = self.lookup_go_type(pkg_name, name) {
                 // Record symbol for go-to-definition (with Go source location)
                 self.record_symbol(
-                    *field_span,
+                    func.span,
                     SymbolInfo {
                         name: name.clone(),
                         ty: ty.clone(),

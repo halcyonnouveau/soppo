@@ -152,12 +152,70 @@ impl Codegen {
                 self.emit(type_to_go_string(ty));
             }
 
+            TypedExprKind::PackageMember { pkg, member } => {
+                // Package member access: fmt.Println → fmt.Println
+                self.emit(format!("{}.{}", pkg, member));
+            }
+
+            TypedExprKind::EnumVariant { enum_ty, variant } => {
+                // Enum variant access
+                // Note: If this EnumVariant is the func of a Call expression,
+                // the Call will add type args and arguments. We only add type args
+                // here if they're fully resolved (not type variables), which indicates
+                // this is a standalone variant usage like `Option[int].None`.
+                if let Type::Con {
+                    sym,
+                    args: type_args,
+                    ..
+                } = enum_ty
+                {
+                    let type_name = &sym.name;
+                    let is_local = self.global_state.is_local_enum(type_name);
+                    let pkg_name = if sym.module.0.is_empty() {
+                        None
+                    } else {
+                        Some(&sym.module.0)
+                    };
+
+                    // Check if all type args are resolved (no type variables)
+                    let type_args_resolved = type_args.iter().all(|t| !t.contains_var());
+
+                    if is_local {
+                        // Local enum variant: Colour.Red → ColourRed
+                        self.emit(format!("{}{}", type_name, variant));
+
+                        // Add type args for generic enums only if fully resolved
+                        // If unresolved, this EnumVariant is part of a Call which handles type args
+                        if !type_args.is_empty() && type_args_resolved {
+                            self.emit("[");
+                            for (i, ty) in type_args.iter().enumerate() {
+                                if i > 0 {
+                                    self.emit(", ");
+                                }
+                                self.emit(type_to_go_string(ty));
+                            }
+                            self.emit("]()");
+                        }
+                    } else if let Some(pkg) = pkg_name {
+                        // Cross-package enum: types.Status.Active → types.StatusActive
+                        self.emit(format!("{}.{}{}", pkg, type_name, variant));
+                    } else {
+                        // Fallback
+                        self.emit(format!("{}{}", type_name, variant));
+                    }
+                } else {
+                    // Fallback for non-Con types
+                    self.emit(variant);
+                }
+            }
+
             TypedExprKind::Field {
                 expr: base_expr,
                 field,
                 ..
             } => {
                 // Check if this is a generic enum variant with explicit type args
+                // (base is TypeInst like Option[int])
                 if let TypedExprKind::TypeInst { ty } = &base_expr.kind
                     && let Type::Con {
                         sym,
@@ -181,41 +239,12 @@ impl Codegen {
                     return;
                 }
 
-                // Check if this is an enum constructor (local)
-                if let TypedExprKind::Ident(type_name) = &base_expr.kind
-                    && self.global_state.is_local_enum(type_name)
-                {
-                    // Enum values: Colour.Red → ColourRed
-                    self.emit(format!("{}{}", type_name, field));
-                    // Check for inferred type args from the expression's type
-                    if let Type::Con {
-                        args: type_args, ..
-                    } = &expr.ty
-                        && !type_args.is_empty()
-                    {
-                        self.emit("[");
-                        for (i, ty) in type_args.iter().enumerate() {
-                            if i > 0 {
-                                self.emit(", ");
-                            }
-                            self.emit(type_to_go_string(ty));
-                        }
-                        self.emit("]()");
-                    }
-                    return;
-                }
-
-                // Check for cross-package enum: pkg.Type.Variant
-                if let TypedExprKind::Field {
-                    expr: inner_expr,
-                    field: type_name,
-                    ..
-                } = &base_expr.kind
-                    && let TypedExprKind::Ident(pkg_name) = &inner_expr.kind
-                    && self.global_state.is_soppo_enum(pkg_name, type_name)
+                // Check for cross-package enum via PackageMember: pkg.Type.Variant
+                if let TypedExprKind::PackageMember { pkg, member } = &base_expr.kind
+                    && self.global_state.is_soppo_enum(pkg, member)
                 {
                     // Cross-package enum: types.Status.Active → types.StatusActive
-                    self.emit(format!("{}.{}{}", pkg_name, type_name, field));
+                    self.emit(format!("{}.{}{}", pkg, member, field));
                     return;
                 }
 

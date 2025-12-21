@@ -1,0 +1,16 @@
+package main
+
+import (
+	"fmt"
+	"github.com/test/cross_package_struct_literal/helpers"
+)
+
+func main() {
+	// Struct literal with cross-package type should mark import as used
+	p := helpers.Point{X: 1, Y: 2}
+	fmt.Println(p)
+
+	// Cross-package enum variant with struct literal
+	r := helpers.Shape.Rectangle{TopLeft: helpers.Point{X: 10, Y: 20}}
+	fmt.Println(r)
+}

@@ -92,6 +92,18 @@ impl Type {
         matches!(self, Type::Error)
     }
 
+    /// Check if this type contains any unresolved type variables
+    pub fn contains_var(&self) -> bool {
+        match self {
+            Type::Var(_) => true,
+            Type::Con { args, .. } => args.iter().any(|t| t.contains_var()),
+            Type::Func { args, ret, .. } => {
+                args.iter().any(|(_, t)| t.contains_var()) || ret.contains_var()
+            }
+            Type::Never | Type::Error => false,
+        }
+    }
+
     /// Create a type variable
     pub fn var(id: i32) -> Self {
         Type::Var(id)

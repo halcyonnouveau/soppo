@@ -1,0 +1,11 @@
+package helpers
+
+type Point struct {
+	X int
+	Y int
+}
+
+type Shape enum {
+	Circle struct { Radius int }
+	Rectangle struct { TopLeft Point }
+}
