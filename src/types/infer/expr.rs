@@ -210,12 +210,12 @@ impl Infer {
                     ));
                 }
 
-                // Also check if it's a type name (for type conversions like MyType(value))
-                let is_type_name = self.global_state.has_type(name)
-                    || Type::is_builtin_type(name)
+                // Check if it's a builtin type/function (don't error on those)
+                let is_builtin_or_type = self.global_state.has_type(name)
+                    || Type::is_builtin(name)
                     || Self::is_slice_type_conversion(name);
 
-                if !is_type_name {
+                if !is_builtin_or_type {
                     // Variable not found - emit error but return TypedExpr with Ident kind
                     self.emit_error(SoppoError::UndefinedVariable {
                         name: name.clone(),
@@ -429,7 +429,7 @@ impl Infer {
                 type_args,
                 args,
             } => {
-                // Infer call returns the result type - we wrap in a placeholder TypedExpr
+                // Infer the function and arguments first
                 let typed_func = self.infer_expr(func);
                 let typed_args: Vec<TypedCallArg> = args
                     .iter()
@@ -442,7 +442,67 @@ impl Infer {
                 let type_arg_types: Vec<Type> =
                     type_args.iter().map(|ta| self.resolve_type(ta)).collect();
 
-                // Call the type inference logic (which does unification)
+                // Check if this is a type conversion: TypeName(value)
+                // Type conversions have exactly 1 argument and func is a type name
+                let is_type_conversion = args.len() == 1 && type_args.is_empty() && {
+                    match &typed_func.kind {
+                        TypedExprKind::Ident(name) => {
+                            self.global_state.has_type(name)
+                                || Type::is_builtin_type(name)
+                                || Self::is_slice_type_conversion(name)
+                        }
+                        TypedExprKind::Field { expr, field, .. } => {
+                            // pkg.Type(value) case
+                            if let TypedExprKind::Ident(pkg_name) = &expr.kind {
+                                if self.is_imported_package(pkg_name) {
+                                    // Check if it's a type in the package
+                                    self.lookup_soppo_type(pkg_name, field).is_some()
+                                        || self.lookup_go_type(pkg_name, field).is_some()
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    }
+                };
+
+                if is_type_conversion {
+                    // Get the target type and value
+                    let (_, typed_value, _) = typed_args.into_iter().next().unwrap();
+                    let target_ty = match &typed_func.kind {
+                        TypedExprKind::Ident(name) => Type::simple(name),
+                        TypedExprKind::Field { expr, field, .. } => {
+                            if let TypedExprKind::Ident(pkg_name) = &expr.kind {
+                                // Look up the actual type from the package
+                                if let Some((ty, ..)) = self.lookup_soppo_type(pkg_name, field) {
+                                    ty
+                                } else if let Some((ty, ..)) = self.lookup_go_type(pkg_name, field)
+                                {
+                                    ty
+                                } else {
+                                    Type::simple(&format!("{}.{}", pkg_name, field))
+                                }
+                            } else {
+                                Type::error()
+                            }
+                        }
+                        _ => Type::error(),
+                    };
+
+                    return Ok(TypedExpr::new(
+                        TypedExprKind::TypeConversion {
+                            target_ty: target_ty.clone(),
+                            value: Box::new(typed_value),
+                        },
+                        target_ty,
+                        span,
+                    ));
+                }
+
+                // Not a type conversion - call the regular type inference logic
                 let result_ty = self.infer_call_type(&typed_func, type_args, &typed_args, span)?;
 
                 Ok(TypedExpr::new(
@@ -452,6 +512,47 @@ impl Infer {
                         args: typed_args,
                     },
                     result_ty,
+                    span,
+                ))
+            }
+
+            ExprKind::TypeInst { ty, type_args } => {
+                // Type instantiation: Option[int] for accessing generic type members
+                // Resolve the base type name from the expression (handles nested paths)
+                fn extract_type_path(expr: &Expr) -> Option<String> {
+                    match &expr.kind {
+                        ExprKind::Ident(name) => Some(name.clone()),
+                        ExprKind::Field { expr, field, .. } => {
+                            extract_type_path(expr).map(|base| format!("{}.{}", base, field))
+                        }
+                        _ => None,
+                    }
+                }
+
+                let type_name = extract_type_path(ty).ok_or_else(|| SoppoError::Type {
+                    message: format!(
+                        "Expected type name in type instantiation, got {:?}",
+                        ty.kind
+                    ),
+                    span,
+                })?;
+
+                // Validate type arguments exist
+                for ta in type_args {
+                    if let Err(e) = self.validate_type_arg(ta) {
+                        self.emit_error(e);
+                    }
+                }
+
+                let type_arg_types: Vec<Type> =
+                    type_args.iter().map(|ta| self.resolve_type(ta)).collect();
+                let instantiated_ty = Type::generic(&type_name, type_arg_types);
+
+                Ok(TypedExpr::new(
+                    TypedExprKind::TypeInst {
+                        ty: instantiated_ty.clone(),
+                    },
+                    instantiated_ty,
                     span,
                 ))
             }

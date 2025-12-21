@@ -1492,6 +1492,18 @@ impl Formatter {
                 result.push(')');
                 result
             }
+            ExprKind::TypeInst { ty, type_args } => {
+                // Type instantiation: Option[int]
+                let mut result = self.format_expr(ty);
+                if !type_args.is_empty() {
+                    result.push('[');
+                    let targs: Vec<_> =
+                        type_args.iter().map(Self::format_type_annotation).collect();
+                    result.push_str(&targs.join(", "));
+                    result.push(']');
+                }
+                result
+            }
             ExprKind::Field { expr, field, .. } => {
                 format!("{}.{}", self.format_expr(expr), field)
             }

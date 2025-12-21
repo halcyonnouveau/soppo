@@ -6,6 +6,6 @@ type Option[T any] enum {
 }
 
 func main() {
-	x := Option.None[String]
+	x := Option[String].None
 	_ = x
 }

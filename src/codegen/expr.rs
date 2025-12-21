@@ -138,31 +138,44 @@ impl Codegen {
                 self.emit(")");
             }
 
+            TypedExprKind::TypeConversion { target_ty, value } => {
+                // Type conversion: int(x), []byte(s), pkg.Type(value)
+                self.emit(type_to_go_string(target_ty));
+                self.emit("(");
+                self.gen_expr(value);
+                self.emit(")");
+            }
+
+            TypedExprKind::TypeInst { ty } => {
+                // Type instantiation: Option[int] for accessing generic type members
+                // This is used as a base for field access, e.g., Option[int].None
+                self.emit(type_to_go_string(ty));
+            }
+
             TypedExprKind::Field {
                 expr: base_expr,
                 field,
                 ..
             } => {
                 // Check if this is a generic enum variant with explicit type args
-                if let TypedExprKind::Call {
-                    func,
-                    type_args,
-                    args,
-                } = &base_expr.kind
-                    && let TypedExprKind::Ident(type_name) = &func.kind
+                if let TypedExprKind::TypeInst { ty } = &base_expr.kind
+                    && let Type::Con {
+                        sym,
+                        args: type_args,
+                        ..
+                    } = ty
                     && !type_args.is_empty()
-                    && args.is_empty()
-                    && self.global_state.is_local_enum(type_name)
+                    && self.global_state.is_local_enum(&sym.name)
                 {
                     // Generic enum unit variant: Option[int].None → OptionNone[int]()
                     // Use constructor function which returns the interface type
-                    self.emit(format!("{}{}", type_name, field));
+                    self.emit(format!("{}{}", sym.name, field));
                     self.emit("[");
-                    for (i, ty) in type_args.iter().enumerate() {
+                    for (i, ty_arg) in type_args.iter().enumerate() {
                         if i > 0 {
                             self.emit(", ");
                         }
-                        self.emit(type_to_go_string(ty));
+                        self.emit(type_to_go_string(ty_arg));
                     }
                     self.emit("]()");
                     return;

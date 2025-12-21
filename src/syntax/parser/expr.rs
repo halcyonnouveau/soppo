@@ -239,13 +239,12 @@ impl Parser {
                         // treat as type instantiation. Type system will verify later.
                         let is_type_instantiation = !type_args.is_empty() && !looks_like_index;
                         if is_type_instantiation {
-                            // This is a type instantiation: expr[types] -> treat as call with no args
+                            // This is a type instantiation: Type[Args]
                             let expr_span = expr.span;
                             expr = Expr::new(
-                                ExprKind::Call {
-                                    func: Box::new(expr),
+                                ExprKind::TypeInst {
+                                    ty: Box::new(expr),
                                     type_args,
-                                    args: vec![],
                                 },
                                 self.merge_spans(expr_span, bracket_end_span),
                             );
@@ -403,12 +402,8 @@ impl Parser {
                             ExprKind::Field { expr, field, .. } => extract_type_info(expr)
                                 .map(|(base, args)| (format!("{}.{}", base, field), args)),
                             // Type instantiation: Option[int] -> ("Option", [int])
-                            ExprKind::Call {
-                                func,
-                                args,
-                                type_args,
-                            } if args.is_empty() && !type_args.is_empty() => {
-                                extract_type_info(func).map(|(name, _)| (name, type_args.clone()))
+                            ExprKind::TypeInst { ty, type_args } => {
+                                extract_type_info(ty).map(|(name, _)| (name, type_args.clone()))
                             }
                             _ => None,
                         }

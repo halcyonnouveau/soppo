@@ -67,6 +67,22 @@ pub enum TypedExprKind {
         args: Vec<TypedCallArg>,
     },
 
+    /// Type conversion: `int(x)`, `[]byte(s)`, `MyType(value)`
+    /// Distinct from Call - this converts a value to a target type.
+    TypeConversion {
+        /// The target type to convert to
+        target_ty: Type,
+        /// The value being converted
+        value: Box<TypedExpr>,
+    },
+
+    /// Type instantiation: `Option[int]` for accessing generic type members
+    /// Used when accessing variants like `Option[int].None`
+    TypeInst {
+        /// The instantiated type with resolved type arguments
+        ty: Type,
+    },
+
     Field {
         expr: Box<TypedExpr>,
         field: String,

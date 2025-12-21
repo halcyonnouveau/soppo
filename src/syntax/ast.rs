@@ -431,6 +431,15 @@ pub enum ExprKind {
         /// Value arguments in parentheses, e.g., `(1, 2, 3)` in `foo(1, 2, 3)`
         args: Vec<CallArg>,
     },
+    /// Type instantiation without call, e.g., `Option[int]` for accessing `.None`
+    /// Distinct from Call because there are no value arguments - this is purely
+    /// a type reference with type arguments, used for accessing generic type members.
+    TypeInst {
+        /// The base type expression (usually an Ident)
+        ty: Box<Expr>,
+        /// Type arguments, e.g., `[int, string]` in `Result[int, string]`
+        type_args: Vec<TypeAnnotation>,
+    },
     Field {
         expr: Box<Expr>,
         field: String,

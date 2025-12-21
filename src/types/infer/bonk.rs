@@ -433,6 +433,15 @@ fn bonk_expr(expr: &mut TypedExpr, subs: &HashMap<i32, Type>) {
             }
         }
 
+        TypedExprKind::TypeConversion { target_ty, value } => {
+            bonk_type(target_ty, subs);
+            bonk_expr(value, subs);
+        }
+
+        TypedExprKind::TypeInst { ty } => {
+            bonk_type(ty, subs);
+        }
+
         TypedExprKind::Field { expr, .. } => {
             bonk_expr(expr, subs);
         }

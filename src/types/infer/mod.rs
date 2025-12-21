@@ -680,8 +680,8 @@ impl Infer {
                 nullable,
             } => {
                 // Set module if empty and this looks like a type from the package
-                // (not a built-in like int, string, etc.)
-                let is_builtin = Type::is_builtin_type(&name.name);
+                // (not a built-in like int, string, len, etc.)
+                let is_builtin = Type::is_builtin(&name.name);
 
                 // Don't set module on:
                 // - Builtin types (int, string, etc.)

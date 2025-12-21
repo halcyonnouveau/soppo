@@ -216,7 +216,7 @@ impl Type {
             .or_else(|| ast_ty.name.strip_prefix("[]"))
             .unwrap_or(&ast_ty.name);
 
-        let type_module = if Self::is_builtin_type(base_name) {
+        let type_module = if Self::is_builtin(base_name) {
             ModuleId::empty()
         } else if let Some(dot_idx) = base_name.find('.') {
             // Qualified name like "config.Config" - extract package
@@ -241,7 +241,7 @@ impl Type {
         }
     }
 
-    /// Check if a type name is a Go/Soppo built-in type
+    /// Check if a name is a Go/Soppo built-in type (not function)
     pub fn is_builtin_type(name: &str) -> bool {
         matches!(
             name,
@@ -266,8 +266,14 @@ impl Type {
                 | "complex128"
                 | "error"
                 | "any"
-                // fn
-                | "make"
+        )
+    }
+
+    /// Check if a name is a Go/Soppo built-in function
+    pub fn is_builtin_func(name: &str) -> bool {
+        matches!(
+            name,
+            "make"
                 | "new"
                 | "len"
                 | "cap"
@@ -283,6 +289,11 @@ impl Type {
                 | "imag"
                 | "close"
         )
+    }
+
+    /// Check if a name is a Go/Soppo built-in (type or function)
+    pub fn is_builtin(name: &str) -> bool {
+        Self::is_builtin_type(name) || Self::is_builtin_func(name)
     }
 
     /// Check if this type is nullable
