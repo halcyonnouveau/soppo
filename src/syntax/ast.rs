@@ -347,7 +347,7 @@ pub enum StmtKind {
     // stmt ? or stmt ? { handler } or stmt ? errName { handler }
     TryStmt {
         stmt: Box<Stmt>,
-        error_name: Option<String>,
+        error_name: Option<Ident>,
         handler: Option<Block>,
         try_span: Span,
     },

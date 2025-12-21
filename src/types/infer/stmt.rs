@@ -1538,15 +1538,21 @@ impl Infer {
                 // If handler present, infer it with error_name in scope
                 let typed_handler = if let Some(block) = handler {
                     self.push_scope();
-                    if let Some(name) = error_name {
-                        if let Err(e) =
-                            self.insert_var(name.clone(), Type::simple("error"), Some(stmt.span))
-                        {
+                    if let Some(ident) = error_name {
+                        if let Err(e) = self.insert_var(
+                            ident.name.clone(),
+                            Type::simple("error"),
+                            Some(ident.span),
+                        ) {
                             self.emit_error(e);
                         }
-                        self.set_nil_state(name.clone(), Nullability::NonNull);
+                        self.set_nil_state(ident.name.clone(), Nullability::NonNull);
                     }
                     let typed_block = self.infer_block(block);
+                    // Check for unused error variable before popping scope
+                    if let Err(e) = self.check_unused_vars_in_scope() {
+                        self.emit_error(e);
+                    }
                     self.pop_scope();
                     Some(typed_block)
                 } else {

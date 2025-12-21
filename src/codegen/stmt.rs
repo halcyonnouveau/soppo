@@ -1,5 +1,5 @@
 use super::{Codegen, type_to_go_string};
-use crate::syntax::{IntFormat, Literal};
+use crate::syntax::{Ident, IntFormat, Literal};
 use crate::types::Type;
 use crate::types::ast::{
     TypedArm, TypedBlock, TypedExpr, TypedExprKind, TypedFieldPattern, TypedPatternKind,
@@ -807,7 +807,7 @@ impl Codegen {
     fn gen_try_stmt(
         &mut self,
         stmt: &TypedStmt,
-        error_name: &Option<String>,
+        error_name: &Option<Ident>,
         handler: &Option<TypedBlock>,
         discard_count: usize,
         _discard_types: &[Type],
@@ -839,11 +839,11 @@ impl Codegen {
         self.emit(" != nil ");
         if let Some(handler_block) = handler {
             // Named error and handler
-            if let Some(name) = error_name {
+            if let Some(ident) = error_name {
                 self.emit("{\n");
                 self.indent();
                 self.emit_indent();
-                self.emit(name);
+                self.emit(&ident.name);
                 self.emit(" := ");
                 self.emit(&err_var);
                 self.emit("\n");

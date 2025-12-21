@@ -1,0 +1,15 @@
+package main
+
+import "errors"
+
+func connect() (string, error) {
+	return "", errors.New("connection failed")
+}
+
+func main() {
+	// Named error that is not used - should be compile error
+	result := connect() ? myErr {
+		return
+	}
+	_ = result
+}

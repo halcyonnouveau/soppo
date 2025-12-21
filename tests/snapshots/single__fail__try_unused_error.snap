@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::unused_variable
+
+  × Variable `myErr` is declared but not used
+    ╭─[try_unused_error.sop:11:24]
+ 10 │     // Named error that is not used - should be compile error
+ 11 │     result := connect() ? myErr {
+    ·                           ──┬──
+    ·                             ╰── unused variable
+ 12 │         return
+    ╰────
+  help: remove the variable, or use `_ = myErr` to suppress this error

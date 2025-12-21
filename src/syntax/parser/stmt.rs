@@ -39,8 +39,8 @@ impl Parser {
                 && self.peek_next_is(&Token::LBrace)
             {
                 // ? errName { block } form
-                let name = match self.advance() {
-                    Some((Token::Ident(name), _)) => name,
+                let ident = match self.advance() {
+                    Some((Token::Ident(name), span)) => Ident { name, span },
                     _ => {
                         return Err(SoppoError::Parse {
                             message: "expected identifier after `?`".to_string(),
@@ -49,7 +49,7 @@ impl Parser {
                     }
                 };
                 let block = self.parse_block()?;
-                (Some(name), Some(block))
+                (Some(ident), Some(block))
             } else {
                 // Simple ? form
                 (None, None)

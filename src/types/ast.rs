@@ -371,7 +371,7 @@ pub enum TypedStmtKind {
     /// stmt ? or stmt ? { handler }
     TryStmt {
         stmt: Box<TypedStmt>,
-        error_name: Option<String>,
+        error_name: Option<Ident>,
         handler: Option<TypedBlock>,
         try_span: Span,
         /// Number of non-error values to discard (computed, not Cell)
