@@ -160,9 +160,18 @@ pub fn build_project_to_disk(root: &Path, output_dir: Option<&Path>) -> Result<u
     Ok(count)
 }
 
-/// Compile a single source string
+/// Try to discover a project from the current working directory.
+/// Returns None if no go.mod is found (which is fine for simple scripts).
+fn discover_project() -> Option<Project> {
+    std::env::current_dir()
+        .ok()
+        .and_then(|cwd| Project::discover(&cwd).ok())
+}
+
+/// Compile a single source string.
+/// Automatically discovers project context from cwd for external module resolution.
 pub fn compile(source: &str, filename: &str) -> Result<String> {
-    let mut infer = Infer::new()?;
+    let mut infer = create_infer()?;
     let typed_file = parse_typecheck_to_typed(source, filename, &mut infer)?;
 
     let global_state = infer.into_global_state();
@@ -172,6 +181,14 @@ pub fn compile(source: &str, filename: &str) -> Result<String> {
     })?;
 
     Ok(codegen.output().to_string())
+}
+
+/// Create an Infer instance, auto-discovering project context if available.
+fn create_infer() -> Result<Infer> {
+    match discover_project() {
+        Some(proj) => Infer::with_project(proj),
+        None => Infer::new(),
+    }
 }
 
 /// Parse, typecheck, and build a TypedFile
@@ -243,23 +260,27 @@ pub fn compile_with_context(
     Ok((codegen.output().to_string(), global_state))
 }
 
-/// Type-check a single source string without generating code
+/// Type-check a single source string without generating code.
+/// Automatically discovers project context from cwd for external module resolution.
 pub fn typecheck(source: &str, filename: &str) -> Result<()> {
-    typecheck_with_symbols(source, filename).map(|_| ())
+    let mut infer = create_infer()?;
+    parse_and_typecheck(source, filename, &mut infer)?;
+    Ok(())
 }
 
 /// Type-check a single source string and return the symbol table.
 /// Used by the LSP for hover and go-to-definition.
 pub fn typecheck_with_symbols(source: &str, filename: &str) -> Result<SymbolTable> {
-    let mut infer = Infer::new()?;
+    let mut infer = create_infer()?;
     parse_and_typecheck(source, filename, &mut infer)?;
     Ok(infer.into_symbols())
 }
 
 /// Type-check a single source string and return the typed AST.
 /// Used by the linter to analyse code structure with type information.
+/// Automatically discovers project context from cwd for external module resolution.
 pub fn typecheck_to_typed(source: &str, filename: &str) -> Result<TypedFile> {
-    let mut infer = Infer::new()?;
+    let mut infer = create_infer()?;
     parse_typecheck_to_typed(source, filename, &mut infer)
 }
 
@@ -274,8 +295,9 @@ pub struct TypecheckResult {
 
 /// Type-check a single source string and return both typed AST and symbol table.
 /// Used by the LSP to support both hover/go-to-definition and linting.
+/// Automatically discovers project context from cwd for external module resolution.
 pub fn typecheck_to_typed_with_symbols(source: &str, filename: &str) -> Result<TypecheckResult> {
-    let mut infer = Infer::new()?;
+    let mut infer = create_infer()?;
     let typed_file = parse_typecheck_to_typed(source, filename, &mut infer)?;
     let symbols = infer.into_symbols();
     Ok(TypecheckResult {

@@ -485,23 +485,17 @@ impl Infer {
                 }
 
                 // Go package import
-                // Use alias if provided, otherwise derive from path
-                let package_name = import
-                    .alias
-                    .as_deref()
-                    .unwrap_or_else(|| import_path.rsplit('/').next().unwrap_or(import_path));
-
-                // Track the import for later lookup and unused import checks
-                self.imports.insert(
-                    package_name.to_string(),
-                    (import_path.to_string(), import.span, false, ImportKind::Go),
-                );
-
-                // Check if Go package has soppo type markers and register them
-                if let Ok(pkg) = self
+                // Use alias if provided, otherwise get actual package name from source
+                let package_name = if let Some(alias) = import.alias.as_deref() {
+                    alias.to_string()
+                } else if let Ok(pkg) = self
                     .go_cache
                     .get_or_parse(import_path, self.project.as_ref())
                 {
+                    // Use actual package name from Go source (e.g., "go-isatty" -> "isatty")
+                    let pkg_name = pkg.name.clone();
+
+                    // Register soppo type markers if present
                     for (type_name, soppo_type) in &pkg.soppo_types {
                         let kind = match soppo_type.kind.as_str() {
                             "enum" => crate::types::ctx::GoSoppoKind::Enum,
@@ -509,13 +503,28 @@ impl Infer {
                             _ => continue,
                         };
                         self.global_state
-                            .register_go_soppo_type(package_name, type_name, kind);
+                            .register_go_soppo_type(&pkg_name, type_name, kind);
                     }
-                }
+
+                    pkg_name
+                } else {
+                    // Fallback: derive from path (parsing failed, so symbols won't work anyway)
+                    import_path
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(import_path)
+                        .to_string()
+                };
+
+                // Track the import for later lookup and unused import checks
+                self.imports.insert(
+                    package_name.clone(),
+                    (import_path.to_string(), import.span, false, ImportKind::Go),
+                );
 
                 // Add package name to scope with a special "package" type
                 // This allows field access like fmt.Printf to work
-                let _ = self.insert_var(package_name.to_string(), Type::simple("package"), None);
+                let _ = self.insert_var(package_name, Type::simple("package"), None);
             }
         }
     }

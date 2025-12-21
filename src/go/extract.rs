@@ -174,6 +174,12 @@ fn extract_dir(dir: &Path, pkg: &mut GoPackage) -> Result<()> {
 fn extract_file(path: &Path, pkg: &mut GoPackage) -> Result<()> {
     let source = fs::read_to_string(path).map_err(|e| ExtractError::ReadFile(e.to_string()))?;
 
+    // Skip files with //go:build ignore or // +build ignore directives
+    // These are typically generator scripts with `package main`
+    if has_build_ignore(&source) {
+        return Ok(());
+    }
+
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_go::LANGUAGE.into())
@@ -1325,6 +1331,24 @@ fn node_text<'a>(node: tree_sitter::Node, source: &'a str) -> &'a str {
 
 fn is_exported(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+}
+
+/// Check if a Go source file has a build ignore directive.
+/// These are typically generator scripts with `package main`.
+fn has_build_ignore(source: &str) -> bool {
+    // Build constraints must appear before the package clause,
+    // preceded only by blank lines and comments
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//go:build ignore") || trimmed.starts_with("// +build ignore") {
+            return true;
+        }
+        // Stop at package clause - no build constraints after this
+        if trimmed.starts_with("package ") {
+            break;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
