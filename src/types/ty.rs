@@ -431,7 +431,12 @@ impl fmt::Display for Type {
                     || n.starts_with("chan ")
                     || n.starts_with("...");
                 if args.is_empty() || hide_args {
-                    write!(f, "{}{}", prefix, name.name)
+                    // Include module prefix if present (e.g., cli.Flag)
+                    if name.module.0.is_empty() {
+                        write!(f, "{}{}", prefix, name.name)
+                    } else {
+                        write!(f, "{}{}.{}", prefix, name.module.0, name.name)
+                    }
                 } else {
                     let args_str = args
                         .iter()

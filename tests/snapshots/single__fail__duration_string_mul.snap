@@ -9,8 +9,8 @@ Error: soppo::type_mismatch
  7 │     // Duration * string should fail - string is not compatible with int64
  8 │     d := time.Millisecond * "hello"
    ·                             ───┬───
-   ·                                ╰── expected `Duration`, found `string`
+   ·                                ╰── expected `time.Duration`, found `string`
  9 │     fmt.Println(d)
    ╰────
-  help: Change this expression to produce `Duration`, or change the expected
-        type
+  help: Change this expression to produce `time.Duration`, or change the
+        expected type

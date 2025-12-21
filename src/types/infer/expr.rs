@@ -692,14 +692,22 @@ impl Infer {
                         } else {
                             None
                         };
-                        // Return the resolved type to match how return types are handled
+                        // Resolve element type properly to preserve module info (e.g., cli.Flag)
+                        let elem_ty_ann = TypeAnnotation {
+                            name: elem_name.to_string(),
+                            args: vec![],
+                            span: ty.span,
+                            nullable: false,
+                        };
                         (
-                            Type::simple(elem_name),
+                            self.resolve_type(&elem_ty_ann),
                             Some(self.resolve_type(ty)),
                             anon_fields,
                         )
                     } else {
-                        (Type::simple(&ty.name), None, None)
+                        // Non-slice type annotation - resolve it properly
+                        let resolved = self.resolve_type(ty);
+                        (resolved, None, None)
                     }
                 } else if !elements.is_empty() {
                     let first_typed = self.infer_expr(&elements[0]);

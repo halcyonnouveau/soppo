@@ -2,13 +2,14 @@
 source: tests/multi.rs
 expression: sanitise_error(&err)
 ---
-soppo::type_error
+soppo::module_resolution
 
-  × Type error: `DoSomething` not found in package `nonexistent`
-   ╭─[main.sop:6:14]
- 5 │ func main() {
- 6 │     nonexistent.DoSomething()
-   ·                 ─────┬─────
-   ·                      ╰── error occurred here
- 7 │ }
+  × Cannot resolve module `github.com/test/missing/nonexistent`
+   ╭─[main.sop:3:8]
+ 2 │ 
+ 3 │ import "github.com/test/missing/nonexistent"
+   ·        ──────────────────┬──────────────────
+   ·                          ╰── module cannot be resolved
+ 4 │ 
    ╰────
+  help: Check the import path, or create `nonexistent/` with .sop files

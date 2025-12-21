@@ -71,6 +71,27 @@ pub enum SoppoError {
         span: Span,
     },
 
+    #[error("Cannot resolve Go module `{import_path}`")]
+    #[diagnostic(code(soppo::go_module_resolution), help("{hint}"))]
+    GoModuleResolution {
+        import_path: String,
+        hint: String,
+        #[label("module cannot be resolved")]
+        span: Span,
+    },
+
+    #[error("Cannot resolve module `{import_path}`")]
+    #[diagnostic(
+        code(soppo::module_resolution),
+        help("Check the import path, or create `{local_path}/` with .sop files")
+    )]
+    ModuleResolution {
+        import_path: String,
+        local_path: String,
+        #[label("module cannot be resolved")]
+        span: Span,
+    },
+
     #[error("Potential nil pointer dereference")]
     #[diagnostic(
         code(soppo::nil_pointer),

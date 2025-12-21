@@ -200,7 +200,14 @@ fn parse_typecheck_to_typed(source: &str, filename: &str, infer: &mut Infer) -> 
     })?;
 
     // Process imports (register Go packages, etc.)
-    infer.process_imports(&file.imports);
+    // If any external imports fail to resolve, bail early with just those errors
+    if !infer.process_imports(&file.imports) {
+        let errors = infer.take_errors();
+        let source_code = NamedSource::new(filename, source.to_string());
+        if let Some(errs) = crate::error::SoppoErrors::new(errors) {
+            return Err(miette::Report::from(errs).with_source_code(source_code));
+        }
+    }
 
     // Infer the file and get the typed AST directly
     let mut typed_file = infer.infer_file(&file);
@@ -388,7 +395,14 @@ fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Resul
         miette::Report::from(e).with_source_code(NamedSource::new(filename, source.to_string()))
     })?;
 
-    infer.process_imports(&file.imports);
+    // Process imports - bail early if external imports fail
+    if !infer.process_imports(&file.imports) {
+        let errors = infer.take_errors();
+        let source_code = NamedSource::new(filename, source.to_string());
+        if let Some(errs) = crate::error::SoppoErrors::new(errors) {
+            return Err(miette::Report::from(errs).with_source_code(source_code));
+        }
+    }
 
     // Pass 1: Register all type definitions and function signatures
     for decl in &file.decls {
@@ -525,7 +539,13 @@ pub fn typecheck_workspace(
         global_ctxt.set_current_module(ModuleId::new(module_id));
 
         let mut infer = Infer::with_global_state_and_project(global_ctxt, project.clone())?;
-        infer.process_imports(&file.imports);
+
+        // Process imports - if any fail, skip rest of this file
+        if !infer.process_imports(&file.imports) {
+            diagnostics.insert(file_id, infer.take_errors());
+            global_ctxt = infer.into_global_state();
+            continue;
+        }
 
         // Infer the file and get the typed AST
         let mut typed_file = infer.infer_file(&file);

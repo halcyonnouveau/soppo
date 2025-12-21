@@ -420,12 +420,17 @@ impl Infer {
         }
     }
 
-    /// Process imports and add package names to scope
+    /// Process imports and add package names to scope.
+    ///
+    /// Returns `true` if all imports resolved successfully, `false` if any failed.
+    /// When `false` is returned, errors have been added to `self.errors`.
     ///
     /// Imports are classified as Soppo or Go based on whether the import path:
     /// 1. Starts with the project's module path
     /// 2. Corresponds to a local directory with .sop files
-    pub fn process_imports(&mut self, imports: &[Import]) {
+    pub fn process_imports(&mut self, imports: &[Import]) -> bool {
+        let mut all_resolved = true;
+
         for import in imports {
             let import_path = import.path.trim_matches('"');
 
@@ -488,32 +493,79 @@ impl Infer {
                 // Use alias if provided, otherwise get actual package name from source
                 let package_name = if let Some(alias) = import.alias.as_deref() {
                     alias.to_string()
-                } else if let Ok(pkg) = self
-                    .go_cache
-                    .get_or_parse(import_path, self.project.as_ref())
-                {
-                    // Use actual package name from Go source (e.g., "go-isatty" -> "isatty")
-                    let pkg_name = pkg.name.clone();
-
-                    // Register soppo type markers if present
-                    for (type_name, soppo_type) in &pkg.soppo_types {
-                        let kind = match soppo_type.kind.as_str() {
-                            "enum" => crate::types::ctx::GoSoppoKind::Enum,
-                            "nilable" => crate::types::ctx::GoSoppoKind::Nilable,
-                            _ => continue,
-                        };
-                        self.global_state
-                            .register_go_soppo_type(&pkg_name, type_name, kind);
-                    }
-
-                    pkg_name
                 } else {
-                    // Fallback: derive from path (parsing failed, so symbols won't work anyway)
-                    import_path
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or(import_path)
-                        .to_string()
+                    match self
+                        .go_cache
+                        .get_or_parse(import_path, self.project.as_ref())
+                    {
+                        Ok(pkg) => {
+                            // Use actual package name from Go source (e.g., "go-isatty" -> "isatty")
+                            let pkg_name = pkg.name.clone();
+
+                            // Register soppo type markers if present
+                            for (type_name, soppo_type) in &pkg.soppo_types {
+                                let kind = match soppo_type.kind.as_str() {
+                                    "enum" => crate::types::ctx::GoSoppoKind::Enum,
+                                    "nilable" => crate::types::ctx::GoSoppoKind::Nilable,
+                                    _ => continue,
+                                };
+                                self.global_state
+                                    .register_go_soppo_type(&pkg_name, type_name, kind);
+                            }
+
+                            pkg_name
+                        }
+                        Err(_) => {
+                            // Check if this looks like an external package (has a domain)
+                            // But exclude paths that start with project's module path
+                            // (those are local packages that just don't have .sop files)
+                            let is_external = import_path
+                                .split('/')
+                                .next()
+                                .map(|first| first.contains('.'))
+                                .unwrap_or(false);
+
+                            // Check if this is a local path (starts with project's module path)
+                            let local_path = self.project.as_ref().and_then(|p| {
+                                crate::deps::get_local_package_path(import_path, &p.module_path)
+                                    .map(|s| s.to_string())
+                            });
+
+                            if let Some(local_path) = local_path {
+                                // Local package that doesn't exist
+                                self.errors.push(SoppoError::ModuleResolution {
+                                    import_path: import_path.to_string(),
+                                    local_path,
+                                    span: import.span,
+                                });
+                                all_resolved = false;
+                                continue;
+                            }
+
+                            if is_external {
+                                // External packages require go.mod - emit error and skip
+                                let hint = if self.project.is_none() {
+                                    "Run `sop build` from a directory containing go.mod".to_string()
+                                } else {
+                                    format!("Run `go get {}` to add the dependency", import_path)
+                                };
+                                self.errors.push(SoppoError::GoModuleResolution {
+                                    import_path: import_path.to_string(),
+                                    hint,
+                                    span: import.span,
+                                });
+                                all_resolved = false;
+                                continue;
+                            }
+
+                            // Fallback for stdlib: derive from path
+                            import_path
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or(import_path)
+                                .to_string()
+                        }
+                    }
                 };
 
                 // Track the import for later lookup and unused import checks
@@ -527,6 +579,8 @@ impl Infer {
                 let _ = self.insert_var(package_name, Type::simple("package"), None);
             }
         }
+
+        all_resolved
     }
 
     /// Check if a package name refers to a Soppo module import
