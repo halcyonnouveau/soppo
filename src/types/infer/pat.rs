@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::Infer;
-use crate::error::Result;
+use crate::error::SoppoResult;
 use crate::syntax::{EnumVariant, FieldPattern, Pattern, PatternKind};
 use crate::types::ast::TypedFieldPattern;
 use crate::types::ctx::TypeDefKind;
@@ -13,7 +13,7 @@ impl Infer {
         &mut self,
         pattern: &Pattern,
         scrutinee_ty: &Type,
-    ) -> Result<()> {
+    ) -> SoppoResult<()> {
         match &pattern.kind {
             PatternKind::Default => {
                 // Default doesn't bind anything
@@ -149,7 +149,7 @@ impl Infer {
         &mut self,
         pattern: &Pattern,
         scrutinee_ty: &Type,
-    ) -> Result<HashMap<String, Type>> {
+    ) -> SoppoResult<HashMap<String, Type>> {
         let mut bindings = HashMap::new();
 
         match &pattern.kind {

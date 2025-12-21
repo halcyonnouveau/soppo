@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::interface_not_satisfied
+
+  × Type `*BadReader` does not satisfy interface `Reader`
+    ╭─[interface_wrong_return_type.sop:18:12]
+ 17 │     reader := &BadReader{}
+ 18 │     useReader(reader)  // ERROR: BadReader doesn't satisfy Reader
+    ·               ───┬──
+    ·                  ╰── does not satisfy `Reader`
+ 19 │ }
+    ╰────
+  help: method `Read` has return type `int`, but interface requires `string`

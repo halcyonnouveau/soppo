@@ -1,0 +1,32 @@
+package main
+
+type MyError struct {
+	msg string
+}
+
+func (e *MyError) Error() string {
+	return e.msg
+}
+
+// ERROR: Returning nilable pointer as interface
+func getError() error {
+	var p ?*MyError = nil
+	return p
+}
+
+// ERROR: Assigning nilable pointer to interface variable
+func assignToInterface() {
+	var p ?*MyError = nil
+	var err error = p
+	_ = err
+}
+
+// ERROR: Passing nilable pointer to function expecting interface
+func takeError(err error) {}
+
+func passToFunc() {
+	var p ?*MyError = nil
+	takeError(p)
+}
+
+func main() {}

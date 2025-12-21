@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::ast::TypeAnnotation;
 use crate::syntax::lexer::Token;
 
@@ -7,7 +7,7 @@ impl Parser {
     /// Parse a type annotation
     /// Supports: T, []T, [N]T, *T, map[K]V, chan T, T[A, B], ...T (variadic)
     /// Also supports nullable prefix: ?*T, ?[]T, ?Interface
-    pub(super) fn parse_type(&mut self) -> Result<TypeAnnotation> {
+    pub(super) fn parse_type(&mut self) -> SoppoResult<TypeAnnotation> {
         let start_span = self.peek_span();
 
         // Check for nullable prefix: ?

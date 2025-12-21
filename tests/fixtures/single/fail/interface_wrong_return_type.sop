@@ -1,0 +1,19 @@
+package main
+
+type Reader interface {
+	Read() string
+}
+
+type BadReader struct {}
+
+// Wrong return type - returns int instead of string
+func (r *BadReader) Read() int {
+	return 42
+}
+
+func useReader(r Reader) {}
+
+func main() {
+	reader := &BadReader{}
+	useReader(reader)  // ERROR: BadReader doesn't satisfy Reader
+}

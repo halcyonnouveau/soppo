@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::Infer;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::{
     BinOp, EnumVariant, Expr, ExprKind, ModuleId, Span, Symbol, TypeAnnotation, UnaryOp,
 };
@@ -35,7 +35,7 @@ impl Infer {
     ///
     /// **Prefer `infer_expr`** which collects errors and returns error TypedExpr on failure.
     /// This version should only be used when you need to explicitly check if inference failed.
-    pub fn infer_expr_inner(&mut self, expr: &Expr) -> Result<TypedExpr> {
+    pub fn infer_expr_inner(&mut self, expr: &Expr) -> SoppoResult<TypedExpr> {
         let span = expr.span;
         match &expr.kind {
             ExprKind::Integer(val, fmt) => Ok(TypedExpr::new(
@@ -1409,7 +1409,7 @@ impl Infer {
         expr: &TypedExpr,
         field: &str,
         span: &Span,
-    ) -> Result<FieldAccessResult> {
+    ) -> SoppoResult<FieldAccessResult> {
         // Check if this is accessing something from an imported package
         // e.g., fmt.Println, strings.HasPrefix, or helpers.Add (sop: import)
         if let TypedExprKind::Ident(pkg_name) = &expr.kind
@@ -2030,7 +2030,7 @@ impl Infer {
         type_args: &[TypeAnnotation],
         args: &[TypedCallArg],
         expr_span: Span,
-    ) -> Result<Type> {
+    ) -> SoppoResult<Type> {
         // Helper closures for accessing typed argument types and spans
         let arg_ty = |i: usize| args[i].1.ty.clone();
         let arg_span = |i: usize| args[i].1.span;
@@ -2986,7 +2986,7 @@ impl Infer {
     }
 
     /// Infer the type of a unary expression
-    fn infer_unary(&mut self, op: &UnaryOp, operand: &Expr, span: Span) -> Result<TypedExpr> {
+    fn infer_unary(&mut self, op: &UnaryOp, operand: &Expr, span: Span) -> SoppoResult<TypedExpr> {
         let typed_operand = self.infer_expr(operand);
 
         // Handle deref separately - it produces TypedExprKind::Deref
@@ -3051,7 +3051,7 @@ impl Infer {
         typed_operand: TypedExpr,
         operand: &Expr,
         span: Span,
-    ) -> Result<TypedExpr> {
+    ) -> SoppoResult<TypedExpr> {
         if typed_operand.is_error() {
             return Ok(TypedExpr::new(
                 TypedExprKind::Deref {
@@ -3145,7 +3145,7 @@ impl Infer {
 
 /// Validate a format specifier against an expression type.
 /// Returns Ok(()) if valid, Err(message) if invalid.
-fn validate_format_specifier(format: &str, ty: &Type) -> std::result::Result<(), String> {
+fn validate_format_specifier(format: &str, ty: &Type) -> Result<(), String> {
     // Extract the base verb from the format (e.g., "d" from "010d", "f" from ".2f")
     let base_verb = extract_base_verb(format);
 
@@ -3304,10 +3304,10 @@ fn is_interface_type(ty: &Type) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::Result;
+    use crate::error::SoppoResult;
     use crate::syntax::{FileId, Parser};
 
-    fn infer_expr_helper(source: &str) -> Result<Type> {
+    fn infer_expr_helper(source: &str) -> SoppoResult<Type> {
         let mut parser = Parser::new(source, FileId(0));
         let expr = parser.parse_expr()?;
         let mut infer = Infer::new().expect("Failed to create Infer");

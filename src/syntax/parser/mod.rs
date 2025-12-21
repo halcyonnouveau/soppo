@@ -7,7 +7,7 @@ mod ty;
 use super::ast::Expr;
 use super::lexer::{Comment, Lexer, Token};
 use super::source::{FileId, Span};
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 
 /// A parsed function argument: (optional name with span, value expression, is_spread)
 type ParsedArg = (Option<(String, Span)>, Expr, bool);
@@ -161,7 +161,7 @@ impl Parser {
     }
 
     /// Expect a specific token, error if not present
-    fn expect(&mut self, expected: Token) -> Result<Span> {
+    fn expect(&mut self, expected: Token) -> SoppoResult<Span> {
         match self.advance() {
             Some((tok, span)) if tok == expected => Ok(span),
             Some((tok, span)) => Err(SoppoError::Parse {
@@ -181,7 +181,7 @@ impl Parser {
     }
 
     /// Validate that an identifier is not a reserved keyword
-    fn validate_identifier(&self, name: &str, span: &Span) -> Result<()> {
+    fn validate_identifier(&self, name: &str, span: &Span) -> SoppoResult<()> {
         if Self::is_reserved_keyword(name) {
             Err(SoppoError::Parse {
                 message: format!(
@@ -196,7 +196,7 @@ impl Parser {
     }
 
     /// Parse an identifier token with a contextual error message
-    fn parse_identifier(&mut self, context: &str) -> Result<(String, Span)> {
+    fn parse_identifier(&mut self, context: &str) -> SoppoResult<(String, Span)> {
         match self.advance() {
             Some((Token::Ident(name), span)) => Ok((name, span)),
             Some((tok, span)) => Err(SoppoError::Parse {
@@ -222,7 +222,7 @@ impl Parser {
     }
 
     /// Parse a comma-separated argument list (for function calls)
-    fn parse_argument_list(&mut self) -> Result<Vec<ParsedArg>> {
+    fn parse_argument_list(&mut self) -> SoppoResult<Vec<ParsedArg>> {
         let mut args = Vec::new();
 
         if !matches!(self.peek(), Some(Token::RParen)) {

@@ -1,0 +1,37 @@
+---
+source: tests/multi.rs
+expression: format_results(&results)
+---
+=== cmd/main.go ===
+//soppo:generated
+package main
+
+import "fmt"
+import "github.com/test/iface/interfaces"
+
+type MyReader struct {
+	data string
+}
+
+func (r *MyReader) Read() string {
+	return r.data
+}
+
+func useReader(r interfaces.Reader) {
+	fmt.Println(r.Read())
+}
+
+func main() {
+	reader := (&MyReader{data: "hello"})
+	useReader(reader)
+}
+
+
+
+=== interfaces/lib.go ===
+//soppo:generated
+package interfaces
+
+type Reader interface {
+	Read() string
+}

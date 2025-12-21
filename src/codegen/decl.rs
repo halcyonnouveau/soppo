@@ -9,7 +9,7 @@ use crate::types::ast::{
 
 impl Codegen {
     /// Generate code for an entire typed file
-    pub fn gen_file(&mut self, file: &TypedFile) -> crate::error::Result<()> {
+    pub fn gen_file(&mut self, file: &TypedFile) -> crate::error::SoppoResult<()> {
         // Find the earliest position in the file (first import or first declaration)
         let first_line = file
             .imports
@@ -507,7 +507,7 @@ impl Codegen {
     }
 
     /// Generate typed declarations to a separate buffer (to discover needed imports first)
-    fn gen_declarations(&mut self, file: &TypedFile) -> crate::error::Result<String> {
+    fn gen_declarations(&mut self, file: &TypedFile) -> crate::error::SoppoResult<String> {
         let saved_output = std::mem::take(&mut self.output);
 
         for decl in &file.decls {

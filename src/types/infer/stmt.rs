@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::Infer;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::{
     BinOp, EnumVariant, Expr, ExprKind, Literal, PatternKind, SelectCaseKind, Stmt, StmtKind,
 };
@@ -120,7 +120,7 @@ impl Infer {
     /// This version should only be used when you need to explicitly check if inference failed.
     ///
     /// Returns a TypedStmt containing the typed statement kind and its span.
-    pub fn infer_stmt_inner(&mut self, stmt: &Stmt) -> Result<TypedStmt> {
+    pub fn infer_stmt_inner(&mut self, stmt: &Stmt) -> SoppoResult<TypedStmt> {
         let kind = match &stmt.kind {
             StmtKind::Decl { ident, value } => {
                 let typed_value = self.infer_expr(value);

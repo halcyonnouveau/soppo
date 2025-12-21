@@ -370,7 +370,7 @@ fn parse_and_typecheck(source: &str, filename: &str, infer: &mut Infer) -> Resul
 }
 
 /// Register a declaration (pass 1) - returns SoppoError for collection
-fn register_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::Result<()> {
+fn register_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::SoppoResult<()> {
     match decl {
         Decl::Const(const_decl) => {
             infer.infer_const_decl(const_decl);
@@ -394,7 +394,7 @@ fn register_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::Result<(
 }
 
 /// Infer a declaration body (pass 2) - returns SoppoError for collection
-fn infer_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::Result<()> {
+fn infer_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::SoppoResult<()> {
     match decl {
         Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) | Decl::Type(_) => {}
         Decl::Func(func) => {

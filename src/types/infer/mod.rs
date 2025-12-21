@@ -12,7 +12,7 @@ pub use bonk::bonk_file;
 use super::ctx::GlobalCtxt;
 use super::sym::{SymbolInfo, SymbolKind, SymbolTable};
 use super::ty::{Nullability, Type};
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::go::{GoCache, Project, SourceLocation, parse_go_type};
 use crate::syntax::{
     Expr, ExprKind, Import, ModuleId, Span, Stmt, StmtKind, Symbol, TypeAnnotation, UnaryOp,
@@ -1141,7 +1141,7 @@ impl Infer {
         &self,
         concrete_ty: &Type,
         interface_ty: &Type,
-    ) -> std::result::Result<(), String> {
+    ) -> Result<(), String> {
         // Get the interface methods
         let interface_methods = match self.get_interface_methods(interface_ty) {
             Some(methods) => methods,
@@ -1670,7 +1670,7 @@ impl Infer {
 
     /// Validate that a type annotation refers to a real type.
     /// This catches errors like `Option.None[String]` where `String` isn't a valid Go type.
-    pub(super) fn validate_type_arg(&self, ast_ty: &TypeAnnotation) -> Result<()> {
+    pub(super) fn validate_type_arg(&self, ast_ty: &TypeAnnotation) -> SoppoResult<()> {
         let name = &ast_ty.name;
 
         // Generic parameters are always valid (they're checked elsewhere)
@@ -1861,7 +1861,7 @@ impl Infer {
 
     /// Check for unused variables in the current scope
     /// Returns an error for the first unused variable (by source position)
-    pub(super) fn check_unused_vars_in_scope(&self) -> Result<()> {
+    pub(super) fn check_unused_vars_in_scope(&self) -> SoppoResult<()> {
         if let Some(scope) = self.scopes.last() {
             // Collect unused variables and sort by span for deterministic order
             let mut unused: Vec<_> = scope
@@ -1882,7 +1882,7 @@ impl Infer {
 
     /// Check for unused imports after file inference
     /// Returns an error for the first unused import found
-    pub fn check_unused_imports(&self) -> Result<()> {
+    pub fn check_unused_imports(&self) -> SoppoResult<()> {
         for (name, (path, span, used, _)) in &self.imports {
             if !used {
                 return Err(SoppoError::UnusedImport {
@@ -1910,7 +1910,7 @@ impl Infer {
         name: String,
         ty: Type,
         def_span: Option<Span>,
-    ) -> Result<()> {
+    ) -> SoppoResult<()> {
         // Blank identifier `_` is special - it discards values and can be used multiple times
         if name == "_" {
             return Ok(());
@@ -1969,7 +1969,7 @@ impl Infer {
     pub(super) fn insert_short_decl_vars(
         &mut self,
         vars: &[(String, Type, Option<Span>)],
-    ) -> Result<()> {
+    ) -> SoppoResult<()> {
         // Check how many variables are new vs existing
         let new_vars: Vec<_> = vars
             .iter()
@@ -2554,7 +2554,7 @@ impl Infer {
     /// Check if an expression is a generic enum variant that needs type args.
     /// Returns an error if the expression uses a generic enum variant without
     /// explicit type args and there's no context to infer them from.
-    pub(super) fn check_generic_enum_needs_type_args(&self, expr: &Expr) -> Result<()> {
+    pub(super) fn check_generic_enum_needs_type_args(&self, expr: &Expr) -> SoppoResult<()> {
         match &expr.kind {
             // Field access like Option.None (unit variant)
             ExprKind::Field {

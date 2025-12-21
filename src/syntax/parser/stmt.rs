@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::ast::{
     Block, Expr, ExprKind, Ident, SelectCase, SelectCaseKind, Stmt, StmtKind,
 };
@@ -8,7 +8,7 @@ use crate::syntax::source::Span;
 
 impl Parser {
     /// Parse a statement, including optional ? error propagation
-    pub fn parse_stmt(&mut self) -> Result<Stmt> {
+    pub fn parse_stmt(&mut self) -> SoppoResult<Stmt> {
         let stmt = self.parse_stmt_inner()?;
 
         // Check for ? error propagation
@@ -72,7 +72,7 @@ impl Parser {
     }
 
     /// Parse a statement (inner implementation, without ? handling)
-    fn parse_stmt_inner(&mut self) -> Result<Stmt> {
+    fn parse_stmt_inner(&mut self) -> SoppoResult<Stmt> {
         let start_span = self.peek_span();
 
         match self.peek() {
@@ -995,7 +995,7 @@ impl Parser {
     }
 
     /// Parse a block of statements
-    pub fn parse_block(&mut self) -> Result<Block> {
+    pub fn parse_block(&mut self) -> SoppoResult<Block> {
         let start_span = self.expect(Token::LBrace)?;
         // Skip terminators after opening brace
         self.skip_terminators();
@@ -1017,7 +1017,7 @@ impl Parser {
     }
 
     /// Parse select statement
-    pub(super) fn parse_select_stmt(&mut self, start_span: Span) -> Result<Stmt> {
+    pub(super) fn parse_select_stmt(&mut self, start_span: Span) -> SoppoResult<Stmt> {
         self.expect(Token::LBrace)?;
         self.skip_terminators();
 
@@ -1038,7 +1038,7 @@ impl Parser {
     }
 
     /// Parse a select case: case <-ch:, case v := <-ch:, case ch <- v:, or default:
-    fn parse_select_case(&mut self) -> Result<SelectCase> {
+    fn parse_select_case(&mut self) -> SoppoResult<SelectCase> {
         let case_start = self.peek_span();
 
         // Check for default:
@@ -1172,7 +1172,7 @@ impl Parser {
     }
 
     /// Parse the body of a select case (statements until next case/default/})
-    fn parse_select_case_body(&mut self) -> Result<Block> {
+    fn parse_select_case_body(&mut self) -> SoppoResult<Block> {
         let mut stmts = Vec::new();
         let body_start = self.peek_span();
 

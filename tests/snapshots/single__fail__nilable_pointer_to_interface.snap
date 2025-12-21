@@ -1,0 +1,39 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::nilable_pointer_to_interface
+
+  × Cannot assign nilable pointer `?*MyError` to interface type
+    ╭─[nilable_pointer_to_interface.sop:14:9]
+ 13 │     var p ?*MyError = nil
+ 14 │     return p
+    ·            ┬
+    ·            ╰── nilable pointer assigned to interface
+ 15 │ }
+    ╰────
+  help: use a nil check first, or return `nil` directly
+
+Error: soppo::nilable_pointer_to_interface
+
+  × Cannot assign nilable pointer `?*MyError` to interface type
+    ╭─[nilable_pointer_to_interface.sop:20:18]
+ 19 │     var p ?*MyError = nil
+ 20 │     var err error = p
+    ·                     ┬
+    ·                     ╰── nilable pointer assigned to interface
+ 21 │     _ = err
+    ╰────
+  help: use a nil check first, or return `nil` directly
+
+Error: soppo::nilable_pointer_to_interface
+
+  × Cannot assign nilable pointer `?*MyError` to interface type
+    ╭─[nilable_pointer_to_interface.sop:29:12]
+ 28 │     var p ?*MyError = nil
+ 29 │     takeError(p)
+    ·               ┬
+    ·               ╰── nilable pointer assigned to interface
+ 30 │ }
+    ╰────
+  help: use a nil check first, or return `nil` directly

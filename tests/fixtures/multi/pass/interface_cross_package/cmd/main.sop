@@ -1,0 +1,23 @@
+package main
+
+import (
+	"fmt"
+	"github.com/test/iface/interfaces"
+)
+
+type MyReader struct {
+	data string
+}
+
+func (r *MyReader) Read() string {
+	return r.data
+}
+
+func useReader(r interfaces.Reader) {
+	fmt.Println(r.Read())
+}
+
+func main() {
+	reader := &MyReader{data: "hello"}
+	useReader(reader)
+}

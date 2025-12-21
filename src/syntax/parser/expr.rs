@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::ast::{
     AssignOp, BinOp, Expr, ExprKind, Ident, Param, StringPart, TypeAnnotation, UnaryOp,
 };
@@ -36,12 +36,17 @@ impl BinOp {
 
 impl Parser {
     /// Parse an expression
-    pub fn parse_expr(&mut self) -> Result<Expr> {
+    pub fn parse_expr(&mut self) -> SoppoResult<Expr> {
         self.parse_binary(0)
     }
 
     /// Parse a unary operator expression
-    fn parse_unary(&mut self, op: UnaryOp, start_span: Span, use_postfix: bool) -> Result<Expr> {
+    fn parse_unary(
+        &mut self,
+        op: UnaryOp,
+        start_span: Span,
+        use_postfix: bool,
+    ) -> SoppoResult<Expr> {
         let operand = if use_postfix {
             self.parse_postfix()?
         } else {
@@ -60,7 +65,7 @@ impl Parser {
     }
 
     /// Parse binary operations with precedence
-    fn parse_binary(&mut self, min_prec: u8) -> Result<Expr> {
+    fn parse_binary(&mut self, min_prec: u8) -> SoppoResult<Expr> {
         let mut left = self.parse_postfix()?;
 
         while let Some(op) = self.peek_binop() {
@@ -132,7 +137,7 @@ impl Parser {
     }
 
     /// Parse postfix operations (call, field access)
-    fn parse_postfix(&mut self) -> Result<Expr> {
+    fn parse_postfix(&mut self) -> SoppoResult<Expr> {
         let mut expr = self.parse_primary()?;
 
         loop {
@@ -584,7 +589,7 @@ impl Parser {
     }
 
     /// Parse a primary expression (literals, identifiers, parenthesized expressions)
-    fn parse_primary(&mut self) -> Result<Expr> {
+    fn parse_primary(&mut self) -> SoppoResult<Expr> {
         let (tok, span) = self.advance().ok_or_else(|| SoppoError::Parse {
             message: "Unexpected end of input".to_string(),
             span: Span::dummy(),
@@ -1028,7 +1033,7 @@ impl Parser {
 
     /// Parse a string with interpolation: "Hello, {name}!" or "Price: {cost:.2f}"
     /// Returns a vector of StringPart
-    fn parse_string_interpolation(&mut self, s: &str, span: Span) -> Result<Vec<StringPart>> {
+    fn parse_string_interpolation(&mut self, s: &str, span: Span) -> SoppoResult<Vec<StringPart>> {
         let mut parts = Vec::new();
         let mut current_literal = String::new();
         let mut char_indices = s.char_indices().peekable();
@@ -1158,11 +1163,11 @@ fn split_interpolation_content(content: &str) -> (&str, Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::Result;
+    use crate::error::SoppoResult;
     use crate::syntax::ast::ExprKind;
     use crate::syntax::source::FileId;
 
-    fn parse_expr_helper(source: &str) -> Result<Expr> {
+    fn parse_expr_helper(source: &str) -> SoppoResult<Expr> {
         Parser::new(source, FileId(0)).parse_expr()
     }
 

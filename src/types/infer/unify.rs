@@ -1,5 +1,5 @@
 use super::Infer;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::Span;
 use crate::types::Type;
 use crate::types::ctx::TypeDefKind;
@@ -35,7 +35,7 @@ impl Infer {
     ///
     /// **Prefer `unify`** which emits errors and returns bool on failure.
     /// This version should only be used when you need to explicitly check if unification failed.
-    pub fn unify_inner(&mut self, t1: &Type, t2: &Type, span: &Span) -> Result<()> {
+    pub fn unify_inner(&mut self, t1: &Type, t2: &Type, span: &Span) -> SoppoResult<()> {
         let t1 = self.resolve_alias(self.substitute(t1.clone()));
         let t2 = self.resolve_alias(self.substitute(t2.clone()));
 

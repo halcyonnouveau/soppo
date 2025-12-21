@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::ast::{
     Arm, Block, FieldPattern, Ident, Literal, Pattern, PatternKind, Stmt, StmtKind, TypeAnnotation,
 };
@@ -8,7 +8,7 @@ use crate::syntax::source::Span;
 
 impl Parser {
     /// Parse match statement
-    pub(super) fn parse_match_stmt(&mut self, start_span: Span) -> Result<Stmt> {
+    pub(super) fn parse_match_stmt(&mut self, start_span: Span) -> SoppoResult<Stmt> {
         // Check for expression-less match: `match {`
         let (scrutinee, is_expression_less) = if matches!(self.peek(), Some(Token::LBrace)) {
             (None, true)
@@ -39,7 +39,7 @@ impl Parser {
     }
 
     /// Parse a match arm: case pattern, pattern: statements (until next case/default/})
-    fn parse_match_arm(&mut self, is_expression_less: bool) -> Result<Arm> {
+    fn parse_match_arm(&mut self, is_expression_less: bool) -> SoppoResult<Arm> {
         // Handle both 'case Pattern:' and 'default:'
         let patterns = if let Some(Token::Ident(s)) = self.peek() {
             if s == "default" {
@@ -97,7 +97,7 @@ impl Parser {
     }
 
     /// Parse comma-separated patterns for a match arm
-    fn parse_patterns(&mut self, is_expression_less: bool) -> Result<Vec<Pattern>> {
+    fn parse_patterns(&mut self, is_expression_less: bool) -> SoppoResult<Vec<Pattern>> {
         let mut patterns = vec![self.parse_pattern_or_guard(is_expression_less)?];
 
         // Parse additional comma-separated patterns
@@ -110,7 +110,7 @@ impl Parser {
     }
 
     /// Parse a pattern or guard expression (for expression-less match)
-    fn parse_pattern_or_guard(&mut self, is_expression_less: bool) -> Result<Pattern> {
+    fn parse_pattern_or_guard(&mut self, is_expression_less: bool) -> SoppoResult<Pattern> {
         if is_expression_less {
             // For expression-less match, parse an expression as the guard
             let expr = self.parse_expr()?;
@@ -125,7 +125,7 @@ impl Parser {
     }
 
     /// Parse a pattern
-    fn parse_pattern(&mut self) -> Result<Pattern> {
+    fn parse_pattern(&mut self) -> SoppoResult<Pattern> {
         let (tok, span) = self.advance().ok_or_else(|| SoppoError::Parse {
             message: "Expected pattern".to_string(),
             span: Span::dummy(),

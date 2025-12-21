@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::ast::{
     ConstDecl, Decl, DoctestCode, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic,
     Ident, Import, InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind, VarDecl,
@@ -9,7 +9,7 @@ use crate::syntax::source::Span;
 
 impl Parser {
     /// Parse function parameter
-    fn parse_param(&mut self) -> Result<Param> {
+    fn parse_param(&mut self) -> SoppoResult<Param> {
         // Go syntax: name Type (no colon)
         let (name, name_span) = self.parse_identifier("parameter")?;
         self.validate_identifier(&name, &name_span)?;
@@ -23,7 +23,7 @@ impl Parser {
     }
 
     /// Parse function parameter list with support for grouped parameters: (a, b int, c string)
-    fn parse_param_list(&mut self) -> Result<Vec<Param>> {
+    fn parse_param_list(&mut self) -> SoppoResult<Vec<Param>> {
         let mut params = Vec::new();
 
         if matches!(self.peek(), Some(Token::RParen)) {
@@ -68,7 +68,7 @@ impl Parser {
 
     /// Parse function return list: (x, y int, err error) or (int, string) or int
     /// Returns Vec<Param> where unnamed returns have empty ident name.
-    pub(super) fn parse_return_list(&mut self) -> Result<Vec<Param>> {
+    pub(super) fn parse_return_list(&mut self) -> SoppoResult<Vec<Param>> {
         if matches!(self.peek(), Some(Token::LBrace)) {
             // No return type
             return Ok(vec![]);
@@ -98,7 +98,7 @@ impl Parser {
 
     /// Parse return parameters, handling both named (x int) and unnamed (int) returns.
     /// In Go, if any return is named, all must be named.
-    fn parse_return_params(&mut self) -> Result<Vec<Param>> {
+    fn parse_return_params(&mut self) -> SoppoResult<Vec<Param>> {
         let mut params = Vec::new();
         let mut pending_names: Vec<Ident> = Vec::new();
         let mut is_named: Option<bool> = None;
@@ -246,7 +246,7 @@ impl Parser {
     }
 
     /// Parse generic parameters: [T any, E comparable]
-    fn parse_generics(&mut self) -> Result<Vec<Generic>> {
+    fn parse_generics(&mut self) -> SoppoResult<Vec<Generic>> {
         if !self.consume(&Token::LBracket) {
             return Ok(Vec::new());
         }
@@ -293,7 +293,7 @@ impl Parser {
     }
 
     /// Parse function declaration
-    pub fn parse_func_decl(&mut self) -> Result<FuncDecl> {
+    pub fn parse_func_decl(&mut self) -> SoppoResult<FuncDecl> {
         let start_span = self.expect(Token::Func)?;
         let doc_comment = self.get_doc_comment(start_span.start.line);
 
@@ -336,7 +336,7 @@ impl Parser {
     }
 
     /// Parse type declaration (enum or struct)
-    pub(super) fn parse_type_decl(&mut self) -> Result<TypeDecl> {
+    pub(super) fn parse_type_decl(&mut self) -> SoppoResult<TypeDecl> {
         let start_span = self.expect(Token::Type)?;
         let doc_comment = self.get_doc_comment(start_span.start.line);
 
@@ -423,7 +423,7 @@ impl Parser {
     }
 
     /// Parse enum variant
-    fn parse_enum_variant(&mut self) -> Result<EnumVariant> {
+    fn parse_enum_variant(&mut self) -> SoppoResult<EnumVariant> {
         let (name, name_span) = self.parse_identifier("variant")?;
 
         // Check for data: Single Type or Struct { fields }
@@ -480,7 +480,7 @@ impl Parser {
 
     /// Parse struct fields (supports grouped names like `X, Y int`)
     /// Returns a Vec because `X, Y int` produces multiple Field entries
-    pub fn parse_fields(&mut self) -> Result<Vec<Field>> {
+    pub fn parse_fields(&mut self) -> SoppoResult<Vec<Field>> {
         // Collect all field names (comma-separated)
         let mut names: Vec<Ident> = Vec::new();
 
@@ -524,7 +524,7 @@ impl Parser {
     }
 
     /// Parse interface method signature: MethodName(params) returns
-    fn parse_interface_method(&mut self) -> Result<InterfaceMethod> {
+    fn parse_interface_method(&mut self) -> SoppoResult<InterfaceMethod> {
         let (name, name_span) = self.parse_identifier("method")?;
 
         // Parse parameters (supports grouped params: a, b int)
@@ -567,7 +567,7 @@ impl Parser {
     }
 
     /// Parse top-level declaration
-    pub fn parse_decl(&mut self) -> Result<Decl> {
+    pub fn parse_decl(&mut self) -> SoppoResult<Decl> {
         match self.peek() {
             Some(Token::Const) => Ok(Decl::Const(self.parse_const_decl()?)),
             Some(Token::Var) => Ok(Decl::Var(self.parse_var_decl()?)),
@@ -585,7 +585,7 @@ impl Parser {
     }
 
     /// Parse a var declaration: var NAME = VALUE or var NAME TYPE = VALUE or var NAME TYPE
-    fn parse_var_decl(&mut self) -> Result<VarDecl> {
+    fn parse_var_decl(&mut self) -> SoppoResult<VarDecl> {
         let start = self.expect(Token::Var)?;
 
         let (name, name_span) = self.parse_identifier("variable")?;
@@ -631,7 +631,7 @@ impl Parser {
     }
 
     /// Parse a const declaration: const NAME = VALUE or const NAME TYPE = VALUE
-    fn parse_const_decl(&mut self) -> Result<ConstDecl> {
+    fn parse_const_decl(&mut self) -> SoppoResult<ConstDecl> {
         let start = self.expect(Token::Const)?;
         let doc_comment = self.get_doc_comment(start.start.line);
 
@@ -670,7 +670,7 @@ impl Parser {
 
     /// Parse a const declaration after the 'const' keyword has been consumed
     /// doc_comment_line is the line number where 'const' appeared (for doc comment lookup)
-    fn parse_const_after_keyword(&mut self, doc_comment_line: usize) -> Result<ConstDecl> {
+    fn parse_const_after_keyword(&mut self, doc_comment_line: usize) -> SoppoResult<ConstDecl> {
         let start = self.peek_span();
         let doc_comment = self.get_doc_comment(doc_comment_line);
 
@@ -707,7 +707,7 @@ impl Parser {
 
     /// Parse a const declaration inside a grouped const block
     /// Supports: NAME = VALUE, NAME TYPE = VALUE, NAME (implicit iota continuation)
-    fn parse_const_in_group(&mut self) -> Result<ConstDecl> {
+    fn parse_const_in_group(&mut self) -> SoppoResult<ConstDecl> {
         let start = self.peek_span();
 
         let (name, name_span) = self.parse_identifier("constant")?;
@@ -764,7 +764,7 @@ impl Parser {
     }
 
     /// Parse a single import: "path", alias "path", or _ "path"
-    fn parse_single_import(&mut self) -> Result<Import> {
+    fn parse_single_import(&mut self) -> SoppoResult<Import> {
         match self.advance() {
             Some((Token::String(path), span)) => {
                 // Simple import: "path"
@@ -824,7 +824,7 @@ impl Parser {
     }
 
     /// Parse a complete file
-    pub fn parse_file(&mut self) -> Result<File> {
+    pub fn parse_file(&mut self) -> SoppoResult<File> {
         // Skip leading whitespace/newlines
         self.skip_terminators();
 
@@ -909,7 +909,7 @@ impl Parser {
     /// Parse doctest code: optional imports followed by statements.
     /// Unlike parse_file(), this does not require a package declaration
     /// and parses statements instead of declarations.
-    pub fn parse_doctest(&mut self) -> Result<DoctestCode> {
+    pub fn parse_doctest(&mut self) -> SoppoResult<DoctestCode> {
         // Skip leading whitespace/newlines
         self.skip_terminators();
 

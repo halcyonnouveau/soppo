@@ -1,5 +1,5 @@
 use super::Infer;
-use crate::error::{Result, SoppoError};
+use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::{Block, ConstDecl, Decl, EnumVariant, File, FuncDecl, TypeDecl, TypeKind};
 use crate::types::ast::{
     TypedBlock, TypedConstDecl, TypedDecl, TypedEnumVariant, TypedFile, TypedFuncDecl, TypedImport,
@@ -16,7 +16,7 @@ impl Infer {
         &mut self,
         block: &Block,
         returns: &[crate::syntax::Param],
-    ) -> Result<TypedBlock> {
+    ) -> SoppoResult<TypedBlock> {
         self.push_scope();
 
         // Add named return parameters to the body scope
@@ -72,7 +72,7 @@ impl Infer {
     /// Register a function's signature without checking the body.
     /// This allows functions to be called before their bodies are checked,
     /// enabling Go-style forward references.
-    pub fn register_func_signature(&mut self, func: &FuncDecl) -> Result<()> {
+    pub fn register_func_signature(&mut self, func: &FuncDecl) -> SoppoResult<()> {
         // Check for methods on enum types (not variants) - this is an error
         if let Some(receiver) = &func.receiver {
             let receiver_type_name = &receiver.ty.name;
@@ -157,7 +157,7 @@ impl Infer {
 
     /// Infer and check a function declaration's body, returning a TypedFuncDecl.
     /// The function signature should already be registered via `register_func_signature`.
-    pub fn infer_func_decl(&mut self, func: &FuncDecl) -> Result<TypedFuncDecl> {
+    pub fn infer_func_decl(&mut self, func: &FuncDecl) -> SoppoResult<TypedFuncDecl> {
         self.push_scope();
 
         // Save old generic params and set up new ones for this function
@@ -404,7 +404,7 @@ impl Infer {
     }
 
     /// Type check an enum/struct declaration and return TypedTypeDecl.
-    pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> Result<TypedTypeDecl> {
+    pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> SoppoResult<TypedTypeDecl> {
         // Record type definition for LSP
         self.record_symbol(
             type_decl.ident.span,

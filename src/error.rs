@@ -259,7 +259,7 @@ fn format_cycle(cycle: &[(String, String)]) -> String {
         .to_string()
 }
 
-pub type Result<T> = std::result::Result<T, SoppoError>;
+pub type SoppoResult<T> = std::result::Result<T, SoppoError>;
 
 /// Multiple errors collected during type checking.
 #[derive(Debug)]
