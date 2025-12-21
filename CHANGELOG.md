@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/halcyonnouveau/soppo/compare/v0.7.0...v0.8.0) - 2025-12-21
+
+### Added
+
+- improve interface satisfaction checking with detailed errors
+- add format specifiers to string interpolation
+- improve formatter and parser error messages
+- compiler return multiple errors
+- add positional struct literal support
+
+### Fixed
+
+- *(lsp)* show all diagnostics in workspace mode
+- nilable test
+- doctest attributes
+- *(lsp)* hover/goto for receiver methods and Go param names
+- doctests do what theyre supposed to
+- error message for parse error
+- codegen output tabs instead of spaces
+
+### Refactor
+
+- split Deref out of Unary AST
+- split Field AST into Field, PackageMember, EnumVariant
+- split Call AST into Call, TypeConversion, and TypeInst
+- move to typed AST to produce a `TypedFile` directly, then zonk
+
 ## [0.7.0](https://github.com/halcyonnouveau/soppo/compare/v0.6.0...v0.7.0) - 2025-12-19
 
 ### Added
