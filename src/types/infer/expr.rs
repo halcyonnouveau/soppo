@@ -2988,6 +2988,12 @@ impl Infer {
     /// Infer the type of a unary expression
     fn infer_unary(&mut self, op: &UnaryOp, operand: &Expr, span: Span) -> Result<TypedExpr> {
         let typed_operand = self.infer_expr(operand);
+
+        // Handle deref separately - it produces TypedExprKind::Deref
+        if *op == UnaryOp::Deref {
+            return self.infer_deref(typed_operand, operand, span);
+        }
+
         if typed_operand.is_error() {
             return Ok(TypedExpr::new(
                 TypedExprKind::Unary {
@@ -3015,50 +3021,6 @@ impl Infer {
                 let ptr_name = format!("*{}", operand_ty);
                 Type::generic(&ptr_name, vec![operand_ty])
             }
-            UnaryOp::Deref => {
-                // *p: operand must be *T, result is T
-                let operand_ty = self.substitute(typed_operand.ty.clone());
-
-                // Check for nil pointer dereference (only pointers can be dereferenced)
-                // Skip if operand is a NilAssert - that explicitly asserts non-nil
-                // Skip if type is non-nullable in Soppo (*T vs ?*T) - non-nullable types can't be nil
-                if Self::is_pointer_type(&operand_ty)
-                    && operand_ty.is_nullable()
-                    && !Self::is_nil_asserted(operand)
-                {
-                    // Get a key for the expression (works for identifiers and field chains)
-                    let expr_key = super::stmt::expr_to_key(operand);
-
-                    // Check nil state for the expression, or assume nullable for complex expressions
-                    let is_nullable = match &expr_key {
-                        Some(key) => self.get_nil_state(key) == Nullability::Nullable,
-                        None => true, // Complex expressions are conservatively nullable
-                    };
-
-                    if is_nullable {
-                        let name_for_error = expr_key.unwrap_or_else(|| "expression".to_string());
-                        // Use a more specific span: for field access, point to just the field name
-                        let error_span = match &operand.kind {
-                            ExprKind::Field {
-                                span: field_span, ..
-                            } => *field_span,
-                            _ => operand.span,
-                        };
-                        self.emit_error(SoppoError::NilPointer {
-                            name: name_for_error,
-                            span: error_span,
-                        });
-                    }
-                }
-
-                // Extract the pointee type from *T
-                if let Some(pointee_ty) = Self::extract_pointer_element(&operand_ty) {
-                    pointee_ty
-                } else {
-                    // If we can't determine the pointer type, return a type variable
-                    self.fresh_ty_var()
-                }
-            }
             UnaryOp::Recv => {
                 // <-ch: operand must be chan T, result is T
                 let operand_ty = self.substitute(typed_operand.ty.clone());
@@ -3070,11 +3032,81 @@ impl Infer {
                     self.fresh_ty_var()
                 }
             }
+            UnaryOp::Deref => unreachable!("Deref handled above"),
         };
 
         Ok(TypedExpr::new(
             TypedExprKind::Unary {
                 op: *op,
+                operand: Box::new(typed_operand),
+            },
+            result_ty,
+            span,
+        ))
+    }
+
+    /// Infer the type of a pointer dereference expression (*ptr)
+    fn infer_deref(
+        &mut self,
+        typed_operand: TypedExpr,
+        operand: &Expr,
+        span: Span,
+    ) -> Result<TypedExpr> {
+        if typed_operand.is_error() {
+            return Ok(TypedExpr::new(
+                TypedExprKind::Deref {
+                    operand: Box::new(typed_operand),
+                },
+                Type::error(),
+                span,
+            ));
+        }
+
+        // *p: operand must be *T, result is T
+        let operand_ty = self.substitute(typed_operand.ty.clone());
+
+        // Check for nil pointer dereference (only pointers can be dereferenced)
+        // Skip if operand is a NilAssert - that explicitly asserts non-nil
+        // Skip if type is non-nullable in Soppo (*T vs ?*T) - non-nullable types can't be nil
+        if Self::is_pointer_type(&operand_ty)
+            && operand_ty.is_nullable()
+            && !Self::is_nil_asserted(operand)
+        {
+            // Get a key for the expression (works for identifiers and field chains)
+            let expr_key = super::stmt::expr_to_key(operand);
+
+            // Check nil state for the expression, or assume nullable for complex expressions
+            let is_nullable = match &expr_key {
+                Some(key) => self.get_nil_state(key) == Nullability::Nullable,
+                None => true, // Complex expressions are conservatively nullable
+            };
+
+            if is_nullable {
+                let name_for_error = expr_key.unwrap_or_else(|| "expression".to_string());
+                // Use a more specific span: for field access, point to just the field name
+                let error_span = match &operand.kind {
+                    ExprKind::Field {
+                        span: field_span, ..
+                    } => *field_span,
+                    _ => operand.span,
+                };
+                self.emit_error(SoppoError::NilPointer {
+                    name: name_for_error,
+                    span: error_span,
+                });
+            }
+        }
+
+        // Extract the pointee type from *T
+        let result_ty = if let Some(pointee_ty) = Self::extract_pointer_element(&operand_ty) {
+            pointee_ty
+        } else {
+            // If we can't determine the pointer type, return a type variable
+            self.fresh_ty_var()
+        };
+
+        Ok(TypedExpr::new(
+            TypedExprKind::Deref {
                 operand: Box::new(typed_operand),
             },
             result_ty,

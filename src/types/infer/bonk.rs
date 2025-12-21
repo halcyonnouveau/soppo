@@ -523,6 +523,10 @@ fn bonk_expr(expr: &mut TypedExpr, subs: &HashMap<i32, Type>) {
             bonk_expr(operand, subs);
         }
 
+        TypedExprKind::Deref { operand } => {
+            bonk_expr(operand, subs);
+        }
+
         TypedExprKind::FuncLit {
             params,
             returns,

@@ -160,8 +160,14 @@ pub enum TypedExprKind {
         entries: Vec<(TypedExpr, TypedExpr)>,
     },
 
+    /// Unary operators: `-x`, `!x`, `&x`, `<-ch`
     Unary {
         op: UnaryOp,
+        operand: Box<TypedExpr>,
+    },
+
+    /// Pointer dereference: `*ptr`
+    Deref {
         operand: Box<TypedExpr>,
     },
 

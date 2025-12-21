@@ -505,17 +505,22 @@ impl Codegen {
                     self.gen_expr(operand);
                     self.emit(")");
                 }
-                UnaryOp::Deref => {
-                    self.emit("(*");
-                    self.gen_expr(operand);
-                    self.emit(")");
-                }
                 UnaryOp::Recv => {
                     self.emit("(<-");
                     self.gen_expr(operand);
                     self.emit(")");
                 }
+                UnaryOp::Deref => {
+                    // Deref should be handled by TypedExprKind::Deref
+                    unreachable!("Deref should use TypedExprKind::Deref")
+                }
             },
+
+            TypedExprKind::Deref { operand } => {
+                self.emit("(*");
+                self.gen_expr(operand);
+                self.emit(")");
+            }
 
             TypedExprKind::FuncLit {
                 params,
