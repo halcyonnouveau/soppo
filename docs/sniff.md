@@ -5,14 +5,14 @@ Sniff checks your Soppo code for common issues and suggests improvements. It run
 ```bash
 sop sniff                        # Lint all project files
 sop sniff src/**/*.sop           # Lint specific files/globs
-sop sniff --disable try_operator # Disable specific rules
+sop sniff --ignore try_operator  # Ignore specific rules
 ```
 
-Disable rules globally in `sop.mod`:
+Ignore rules globally in `sop.mod`:
 
 ```toml
 [sniff]
-disable = ["try_operator"]
+ignore = ["try_operator"]
 ```
 
 Ignore warnings with `//sniff:ignore [rule]` on the line before:

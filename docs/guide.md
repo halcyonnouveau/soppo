@@ -352,5 +352,5 @@ Sniff catches common issues and suggests improvements. See [sniff.md](sniff.md) 
 
 ```bash
 sop sniff                        # Lint all project files
-sop sniff --disable try_operator # Disable specific rules
+sop sniff --ignore try_operator  # Ignore specific rules
 ```

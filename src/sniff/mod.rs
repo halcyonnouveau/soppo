@@ -21,7 +21,7 @@ use crate::types::ast::TypedFile;
 #[derive(Debug, Default)]
 pub struct LintConfig {
     /// Rule codes to disable.
-    pub disabled: HashSet<String>,
+    pub ignored: HashSet<String>,
 }
 
 /// A lint warning.
@@ -95,7 +95,7 @@ pub fn lint_file(
     let ignores = IgnoreDirectives::from_comments(&file.comments);
 
     for rule in rules::all_rules() {
-        if !config.disabled.contains(rule.code()) {
+        if !config.ignored.contains(rule.code()) {
             for warning in rule.check(file, source_name, source_code) {
                 // Skip warnings that are ignored by comment directives
                 if !ignores.should_ignore(warning.code, &warning.original_span) {

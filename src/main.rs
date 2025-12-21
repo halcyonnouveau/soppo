@@ -90,7 +90,7 @@ enum Command {
 
         /// Disable specific lint rules
         #[arg(long)]
-        disable: Vec<String>,
+        ignore: Vec<String>,
     },
 }
 
@@ -194,7 +194,7 @@ fn main() -> Result<()> {
 
             format_files(&resolved, write, list, diff)?;
         }
-        Command::Sniff { files, disable } => {
+        Command::Sniff { files, ignore } => {
             let cwd = std::env::current_dir().into_diagnostic()?;
 
             // Try to discover project, but don't fail if there's no go.mod
@@ -216,18 +216,18 @@ fn main() -> Result<()> {
             }
 
             // Build lint config from sop.mod + CLI flags
-            let mut disabled: std::collections::HashSet<String> = disable.into_iter().collect();
+            let mut ignored: std::collections::HashSet<String> = ignore.into_iter().collect();
 
-            // Merge in disabled rules from sop.mod config
+            // Merge in ignored/disabled rules from sop.mod config
             if let Some(ref proj) = project
                 && let Some(ref config) = proj.config
                 && let Some(ref sniff_config) = config.sniff
-                && let Some(ref config_disabled) = sniff_config.disable
+                && let Some(ref config_ignored) = sniff_config.ignore
             {
-                disabled.extend(config_disabled.iter().cloned());
+                ignored.extend(config_ignored.iter().cloned());
             }
 
-            let config = LintConfig { disabled };
+            let config = LintConfig { ignored };
 
             sniff_files(&resolved, &config)?;
         }
