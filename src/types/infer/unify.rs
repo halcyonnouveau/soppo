@@ -49,23 +49,66 @@ impl Infer {
             return Ok(());
         }
 
+        // Helper to check if type is a nilable pointer that should trigger the
+        // nilable-pointer-to-interface error. We skip types from pure Go packages
+        // because they're "defensively nilable" (marked nilable because Go has no
+        // annotations, not because they're actually likely to be nil).
+        let is_problematic_nilable_pointer = |this: &mut Self, ty: &Type| -> bool {
+            ty.is_nullable()
+                && matches!(ty, Type::Con { sym, .. } if sym.name.starts_with('*'))
+                && !this.is_from_go_package(ty)
+        };
+
         // Check if expected type is "error" which is a built-in interface
         if matches!(&t1, Type::Con { sym, .. } if sym.name == "error" || sym.name == "?error") {
+            if is_problematic_nilable_pointer(self, &t2) {
+                return Err(SoppoError::NilablePointerToInterface {
+                    found: t2.to_string(),
+                    span: *span,
+                });
+            }
             return Ok(());
         }
 
         // Check if expected type is an interface from a Go package
         if self.is_go_interface_type(&t1) {
+            if is_problematic_nilable_pointer(self, &t2) {
+                return Err(SoppoError::NilablePointerToInterface {
+                    found: t2.to_string(),
+                    span: *span,
+                });
+            }
             return Ok(());
         }
 
         // Check if expected type is a user-defined interface in the current module
-        if self.is_soppo_interface_type(&t1) {
+        // Skip if the found type is also an interface - let normal type matching handle it
+        if self.is_soppo_interface_type(&t1) && !self.is_soppo_interface_type(&t2) {
             // Check if the concrete type satisfies the interface
-            if self.type_satisfies_interface(&t2, &t1) {
-                return Ok(());
+            match self.type_satisfies_interface(&t2, &t1) {
+                Ok(()) => {
+                    if is_problematic_nilable_pointer(self, &t2) {
+                        return Err(SoppoError::NilablePointerToInterface {
+                            found: t2.to_string(),
+                            span: *span,
+                        });
+                    }
+                    return Ok(());
+                }
+                Err(reason) => {
+                    // Get interface name for error message
+                    let interface_name = match &t1 {
+                        Type::Con { sym, .. } => sym.name.clone(),
+                        _ => t1.to_string(),
+                    };
+                    return Err(SoppoError::InterfaceNotSatisfied {
+                        found: t2.to_string(),
+                        interface_name,
+                        reason,
+                        span: *span,
+                    });
+                }
             }
-            // If not, fall through to produce a type mismatch error
         }
 
         match (&t1, &t2) {

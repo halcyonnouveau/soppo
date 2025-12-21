@@ -148,6 +148,27 @@ pub enum SoppoError {
         span: Span,
     },
 
+    #[error("Cannot assign nilable pointer `{found}` to interface type")]
+    #[diagnostic(
+        code(soppo::nilable_pointer_to_interface),
+        help("use a nil check first, or return `nil` directly")
+    )]
+    NilablePointerToInterface {
+        found: String,
+        #[label("nilable pointer assigned to interface")]
+        span: Span,
+    },
+
+    #[error("Type `{found}` does not satisfy interface `{interface_name}`")]
+    #[diagnostic(code(soppo::interface_not_satisfied), help("{reason}"))]
+    InterfaceNotSatisfied {
+        found: String,
+        interface_name: String,
+        reason: String,
+        #[label("does not satisfy `{interface_name}`")]
+        span: Span,
+    },
+
     #[error("Circular dependency detected\n\n{}", format_cycle(cycle))]
     #[diagnostic(
         code(soppo::circular_dependency),

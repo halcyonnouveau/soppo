@@ -150,11 +150,27 @@ impl ModuleId {
 }
 
 /// A symbol with module context - used for type names, function names, etc.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Note: PartialEq/Hash ignore span - we compare symbols by module and name only.
+#[derive(Debug, Clone)]
 pub struct Symbol {
     pub module: ModuleId,
     pub name: String,
     pub span: Span,
+}
+
+impl PartialEq for Symbol {
+    fn eq(&self, other: &Self) -> bool {
+        self.module == other.module && self.name == other.name
+    }
+}
+
+impl Eq for Symbol {}
+
+impl std::hash::Hash for Symbol {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.module.hash(state);
+        self.name.hash(state);
+    }
 }
 
 impl Symbol {

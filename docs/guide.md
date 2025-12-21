@@ -174,92 +174,62 @@ var maybeUser ?*User = nil  // nilable - can hold nil
 
 func findUser(id int) ?*User {
 	if id == 0 {
-		return nil          // OK: return type is nilable
+		return nil
 	}
 	return &User{name: "Alice"}
 }
 ```
 
-Nilable types include:
-- `?*T` - nilable pointer
-- `?[]T` - nilable slice
-- `?map[K]V` - nilable map
-- `?chan T` - nilable channel
-- `?func(...)` - nilable function
-- `?Interface` - nilable interface
+Nilable types include `?*T`, `?[]T`, `?map[K]V`, `?chan T`, `?func(...)`, and `?Interface`.
 
-Non-nilable types with nil zero values require initialisation:
+Non-nilable types require initialisation:
 
 ```go
-var user *User              // ERROR: non-nilable type requires initialisation
-var user *User = nil        // ERROR: cannot assign nil to non-nilable type
+var user *User              // ERROR: requires initialisation
+var user *User = nil        // ERROR: cannot assign nil
 var user *User = &User{}    // OK
 ```
 
 After a nil check, nilable types are automatically narrowed to non-nilable:
 
 ```go
-result := findUser(1)    // ?*User
+user := findUser(1)  // ?*User
 
-if result != nil {
-	fmt.Println(result.name)    // OK: result is *User here
-	printUser(result)           // OK: can pass to func expecting *User
-}
-
-// Early return also works
-if result == nil {
+if user == nil {
 	return
 }
 
-fmt.Println(result.name)    // OK: result is non-nil after guard
+fmt.Println(user.name)  // OK: user is *User after guard
 ```
 
-Some expressions are guaranteed non-nil:
-- `&expr` (address-of) - always points to a valid value
-- `new(T)` - allocates and returns a valid pointer
-- Nilable results after `?` succeeds
+Some expressions are guaranteed non-nil: `&expr`, `new(T)`, and values after `?` succeeds.
+
+When you know a value is non-nil, but the compiler can't prove it, use `.(!nil)` to assert. This panics if the value is nil, so prefer nil checks when possible:
+
 ```go
-ptr := &User{}              // *User (non-nilable)
-newUser := new(User)        // *User (non-nilable)
+user := findUser(1).(!nil)  // panics if nil - use only when certain
+fmt.Println(user.name)
+```
 
-func getUser(id int) (*User, error) { ... }
-func getNames() ([]string, error) { ... }
-func getScores() (map[string]int, error) { ... }
+Assigning a nilable pointer to an interface requires a nil check first:
 
-func process() error {
-    user := getUser(1) ?    // If we get here, error was nil
-    fmt.Println(user.name)  // OK: user is non-nil after ?
-    return nil
+```go
+func getError() error {
+	var p ?*MyError = nil
+	return p  // ERROR: nilable pointer assigned to interface
+}
+
+// Fix: check first or return nil directly
+func getError() error {
+	var p ?*MyError = maybeGetError()
+	if p == nil {
+		return nil  // OK: explicit nil
+	}
+	return p  // OK: p is non-nil here
 }
 ```
 
-When you know a value is non-nil from external context (e.g., API guarantees), use `.(!nil)` to assert it:
-
-```go
-user := findUser(1).(!nil)
-fmt.Println(user.name)  // OK: user is *User
-```
-
-This generates no runtime code - it's purely a compile-time assertion.
-
-Types from external Go packages default to nilable since Go has no nilability annotations. Use nil checks or `.(!nil)` when passing to Soppo functions expecting non-nilable types.
-
-> [!NOTE]
-> Flow-sensitive nil tracking is complex, and we don't expect to catch every case. The goal is to catch common mistakes, not provide formal guarantees. One notable limitation is Go's interface nil behaviour, an interface is only `== nil` when both its type and value are nil:
->
-> ```go
-> func getError() error {
->     var p *MyError = nil
->     return p  // interface has (type=*MyError, value=nil)
-> }
->
-> err := getError()
-> if err != nil {
->     // This runs! The interface isn't nil because it has a concrete type
-> }
-> ```
->
-> Soppo supports `?Interface` but currently cannot detect when a non-nil interface wraps a nil concrete value.
+This prevents a Go gotcha where a non-nil interface can wrap a nil pointer.
 
 ## Named Arguments
 

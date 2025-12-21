@@ -951,6 +951,60 @@ impl Infer {
             .map(|(path, span, _, _)| (path.as_str(), *span))
     }
 
+    /// Check if a type is from a pure Go package (not Soppo source or soppo-generated).
+    ///
+    /// Types from pure Go packages are "defensively nilable" - they're marked nilable
+    /// because Go has no nilability annotations, not because they're actually likely
+    /// to be nil. This distinction matters for checks like nilable-pointer-to-interface,
+    /// where we want to catch intentional nilability but not defensive nilability.
+    pub(super) fn is_from_go_package(&mut self, ty: &Type) -> bool {
+        let package_name = match ty {
+            Type::Con {
+                sym: name, args, ..
+            } => {
+                // For pointer types like *File, the module is on the inner type
+                // Check the first type arg if this is a pointer with empty module
+                if name.module.0.is_empty() && name.name.starts_with('*') {
+                    if let Some(inner) = args.first() {
+                        return self.is_from_go_package(inner);
+                    }
+                    return false;
+                }
+
+                // Types without a module are local to the current package
+                if name.module.0.is_empty() {
+                    return false;
+                }
+                name.module.0.clone()
+            }
+            _ => return false,
+        };
+
+        // If it's a Soppo import, it's not from a pure Go package
+        if self.is_soppo_import(&package_name) {
+            return false;
+        }
+
+        // Get the import path for this package
+        let import_path = self
+            .imports
+            .get(&package_name)
+            .map(|(path, _, _, _)| path.clone())
+            .unwrap_or_else(|| package_name.clone());
+
+        // Try to get the package info
+        let pkg = match self
+            .go_cache
+            .get_or_parse(&import_path, self.project.as_ref())
+        {
+            Ok(pkg) => pkg,
+            Err(_) => return false,
+        };
+
+        // If the package is soppo-generated, treat it like Soppo code
+        !pkg.soppo_generated
+    }
+
     /// Check if a type is an interface from a Go package
     /// Returns true if the type is defined as an interface in its source package
     pub(super) fn is_go_interface_type(&mut self, ty: &Type) -> bool {
@@ -1001,20 +1055,36 @@ impl Infer {
         false
     }
 
-    /// Check if a type is a user-defined interface in the current module
+    /// Check if a type is a user-defined interface in Soppo code
+    /// (either the current module or an imported Soppo package)
     pub(super) fn is_soppo_interface_type(&self, ty: &Type) -> bool {
-        let type_name = match ty {
+        let (type_name, module) = match ty {
             Type::Con { sym: name, .. } => {
                 // Strip nullable prefix if present
-                name.name
+                let ty_name = name
+                    .name
                     .strip_prefix('?')
                     .unwrap_or(&name.name)
-                    .to_string()
+                    .to_string();
+                (ty_name, &name.module)
             }
             _ => return false,
         };
 
-        // Look up in current module's types
+        // If the type has a module, check that imported Soppo package
+        if !module.0.is_empty() {
+            if let Some(module_id) = self.get_soppo_module(&module.0)
+                && let Some(type_def) = self.global_state.lookup_type_in(module_id, &type_name)
+            {
+                return matches!(
+                    type_def.kind,
+                    crate::types::ctx::TypeDefKind::Interface { .. }
+                );
+            }
+            return false;
+        }
+
+        // Otherwise, look up in current module's types
         if let Some(type_def) = self.global_state.current_module().types.get(&type_name) {
             return matches!(
                 type_def.kind,
@@ -1026,22 +1096,36 @@ impl Infer {
     }
 
     /// Get the interface methods for a type if it's an interface
+    /// (either the current module or an imported Soppo package)
     pub(super) fn get_interface_methods(
         &self,
         ty: &Type,
     ) -> Option<Vec<crate::types::ctx::MethodSig>> {
-        let type_name = match ty {
+        let (type_name, module) = match ty {
             Type::Con { sym: name, .. } => {
                 // Strip nullable prefix if present
-                name.name
+                let ty_name = name
+                    .name
                     .strip_prefix('?')
                     .unwrap_or(&name.name)
-                    .to_string()
+                    .to_string();
+                (ty_name, &name.module)
             }
             _ => return None,
         };
 
-        // Look up in current module's types
+        // If the type has a module, check that imported Soppo package
+        if !module.0.is_empty() {
+            if let Some(module_id) = self.get_soppo_module(&module.0)
+                && let Some(type_def) = self.global_state.lookup_type_in(module_id, &type_name)
+                && let crate::types::ctx::TypeDefKind::Interface { methods } = &type_def.kind
+            {
+                return Some(methods.clone());
+            }
+            return None;
+        }
+
+        // Otherwise, look up in current module's types
         if let Some(type_def) = self.global_state.current_module().types.get(&type_name)
             && let crate::types::ctx::TypeDefKind::Interface { methods } = &type_def.kind
         {
@@ -1051,12 +1135,17 @@ impl Infer {
         None
     }
 
-    /// Check if a concrete type satisfies an interface (has all required methods)
-    pub(super) fn type_satisfies_interface(&self, concrete_ty: &Type, interface_ty: &Type) -> bool {
+    /// Check if a concrete type satisfies an interface.
+    /// Returns Ok(()) if satisfied, or Err(reason) explaining why not.
+    pub(super) fn type_satisfies_interface(
+        &self,
+        concrete_ty: &Type,
+        interface_ty: &Type,
+    ) -> std::result::Result<(), String> {
         // Get the interface methods
         let interface_methods = match self.get_interface_methods(interface_ty) {
             Some(methods) => methods,
-            None => return false,
+            None => return Err("not an interface type".to_string()),
         };
 
         // Get the concrete type name
@@ -1066,14 +1155,21 @@ impl Infer {
                 let type_name = name.name.strip_prefix('?').unwrap_or(&name.name);
                 type_name.strip_prefix('*').unwrap_or(type_name).to_string()
             }
-            _ => return false,
+            _ => return Err("not a concrete type".to_string()),
         };
 
         // Get methods defined on the concrete type
         let module = self.global_state.current_module();
         let type_methods = match module.methods.get(&concrete_name) {
             Some(methods) => methods,
-            None => return interface_methods.is_empty(), // No methods, only satisfies empty interface
+            None => {
+                // No methods, only satisfies empty interface
+                if interface_methods.is_empty() {
+                    return Ok(());
+                }
+                let method_name = &interface_methods[0].name;
+                return Err(format!("missing method `{}`", method_name));
+            }
         };
 
         // Check each interface method is implemented
@@ -1082,22 +1178,69 @@ impl Infer {
                 Some(impl_method) => {
                     // Check parameter count matches (excluding receiver)
                     if impl_method.params.len() != required_method.params.len() {
-                        return false;
+                        return Err(format!(
+                            "method `{}` has {} parameters, but interface requires {}",
+                            required_method.name,
+                            impl_method.params.len(),
+                            required_method.params.len()
+                        ));
                     }
 
                     // Check return type count matches
                     if impl_method.return_types.len() != required_method.returns.len() {
-                        return false;
+                        return Err(format!(
+                            "method `{}` has {} return values, but interface requires {}",
+                            required_method.name,
+                            impl_method.return_types.len(),
+                            required_method.returns.len()
+                        ));
                     }
 
-                    // Note: We do a basic check here. A full implementation would
-                    // unify parameter and return types for exact matching.
+                    // Check parameter types match
+                    for (i, ((_, impl_ty), (_, req_ty))) in impl_method
+                        .params
+                        .iter()
+                        .zip(required_method.params.iter())
+                        .enumerate()
+                    {
+                        if impl_ty != req_ty {
+                            return Err(format!(
+                                "method `{}` parameter {} has type `{}`, but interface requires `{}`",
+                                required_method.name,
+                                i + 1,
+                                impl_ty,
+                                req_ty
+                            ));
+                        }
+                    }
+
+                    // Check return types match
+                    for (i, (impl_ty, req_ty)) in impl_method
+                        .return_types
+                        .iter()
+                        .zip(required_method.returns.iter())
+                        .enumerate()
+                    {
+                        if impl_ty != req_ty {
+                            let pos = if impl_method.return_types.len() == 1 {
+                                String::new()
+                            } else {
+                                format!(" {}", i + 1)
+                            };
+                            return Err(format!(
+                                "method `{}` has return type{} `{}`, but interface requires `{}`",
+                                required_method.name, pos, impl_ty, req_ty
+                            ));
+                        }
+                    }
                 }
-                None => return false, // Required method not found
+                None => {
+                    return Err(format!("missing method `{}`", required_method.name));
+                }
             }
         }
 
-        true
+        Ok(())
     }
 
     /// Get the ultimate underlying type for a type alias chain.

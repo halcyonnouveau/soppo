@@ -2,15 +2,14 @@
 source: tests/single.rs
 expression: result.unwrap_err()
 ---
-Error: soppo::type_mismatch
+Error: soppo::interface_not_satisfied
 
-  × Mismatched types
+  × Type `MyInt` does not satisfy interface `Stringer`
     ╭─[interface_not_satisfied.sop:12:22]
  11 │ func main() {
  12 │     var s Stringer = MyInt(42)
     ·                      ────┬────
-    ·                          ╰── expected `Stringer`, found `MyInt`
+    ·                          ╰── does not satisfy `Stringer`
  13 │     _ = s
     ╰────
-  help: Change this expression to produce `Stringer`, or change the expected
-        type
+  help: missing method `String`
