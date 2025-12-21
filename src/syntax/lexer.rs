@@ -66,6 +66,10 @@ pub enum Token {
     Range,
     #[token("select")]
     Select,
+    // Recognised but unsupported - used to provide a helpful error message
+    // directing users to use `match` instead
+    #[token("switch")]
+    Switch,
 
     // Identifiers and literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", priority = 1, callback = |lex| lex.slice().to_string())]
@@ -235,6 +239,7 @@ impl std::fmt::Display for Token {
             Token::Continue => write!(f, "'continue'"),
             Token::Range => write!(f, "'range'"),
             Token::Select => write!(f, "'select'"),
+            Token::Switch => write!(f, "'switch'"),
             Token::Ident(name) => write!(f, "identifier '{}'", name),
             Token::Float(n) => write!(f, "float '{}'", n),
             Token::Integer(n) => write!(f, "integer '{}'", n.value),

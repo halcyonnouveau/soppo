@@ -18,6 +18,16 @@ pub enum SoppoError {
         span: Span,
     },
 
+    #[error("Use `match` instead of `switch`")]
+    #[diagnostic(
+        code(soppo::unsupported_switch),
+        url("https://tour.soppolang.dev/match")
+    )]
+    UnsupportedSwitch {
+        #[label("`switch` is not supported")]
+        span: Span,
+    },
+
     #[error("Type error: {message}")]
     #[diagnostic(code(soppo::type_error))]
     Type {

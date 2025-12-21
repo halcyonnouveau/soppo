@@ -6,11 +6,12 @@ use std::process::{Command as ProcessCommand, Stdio};
 use clap::{Parser as ClapParser, Subcommand};
 use miette::{IntoDiagnostic, NamedSource, Result};
 use soppo::build;
-use soppo::config::{ConfigError, resolve_globs};
+use soppo::config::{ConfigError, SopConfig, resolve_globs};
 use soppo::fmt;
 use soppo::go::Project;
 use soppo::sniff::{self, LintConfig};
 use soppo::test::TestConfig;
+use tempfile::NamedTempFile;
 
 #[derive(ClapParser)]
 #[command(name = "sop", about = "Sop is a tool for managing Soppo source code")]
@@ -382,8 +383,6 @@ fn format_files(files: &[PathBuf], write: bool, list: bool, diff: bool) -> Resul
 
 /// Show diff between original and formatted using diff -u
 fn show_diff(file: &Path, original: &str, formatted: &str) -> Result<()> {
-    use tempfile::NamedTempFile;
-
     // Create temp files for diff
     let mut orig_file = NamedTempFile::new().into_diagnostic()?;
     let mut fmt_file = NamedTempFile::new().into_diagnostic()?;
@@ -446,8 +445,6 @@ fn sniff_files(files: &[PathBuf], config: &LintConfig) -> Result<()> {
 /// Check if sop.mod in current or parent directories has version requirements
 /// that don't match the current environment.
 fn check_version_requirements() -> Result<()> {
-    use soppo::config::SopConfig;
-
     let cwd = match std::env::current_dir() {
         Ok(d) => d,
         Err(_) => return Ok(()), // Can't check, just continue

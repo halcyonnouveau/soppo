@@ -1,0 +1,14 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::unsupported_switch (https://tour.soppolang.dev/match)
+
+  × Use `match` instead of `switch`
+   ╭─[switch.sop:5:5]
+ 4 │     x := 1
+ 5 │     switch x {
+   ·     ───┬──
+   ·        ╰── `switch` is not supported
+ 6 │     case 1:
+   ╰────

@@ -888,6 +888,8 @@ impl Parser {
                 self.parse_match_stmt(start_span)
             }
 
+            Some(Token::Switch) => Err(SoppoError::UnsupportedSwitch { span: start_span }),
+
             Some(Token::Select) => {
                 self.advance();
                 self.parse_select_stmt(start_span)
