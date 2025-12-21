@@ -31,9 +31,9 @@ func main() {
 
 Any valid expression works inside the braces, including arithmetic, function calls, and field access.
 
-Use double braces to include a literal brace in your string.
+Add format specifiers after a colon for control over formatting: \`{value:spec}\`. These follow Go's fmt verbs.
 
-**Try it:** Add another interpolated value to the output.`,
+**Try it:** Change \`.2f\` to \`.4f\` to show more decimal places.`,
     code: `package main
 
 import "fmt"
@@ -45,6 +45,13 @@ func main() {
 	fmt.Println("{name} v{version}")
 	fmt.Println("2 + 2 = {2 + 2}")
 	fmt.Println("Length: {len(name)}")
+
+	// Format specifiers
+	num := 255
+	fmt.Println("Hex: {num:x}, Binary: {num:b}")
+
+	price := 19.99
+	fmt.Println("Price: {price:.2f}")
 
 	// Escaped braces
 	fmt.Println("Use {{braces}} for interpolation")

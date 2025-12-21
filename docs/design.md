@@ -288,9 +288,15 @@ log(level: "info", "msg1", "msg2")
 name := "alice"
 age := 30
 msg := "hello {name}, you are {age}"
-// Expressions are also supported
 msg2 := "total: {len(items) * 2}"
+
+// Format specifiers: {expr:spec}
+fmt.Println("Hex: {num:x}, Padded: {num:08d}")
+fmt.Println("Price: {price:.2f}")
+fmt.Println("Debug: {items:#v}")
 ```
+
+Format specifiers follow Go's `fmt` verbs (`d`, `x`, `b`, `f`, `e`, `s`, `t`, `v`, etc.). The compiler validates that specifiers match the expression type.
 
 > [!TIP]
 > Use `{{` and `}}` to escape literal braces.
