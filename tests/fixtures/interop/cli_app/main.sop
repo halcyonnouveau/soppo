@@ -1,0 +1,89 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"runtime"
+
+	"log/slog"
+
+	"github.com/lmittmann/tint"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
+	"github.com/urfave/cli/v3"
+)
+
+var runCommand = &cli.Command{
+	Name:  "run",
+	Usage: "Create a container similar to a service to run a one-off command",
+	Action: func(ctx context.Context, cmd *cli.Command) error {
+		return nil
+	},
+}
+
+func initLogger(verbosity int) {
+	var level slog.Level
+	match {
+	case verbosity >= 2:
+		// Trace
+		level = slog.LevelDebug - 4
+	case verbosity >= 1:
+		level = slog.LevelDebug
+	default:
+		level = slog.LevelInfo
+	}
+
+	noColor := false
+
+	// Support for https://no-color.org/
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		noColor = true
+	} else if runtime.GOOS != "windows" && !isatty.IsTerminal(os.Stderr.(!nil).Fd()) {
+		// None windows and no terminal.
+		noColor = true
+	}
+
+	logger := slog.New(tint.NewHandler(
+		colorable.NewColorable(os.Stderr),
+		&tint.Options{
+			NoColor:    noColor,
+			Level:      level,
+			TimeFormat: "15:04",
+		},
+	))
+	slog.SetDefault(logger)
+}
+
+func main() {
+	// Store for cli.BoolFlag.Config.Count
+	var verbosity int
+
+	cmd := &cli.Command{
+		Usage: "Compose for incus",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:    "verbosity",
+				Aliases: []string{"v"},
+				Config: cli.BoolConfig{
+					Count: &verbosity,
+				},
+			},
+		},
+		Commands: []*cli.Command{
+			runCommand,
+		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			initLogger(verbosity)
+			return ctx, nil
+		},
+		After: func(ctx context.Context, cmd *cli.Command) error {
+			return nil
+		},
+	}
+
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		fmt.Printf("ERROR: %s", err)
+		os.Exit(1)
+	}
+}
