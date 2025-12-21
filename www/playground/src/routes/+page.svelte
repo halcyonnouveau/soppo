@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { page } from "$app/state";
+  import LZString from "lz-string";
   import Editor from "$lib/components/Editor.svelte";
 
   const defaultCode = `package main
@@ -25,16 +26,21 @@ func main() {
   onMount(() => {
     const codeParam = page.url.searchParams.get("code");
     if (codeParam) {
-      try {
-        source = decodeURIComponent(atob(codeParam));
-      } catch {
-        // Invalid base64, ignore
+      let decoded = LZString.decompressFromEncodedURIComponent(codeParam);
+      if (!decoded) {
+        // Fallback for old base64 URLs
+        try {
+          decoded = decodeURIComponent(atob(codeParam));
+        } catch {}
+      }
+      if (decoded) {
+        source = decoded;
       }
     }
   });
 
   function share() {
-    const encoded = btoa(encodeURIComponent(source));
+    const encoded = LZString.compressToEncodedURIComponent(source);
     const url = `${window.location.origin}${window.location.pathname}?code=${encoded}`;
     navigator.clipboard.writeText(url);
     shareText = "Copied!";
