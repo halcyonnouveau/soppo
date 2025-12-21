@@ -1,0 +1,52 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func parsePort(s string) (int, error) {
+	if s == "" {
+		return 0, errors.New("empty port")
+	}
+	return 8080, nil
+}
+
+// This function has an if err != nil pattern that could use ?
+func connect() (string, error) {
+	port, err := parsePort("8080")
+	if err != nil {
+		return "", err
+	}
+	return "Connected on port {port}", nil
+}
+
+// This function already uses the try operator - no warning
+func connectWithTry() (string, error) {
+	port := parsePort("8080") ?
+	return "Connected on port {port}", nil
+}
+
+// Multiple error checks - should warn on each
+func multipleChecks() error {
+	_, err := parsePort("8080")
+	if err != nil {
+		return err
+	}
+
+	_, err2 := parsePort("9000")
+	if err2 != nil {
+		return err2
+	}
+
+	return nil
+}
+
+func main() {
+	result, err := connect()
+	if err != nil {
+		fmt.Println("Error: {err}")
+		return
+	}
+	fmt.Println(result)
+}

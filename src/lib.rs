@@ -8,6 +8,7 @@ pub mod doctest;
 pub mod error;
 pub mod fmt;
 pub mod go;
+pub mod sniff;
 pub mod syntax;
 pub mod test;
 pub mod types;

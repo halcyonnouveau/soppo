@@ -1,0 +1,14 @@
+---
+source: tests/sniff.rs
+expression: output
+---
+  ⚠ Consider using the `?` operator
+    ╭─[try_operator_ignore.sop:28:2]
+ 27 │         port, err := parsePort("8080")
+ 28 │ ╭─▶     if err != nil {
+ 29 │ │           return "", err
+ 30 │ ├─▶     }
+    · ╰──── use `?` instead
+ 31 │         return "Connected on port {port}", nil
+    ╰────
+  help: Replace `if err != nil { ... }` with `?`

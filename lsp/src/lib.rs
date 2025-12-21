@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use miette::Diagnostic as MietteDiagnostic;
-use soppo::build::{typecheck, typecheck_with_symbols, typecheck_workspace};
+use soppo::build::{typecheck, typecheck_to_typed_with_symbols, typecheck_workspace};
 use soppo::error::{SoppoError, SoppoErrors};
 use soppo::fmt::format_source;
 use soppo::go::SourceLocation;
+use soppo::sniff::{self, LintConfig, LintWarning};
 use soppo::syntax::{FileId, FileRegistry, Span};
 use soppo::types::{GlobalCtxt, SymbolKind as SoppoSymbolKind, SymbolTable};
 use tokio::sync::RwLock;
@@ -169,6 +170,24 @@ pub fn soppo_error_to_diagnostics(err: &SoppoError) -> Vec<Diagnostic> {
     }]
 }
 
+/// Convert a LintWarning to an LSP diagnostic.
+pub fn lint_warning_to_diagnostic(warning: &LintWarning, source: &str) -> Diagnostic {
+    let range = byte_offset_to_range(
+        source,
+        warning.span.offset(),
+        warning.span.offset() + warning.span.len(),
+    );
+
+    Diagnostic {
+        range,
+        severity: Some(DiagnosticSeverity::WARNING),
+        code: Some(NumberOrString::String(warning.code.to_string())),
+        source: Some("sniff".to_string()),
+        message: warning.message.clone(),
+        ..Default::default()
+    }
+}
+
 /// Run typecheck and convert result to diagnostics.
 pub fn check_document(text: &str, filename: &str) -> Vec<Diagnostic> {
     match typecheck(text, filename) {
@@ -276,6 +295,8 @@ struct Workspace {
     global_ctxt: GlobalCtxt,
     /// Symbol tables per file for LSP features
     symbol_tables: HashMap<FileId, SymbolTable>,
+    /// Typed AST per file for linting
+    typed_files: HashMap<FileId, soppo::types::TypedFile>,
     /// Diagnostics per file (type errors, unused variables, etc.)
     diagnostics: HashMap<FileId, Vec<SoppoError>>,
 }
@@ -303,8 +324,19 @@ impl Backend {
 
     /// Analyse a document, returning diagnostics and symbol table (single-file mode)
     pub fn analyse_document(text: &str, filename: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
-        match typecheck_with_symbols(text, filename) {
-            Ok(symbols) => (vec![], Some(symbols)),
+        match typecheck_to_typed_with_symbols(text, filename) {
+            Ok(result) => {
+                // Run sniff linter on successful typecheck
+                let config = LintConfig::default();
+                let warnings = sniff::lint_file(&result.typed_file, filename, text, &config);
+
+                let diagnostics = warnings
+                    .iter()
+                    .map(|w| lint_warning_to_diagnostic(w, text))
+                    .collect();
+
+                (diagnostics, Some(result.symbols))
+            }
             Err(report) => {
                 // First try to downcast to SoppoError for rich diagnostics
                 if let Some(err) = report.downcast_ref::<SoppoError>() {
@@ -354,6 +386,7 @@ impl Backend {
                     file_registry: result.file_registry,
                     global_ctxt: result.global_ctxt,
                     symbol_tables: result.symbol_tables,
+                    typed_files: result.typed_files,
                     diagnostics: result.diagnostics,
                 });
                 true
@@ -390,6 +423,7 @@ impl Backend {
                     file_registry: result.file_registry,
                     global_ctxt: result.global_ctxt,
                     symbol_tables: result.symbol_tables,
+                    typed_files: result.typed_files,
                     diagnostics: result.diagnostics,
                 });
                 Ok(())
@@ -459,6 +493,9 @@ impl Backend {
             return;
         };
 
+        let open_docs = self.open_documents.read().await;
+        let config = LintConfig::default();
+
         // Publish diagnostics for each file
         for file_id in ws.file_registry.file_ids() {
             let Some(file_path) = ws.file_registry.get_path(file_id) else {
@@ -468,12 +505,37 @@ impl Backend {
                 continue;
             };
 
-            // Get diagnostics for this file, or empty vec if none
-            let diagnostics = ws
+            // Get compile errors for this file
+            let mut diagnostics: Vec<Diagnostic> = ws
                 .diagnostics
                 .get(&file_id)
                 .map(|errors| errors.iter().flat_map(soppo_error_to_diagnostics).collect())
                 .unwrap_or_default();
+
+            // Run sniff on files without compile errors
+            if diagnostics.is_empty()
+                && let Some(typed_file) = ws.typed_files.get(&file_id)
+            {
+                // Get source text
+                let source = open_docs
+                    .get(file_path)
+                    .cloned()
+                    .or_else(|| std::fs::read_to_string(file_path).ok());
+
+                if let Some(source) = source {
+                    let filename = file_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("input.sop");
+
+                    let warnings = sniff::lint_file(typed_file, filename, &source, &config);
+                    diagnostics.extend(
+                        warnings
+                            .iter()
+                            .map(|w| lint_warning_to_diagnostic(w, &source)),
+                    );
+                }
+            }
 
             self.client
                 .publish_diagnostics(uri, diagnostics, None)

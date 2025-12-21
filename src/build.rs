@@ -25,6 +25,8 @@ pub struct WorkspaceResult {
     pub global_ctxt: GlobalCtxt,
     /// Symbol tables per file for LSP features
     pub symbol_tables: HashMap<FileId, SymbolTable>,
+    /// Typed AST per file for linting
+    pub typed_files: HashMap<FileId, TypedFile>,
     /// Diagnostics per file
     pub diagnostics: HashMap<FileId, Vec<SoppoError>>,
 }
@@ -254,6 +256,34 @@ pub fn typecheck_with_symbols(source: &str, filename: &str) -> Result<SymbolTabl
     Ok(infer.into_symbols())
 }
 
+/// Type-check a single source string and return the typed AST.
+/// Used by the linter to analyse code structure with type information.
+pub fn typecheck_to_typed(source: &str, filename: &str) -> Result<TypedFile> {
+    let mut infer = Infer::new()?;
+    parse_typecheck_to_typed(source, filename, &mut infer)
+}
+
+/// Result of type-checking with full context for LSP and linting.
+#[derive(Debug)]
+pub struct TypecheckResult {
+    /// The typed AST
+    pub typed_file: TypedFile,
+    /// Symbol table for LSP features
+    pub symbols: SymbolTable,
+}
+
+/// Type-check a single source string and return both typed AST and symbol table.
+/// Used by the LSP to support both hover/go-to-definition and linting.
+pub fn typecheck_to_typed_with_symbols(source: &str, filename: &str) -> Result<TypecheckResult> {
+    let mut infer = Infer::new()?;
+    let typed_file = parse_typecheck_to_typed(source, filename, &mut infer)?;
+    let symbols = infer.into_symbols();
+    Ok(TypecheckResult {
+        typed_file,
+        symbols,
+    })
+}
+
 /// Type-check a project with proper cross-module import resolution.
 /// Returns a list of (filename, success) pairs for reporting.
 pub fn typecheck_project(root: &Path) -> Result<Vec<PathBuf>> {
@@ -421,6 +451,7 @@ pub fn typecheck_workspace(
             file_registry: FileRegistry::new(),
             global_ctxt: GlobalCtxt::new(),
             symbol_tables: HashMap::new(),
+            typed_files: HashMap::new(),
             diagnostics: HashMap::new(),
         });
     }
@@ -432,6 +463,7 @@ pub fn typecheck_workspace(
     let mut file_registry = FileRegistry::new();
     let mut global_ctxt = GlobalCtxt::new();
     let mut symbol_tables = HashMap::new();
+    let mut typed_files = HashMap::new();
     let mut diagnostics: HashMap<FileId, Vec<SoppoError>> = HashMap::new();
 
     for source_path in &ordered_sources {
@@ -473,17 +505,11 @@ pub fn typecheck_workspace(
         let mut infer = Infer::with_global_state_and_project(global_ctxt, project.clone())?;
         infer.process_imports(&file.imports);
 
-        // Two-pass type checking - collect errors instead of failing immediately
-        for decl in &file.decls {
-            if let Err(e) = register_decl_inner(&mut infer, decl) {
-                infer.emit_error(e);
-            }
-        }
-        for decl in &file.decls {
-            if let Err(e) = infer_decl_inner(&mut infer, decl) {
-                infer.emit_error(e);
-            }
-        }
+        // Infer the file and get the typed AST
+        let mut typed_file = infer.infer_file(&file);
+
+        // Substitute type variables with their solutions
+        crate::types::infer::bonk_file(&mut typed_file, infer.substitutions());
 
         // Check for unused imports
         if let Err(e) = infer.check_unused_imports() {
@@ -502,6 +528,7 @@ pub fn typecheck_workspace(
         let symbols = infer.symbols().clone();
         global_ctxt = infer.into_global_state();
         symbol_tables.insert(file_id, symbols);
+        typed_files.insert(file_id, typed_file);
     }
 
     Ok(WorkspaceResult {
@@ -509,6 +536,7 @@ pub fn typecheck_workspace(
         file_registry,
         global_ctxt,
         symbol_tables,
+        typed_files,
         diagnostics,
     })
 }

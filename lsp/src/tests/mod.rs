@@ -3,6 +3,7 @@ mod diagnostics;
 mod references;
 mod rename;
 mod signature_help;
+mod sniff;
 mod symbols;
 
 use soppo::syntax::{FileId, LineColumn};

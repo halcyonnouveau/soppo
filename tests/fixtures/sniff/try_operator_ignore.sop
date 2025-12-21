@@ -1,0 +1,47 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+func parsePort(s string) (int, error) {
+	if s == "" {
+		return 0, errors.New("empty port")
+	}
+	return 8080, nil
+}
+
+// This should NOT warn (ignored)
+func connectIgnored() (string, error) {
+	port, err := parsePort("8080")
+	//sniff:ignore try_operator
+	if err != nil {
+		return "", err
+	}
+	return "Connected on port {port}", nil
+}
+
+// This SHOULD warn (not ignored)
+func connectNotIgnored() (string, error) {
+	port, err := parsePort("8080")
+	if err != nil {
+		return "", err
+	}
+	return "Connected on port {port}", nil
+}
+
+// This should NOT warn (ignore all lints)
+func connectIgnoreAll() (string, error) {
+	port, err := parsePort("8080")
+	//sniff:ignore
+	if err != nil {
+		return "", err
+	}
+	return "Connected on port {port}", nil
+}
+
+func main() {
+	result, _ := connectIgnored()
+	fmt.Println(result)
+}

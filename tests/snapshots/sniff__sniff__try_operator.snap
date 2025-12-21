@@ -1,0 +1,51 @@
+---
+source: tests/sniff.rs
+expression: output
+---
+  ⚠ Consider using the `?` operator
+    ╭─[try_operator.sop:18:2]
+ 17 │         port, err := parsePort("8080")
+ 18 │ ╭─▶     if err != nil {
+ 19 │ │           return "", err
+ 20 │ ├─▶     }
+    · ╰──── use `?` instead
+ 21 │         return "Connected on port {port}", nil
+    ╰────
+  help: Replace `if err != nil { ... }` with `?`
+
+
+  ⚠ Consider using the `?` operator
+    ╭─[try_operator.sop:33:2]
+ 32 │         _, err := parsePort("8080")
+ 33 │ ╭─▶     if err != nil {
+ 34 │ │           return err
+ 35 │ ├─▶     }
+    · ╰──── use `?` instead
+ 36 │     
+    ╰────
+  help: Replace `if err != nil { ... }` with `?`
+
+
+  ⚠ Consider using the `?` operator
+    ╭─[try_operator.sop:38:2]
+ 37 │         _, err2 := parsePort("9000")
+ 38 │ ╭─▶     if err2 != nil {
+ 39 │ │           return err2
+ 40 │ ├─▶     }
+    · ╰──── use `?` instead
+ 41 │     
+    ╰────
+  help: Replace `if err2 != nil { ... }` with `?`
+
+
+  ⚠ Consider using the `?` operator
+    ╭─[try_operator.sop:47:2]
+ 46 │         result, err := connect()
+ 47 │ ╭─▶     if err != nil {
+ 48 │ │           fmt.Println("Error: {err}")
+ 49 │ │           return
+ 50 │ ├─▶     }
+    · ╰──── use `?` instead
+ 51 │         fmt.Println(result)
+    ╰────
+  help: Replace `if err != nil { ... }` with `?`

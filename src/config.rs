@@ -51,6 +51,15 @@ pub struct SopModRaw {
     pub go: Option<String>,
     /// Sop version requirement (e.g., "0.4.1") - requires sopmod
     pub sop: Option<String>,
+    /// Sniff linter configuration
+    pub sniff: Option<SniffConfigRaw>,
+}
+
+/// Raw sniff configuration from sop.mod
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct SniffConfigRaw {
+    /// Lint rules to disable
+    pub disable: Option<Vec<String>>,
 }
 
 /// Processed config with compiled glob patterns
@@ -68,6 +77,8 @@ pub struct SopConfig {
     pub go: Option<String>,
     /// Sop version requirement (e.g., "0.4.1") - requires sopmod
     pub sop: Option<String>,
+    /// Sniff linter configuration
+    pub sniff: Option<SniffConfigRaw>,
 }
 
 impl SopConfig {
@@ -101,6 +112,7 @@ impl SopConfig {
             config_dir: dir.to_path_buf(),
             go: raw.go,
             sop: raw.sop,
+            sniff: raw.sniff,
         }))
     }
 

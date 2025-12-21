@@ -9,6 +9,7 @@ use soppo::build;
 use soppo::config::{ConfigError, resolve_globs};
 use soppo::fmt;
 use soppo::go::Project;
+use soppo::sniff::{self, LintConfig};
 use soppo::test::TestConfig;
 
 #[derive(ClapParser)]
@@ -79,6 +80,17 @@ enum Command {
         /// Display diffs instead of rewriting files
         #[arg(short, long)]
         diff: bool,
+    },
+    /// Checks source files to catch common mistakes and improve you Soppo code
+    Sniff {
+        /// Files or glob patterns to lint.
+        /// If empty, uses sop.mod config or errors if no config exists.
+        #[arg()]
+        files: Vec<String>,
+
+        /// Disable specific lint rules
+        #[arg(long)]
+        disable: Vec<String>,
     },
 }
 
@@ -181,6 +193,43 @@ fn main() -> Result<()> {
             }
 
             format_files(&resolved, write, list, diff)?;
+        }
+        Command::Sniff { files, disable } => {
+            let cwd = std::env::current_dir().into_diagnostic()?;
+
+            // Try to discover project, but don't fail if there's no go.mod
+            let project = Project::discover(&cwd).ok();
+
+            let resolved = if files.is_empty() {
+                // No files provided - need project config
+                let proj = project.as_ref().ok_or(ConfigError::NoFilesSpecified)?;
+                if proj.config.is_none() {
+                    return Err(ConfigError::NoFilesSpecified.into());
+                }
+                proj.find_sources()
+            } else {
+                resolve_globs(&files, &cwd)?
+            };
+
+            if resolved.is_empty() {
+                return Err(ConfigError::NoFilesSpecified.into());
+            }
+
+            // Build lint config from sop.mod + CLI flags
+            let mut disabled: std::collections::HashSet<String> = disable.into_iter().collect();
+
+            // Merge in disabled rules from sop.mod config
+            if let Some(ref proj) = project
+                && let Some(ref config) = proj.config
+                && let Some(ref sniff_config) = config.sniff
+                && let Some(ref config_disabled) = sniff_config.disable
+            {
+                disabled.extend(config_disabled.iter().cloned());
+            }
+
+            let config = LintConfig { disabled };
+
+            sniff_files(&resolved, &config)?;
         }
     }
 
@@ -357,6 +406,50 @@ fn show_diff(file: &Path, original: &str, formatted: &str) -> Result<()> {
 
     // Print diff output (diff returns exit code 1 when files differ, which is expected)
     print!("{}", String::from_utf8_lossy(&output.stdout));
+
+    Ok(())
+}
+
+/// Lint files for code quality issues
+fn sniff_files(files: &[PathBuf], config: &LintConfig) -> Result<()> {
+    let mut total_warnings = 0;
+
+    for file in files {
+        let source = fs::read_to_string(file)
+            .into_diagnostic()
+            .map_err(|e| e.context(format!("Failed to read file: {}", file.display())))?;
+
+        let filename = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("input.sop");
+
+        // Parse and typecheck to get the typed AST
+        let typed_file = match build::typecheck_to_typed(&source, filename) {
+            Ok(f) => f,
+            Err(e) => {
+                // If there are compile errors, report them and skip linting
+                eprintln!("{:?}", e);
+                continue;
+            }
+        };
+
+        // Run lints
+        let warnings = sniff::lint_file(&typed_file, filename, &source, config);
+        let warning_count = warnings.len();
+
+        for warning in warnings {
+            eprintln!("{:?}", miette::Report::new(warning));
+        }
+
+        total_warnings += warning_count;
+    }
+
+    if total_warnings > 0 {
+        println!("\n⚠ Found {} warning(s)", total_warnings);
+    } else {
+        println!("✓ No lint warnings");
+    }
 
     Ok(())
 }
