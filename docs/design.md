@@ -310,52 +310,18 @@ import "github.com/user/project/helpers"
 import (
 	"fmt"
 	"net/http"
-	"github.com/user/project/util/helpers"
 	myHelpers "github.com/user/project/util/helpers"
 )
 ```
 
-Soppo uses Go-style module-qualified import paths for all imports. Local Soppo packages are detected automatically:
+Soppo uses Go-style import paths. Local Soppo packages are detected automatically when the import path starts with your module path (from `go.mod`) and the directory contains `.sop` files. Otherwise, the import is treated as a Go package.
 
-- If an import path starts with your module path (from `go.mod`) AND
-- The corresponding local directory contains `.sop` files
+Types from external Go packages are assumed nilable since Go has no nilability annotations. Use nil checks or `.(!nil)` when passing to Soppo functions expecting non-nilable types.
 
-Then it's treated as a Soppo import and the generated Go import path is adjusted to point to the compilation output directory.
+Unlike Go, import names cannot be shadowed by local variables.
 
-For example, with module `github.com/user/project`:
-- `import "github.com/user/project/helpers"`: Soppo import if `helpers/` has `.sop` files
-- `import "github.com/user/project/helpers"`: Go import if `helpers/` only has `.go` files
-- `import "fmt"`: Go import (external package)
-
-Like Go, Soppo imports are package-based (directory-based). Each directory with `.sop` files forms a package. Types from Go packages are extracted via tree-sitter parsing.
-
-Soppo-generated Go code includes special markers that preserve type information when re-imported:
-
-```go
-//soppo:generated             // File marker
-//soppo:nilable user : 0      // Function annotation - param "user" and return 0 are nilable
-//soppo:enum                  // Type annotation - struct is an enum variant
-
-type User struct {
-	Name  string
-	Address *Address //soppo:nilable
-}
-```
-
-When importing a Go package with `//soppo:generated`:
-- Fields with `//soppo:nilable` are treated as nilable
-- Fields **without** the marker are non-nilable
-- Types marked `//soppo:enum` support pattern matching
-
-When importing regular Go packages (no marker):
-- All pointer/slice/map/chan/func/interface types are assumed nilable
-
-This allows Soppo projects to depend on generated Go from other Soppo projects while preserving nil safety guarantees.
-
-> [!IMPORTANT]
-> You cannot import external Soppo source directly. To use an external Soppo library, import its generated Go code as a regular Go import.
-
-Unlike Go, import names cannot be shadowed by local variables. This prevents accidentally masking an import and causing confusing errors or subtle bugs.
+> [!NOTE]
+> You cannot import external Soppo source directly. To use an external Soppo library, import its generated Go code. Soppo preserves type information (nilability, enums) in generated code via special comments, so cross-project nil safety is maintained.
 
 ## Build System
 
