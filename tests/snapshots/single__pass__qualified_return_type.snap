@@ -1,0 +1,18 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated
+package main
+
+import "context"
+
+func iReturnAContextWithAnError(ctx context.Context) (context.Context, error) {
+	return context.Background(), nil
+}
+
+func main() {
+	ctx := context.Background()
+	newCtx, _ := iReturnAContextWithAnError(ctx)
+	_ = newCtx
+}

@@ -214,6 +214,63 @@ impl Parser {
                     });
                     break;
                 }
+                Some(Token::Dot) => {
+                    // Qualified type like context.Context - this is an unnamed return
+                    if is_named == Some(true) {
+                        return Err(SoppoError::Parse {
+                            message: "Mixed named and unnamed returns".to_string(),
+                            span: first_span,
+                        });
+                    }
+                    is_named = Some(false);
+
+                    // All pending names were actually simple types
+                    for name in pending_names.drain(..) {
+                        params.push(Param {
+                            ident: Ident::new("", name.span),
+                            ty: TypeAnnotation {
+                                name: name.name,
+                                args: vec![],
+                                span: name.span,
+                                nullable: false,
+                            },
+                        });
+                    }
+
+                    // Parse the rest of the qualified type: .Context
+                    self.advance(); // consume .
+                    let (second_name, second_span) = match self.advance() {
+                        Some((Token::Ident(name), span)) => (name, span),
+                        Some((tok, span)) => {
+                            return Err(SoppoError::Parse {
+                                message: format!("Expected type name, found {}", tok),
+                                span,
+                            });
+                        }
+                        None => {
+                            return Err(SoppoError::Parse {
+                                message: "Expected type name".to_string(),
+                                span: Span::dummy(),
+                            });
+                        }
+                    };
+
+                    let full_span = self.merge_spans(first_span, second_span);
+                    params.push(Param {
+                        ident: Ident::new("", full_span),
+                        ty: TypeAnnotation {
+                            name: format!("{}.{}", first_name, second_name),
+                            args: vec![],
+                            span: full_span,
+                            nullable: false,
+                        },
+                    });
+
+                    if !self.consume(&Token::Comma) {
+                        break;
+                    }
+                    continue;
+                }
                 _ => {
                     // Something else follows - this is a named return
                     // The identifier is a name, parse the type
