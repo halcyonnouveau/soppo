@@ -113,6 +113,17 @@ pub enum SoppoError {
         span: Span,
     },
 
+    #[error("Missing return at end of function")]
+    #[diagnostic(
+        code(soppo::missing_return),
+        help("add a return statement, or ensure all code paths return a value")
+    )]
+    MissingReturn {
+        #[label("function `{name}` missing return")]
+        span: Span,
+        name: String,
+    },
+
     #[error("`?` requires expression to return error")]
     #[diagnostic(
         code(soppo::try_expr_no_error),

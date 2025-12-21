@@ -1,0 +1,57 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::unused_variable
+
+  × Variable `x` is declared but not used
+   ╭─[missing_return.sop:5:2]
+ 4 │ func noReturn() int {
+ 5 │     x := 1
+   ·     ┬
+   ·     ╰── unused variable
+ 6 │ }
+   ╰────
+  help: remove the variable, or use `_ = x` to suppress this error
+
+Error: soppo::missing_return
+
+  × Missing return at end of function
+   ╭─[missing_return.sop:4:21]
+ 3 │     // Missing return in function
+ 4 │ ╭─▶ func noReturn() int {
+ 5 │ │       x := 1
+ 6 │ ├─▶ }
+   · ╰──── function `noReturn` missing return
+ 7 │     
+   ╰────
+  help: add a return statement, or ensure all code paths return a value
+
+Error: soppo::missing_return
+
+  × Missing return at end of function
+    ╭─[missing_return.sop:9:32]
+  8 │     // Missing return in one branch of if
+  9 │ ╭─▶ func partialReturn(x bool) int {
+ 10 │ │       if x {
+ 11 │ │           return 1
+ 12 │ │       }
+ 13 │ │       // missing else return
+ 14 │ ├─▶ }
+    · ╰──── function `partialReturn` missing return
+ 15 │     
+    ╰────
+  help: add a return statement, or ensure all code paths return a value
+
+Error: soppo::missing_return
+
+  × Missing return at end of function
+    ╭─[missing_return.sop:18:18]
+ 17 │     func withLambda() {
+ 18 │ ╭─▶     f := func() int {
+ 19 │ │           x := 1
+ 20 │ ├─▶     }
+    · ╰──── function `(anonymous function)` missing return
+ 21 │         _ = f
+    ╰────
+  help: add a return statement, or ensure all code paths return a value

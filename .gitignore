@@ -1,2 +1,3 @@
 /target
 /examples/**/*.go
+/tests/fixtures/interop/**/*.go

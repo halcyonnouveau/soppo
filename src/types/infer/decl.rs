@@ -258,6 +258,14 @@ impl Infer {
         // Infer the function body
         let typed_body = self.infer_func_body(&func.body, &func.returns)?;
 
+        // Check for missing return: if function has return types, body must diverge
+        if !func.returns.is_empty() && !typed_body.diverges() {
+            self.emit_error(SoppoError::MissingReturn {
+                span: func.body.span,
+                name: func.ident.name.clone(),
+            });
+        }
+
         self.pop_scope();
 
         // Restore old expected return types and generic params

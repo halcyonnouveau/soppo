@@ -1134,6 +1134,14 @@ impl Infer {
                 // Infer body and get the TypedBlock
                 let typed_body = self.infer_block(body);
 
+                // Check for missing return in lambda
+                if !returns.is_empty() && !typed_body.diverges() {
+                    self.emit_error(SoppoError::MissingReturn {
+                        span: body.span,
+                        name: "(anonymous function)".to_string(),
+                    });
+                }
+
                 self.pop_scope();
 
                 // Restore previous expected return types

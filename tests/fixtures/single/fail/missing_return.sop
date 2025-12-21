@@ -1,0 +1,22 @@
+package main
+
+// Missing return in function
+func noReturn() int {
+	x := 1
+}
+
+// Missing return in one branch of if
+func partialReturn(x bool) int {
+	if x {
+		return 1
+	}
+	// missing else return
+}
+
+// Lambda missing return
+func withLambda() {
+	f := func() int {
+		x := 1
+	}
+	_ = f
+}
