@@ -40,7 +40,7 @@ tree-sitter-go = "0.25"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
-insta = "1.44"
+insta = "1.45"
 proptest = "1.9"
 regex = "1.11"
 test-generator = "0.3"
