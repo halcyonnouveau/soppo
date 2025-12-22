@@ -15,7 +15,7 @@ Soppo is not production ready.
 - **Error handling:** `?` propagation with custom handling blocks
 - **Rust-inspired diagnostics:** Helpful compiler error messages
 - **Go interop:** Use any Go library directly
-- **Batteries included:** LSP, formatter, test runner with doctests
+- **Batteries included:** LSP, formatter, linter, test runner with doctests
 
 See [docs/guide.md](docs/guide.md) for the language guide.
 

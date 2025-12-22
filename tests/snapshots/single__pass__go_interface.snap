@@ -2,7 +2,7 @@
 source: tests/single.rs
 expression: output
 ---
-//soppo:generated
+//soppo:generated v1
 // Tests interface type unification - io.Reader accepts *os.File
 package main
 

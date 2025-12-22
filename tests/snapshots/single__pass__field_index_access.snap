@@ -2,7 +2,7 @@
 source: tests/single.rs
 expression: output
 ---
-//soppo:generated
+//soppo:generated v1
 // Test indexing a slice field directly: struct.field[i]
 // Also test nested composite literal syntax: []Item{{Name: "x"}}
 package main

@@ -7,6 +7,10 @@ use std::collections::HashSet;
 use crate::syntax::{AssignOp, BinOp, Comment, Generic, Stmt};
 use crate::types::{GlobalCtxt, Infer, Type};
 
+/// Current version of generated Soppo markers.
+/// Bump this when making breaking changes to the marker format.
+pub const MARKER_VERSION: &str = "v1";
+
 /// Code generator for emitting Go code
 pub struct Codegen {
     pub(crate) output: String,

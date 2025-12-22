@@ -34,8 +34,8 @@ impl Codegen {
         let decls_output = self.gen_declarations(file)?;
 
         // Now build the final output with header, imports, and declarations
-        // Soppo generated marker - always first
-        self.emit_line("//soppo:generated");
+        // Soppo generated marker with version - always first
+        self.emit_line(&format!("//soppo:generated {}", super::MARKER_VERSION));
 
         // Emit file-level comments (after marker, before package)
         for comment in &file_comments {

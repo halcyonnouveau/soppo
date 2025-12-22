@@ -3,7 +3,7 @@ source: tests/multi.rs
 expression: format_results(&results)
 ---
 === cmd/main.go ===
-//soppo:generated
+//soppo:generated v1
 package main
 
 import "fmt"
@@ -17,7 +17,7 @@ func main() {
 
 
 === helpers/lib.go ===
-//soppo:generated
+//soppo:generated v1
 package helpers
 
 func Add(a int, b int) int {

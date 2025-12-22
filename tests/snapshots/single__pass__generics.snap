@@ -2,7 +2,7 @@
 source: tests/single.rs
 expression: output
 ---
-//soppo:generated
+//soppo:generated v1
 package main
 
 import "bytes"

@@ -3,7 +3,7 @@ source: tests/multi.rs
 expression: format_results(&results)
 ---
 === cmd/main.go ===
-//soppo:generated
+//soppo:generated v1
 package main
 
 import "fmt"
@@ -16,7 +16,7 @@ func main() {
 
 
 === pkga/lib.go ===
-//soppo:generated
+//soppo:generated v1
 package pkga
 
 func GetA() int {
@@ -26,7 +26,7 @@ func GetA() int {
 
 
 === pkgb/lib.go ===
-//soppo:generated
+//soppo:generated v1
 package pkgb
 
 import "github.com/test/chain/pkga"

@@ -3,7 +3,7 @@ source: tests/multi.rs
 expression: format_results(&results)
 ---
 === cmd/main.go ===
-//soppo:generated
+//soppo:generated v1
 package main
 
 import "fmt"
@@ -30,7 +30,7 @@ func main() {
 
 
 === types/status.go ===
-//soppo:generated
+//soppo:generated v1
 package types
 
 /*soppo:enum

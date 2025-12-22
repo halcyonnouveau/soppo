@@ -3,7 +3,7 @@ source: tests/multi.rs
 expression: format_results(&results)
 ---
 === cmd/main.go ===
-//soppo:generated
+//soppo:generated v1
 package main
 
 import "fmt"
@@ -22,7 +22,7 @@ func main() {
 
 
 === types/user.go ===
-//soppo:generated
+//soppo:generated v1
 package types
 
 type Logger struct {
