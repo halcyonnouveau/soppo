@@ -25,7 +25,7 @@ func connect() (string, error) {
 }
 "#;
 
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
 
     // Should have symbols (no compile errors)
     assert!(symbols.is_some(), "Should produce symbols for valid code");
@@ -78,7 +78,7 @@ func connect() (string, error) {
 }
 "#;
 
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
 
     // Should have symbols (no compile errors)
     assert!(symbols.is_some(), "Should produce symbols for valid code");
@@ -115,7 +115,7 @@ func connect() (string, error) {
 }
 "#;
 
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
 
     // Should have symbols (no compile errors)
     assert!(symbols.is_some(), "Should produce symbols for valid code");
@@ -138,7 +138,7 @@ func main() {
 }
 "#;
 
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
 
     // Should NOT have symbols (compile error)
     assert!(
@@ -187,7 +187,7 @@ func connect() (string, error) {
 }
 "#;
 
-    let (diagnostics, _) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, _) = Backend::analyse_document(code, "test.sop", true);
 
     assert!(!diagnostics.is_empty(), "Should have sniff warning");
 

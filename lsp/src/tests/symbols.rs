@@ -52,7 +52,7 @@ func main() {
     println(x)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Valid code should have no diagnostics"
@@ -75,7 +75,7 @@ func main() {
     x := undefined_var
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         !diagnostics.is_empty(),
         "Invalid code should have diagnostics"
@@ -93,7 +93,7 @@ func main() {
     println(x)
 }
 "#;
-    let (_, symbols) = Backend::analyse_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop", true);
     let symbols = symbols.expect("Should have symbols");
 
     let x_usage_offset = code.rfind("(x)").unwrap() + 1;
@@ -115,7 +115,7 @@ func main() {
     println(x)
 }
 "#;
-    let (_, symbols) = Backend::analyse_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop", true);
     let symbols = symbols.expect("Should have symbols");
 
     let x_usage_offset = code.rfind("(x)").unwrap() + 1;
@@ -142,7 +142,7 @@ func add(a int, b int) int {
     return a + b
 }
 "#;
-    let (_, symbols) = Backend::analyse_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop", true);
     let symbols = symbols.expect("Should have symbols");
 
     let a_usage_offset = code.find("return a").unwrap() + 7;
@@ -174,7 +174,7 @@ func main() {
     println(x)
 }
 "#;
-    let (_, symbols) = Backend::analyse_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop", true);
     let symbols = symbols.expect("Should have symbols");
 
     let x_usage_offset = code.rfind("(x)").unwrap() + 1;
@@ -202,7 +202,7 @@ func main() {
     println(x)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -243,7 +243,7 @@ func main() {
     println(p.X)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -281,7 +281,7 @@ func main() {
     println(x)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -318,7 +318,7 @@ func main() {
     println(y)
 }
 "#;
-    let (_, symbols) = Backend::analyse_document(code, "test.sop");
+    let (_, symbols) = Backend::analyse_document(code, "test.sop", true);
     let symbols = symbols.expect("Should have symbols");
 
     // Find the 'y' usage in println(y)
@@ -349,7 +349,7 @@ func main() error {
     return nil
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -383,7 +383,7 @@ func main() error {
     return nil
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -420,7 +420,7 @@ func main() {
     println(scanner)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -469,7 +469,7 @@ func main() {
     println(scanner)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -537,7 +537,7 @@ func main() {
     println(scanner)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -583,7 +583,7 @@ func main() {
     println(scanner)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",
@@ -630,7 +630,7 @@ func main() {
     println(scanner)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
     assert!(
         diagnostics.is_empty(),
         "Should have no diagnostics: {:?}",

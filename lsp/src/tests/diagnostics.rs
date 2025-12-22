@@ -321,7 +321,7 @@ func main() {
     x := undefined_var
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
 
     // Should have diagnostics for the error
     assert!(
@@ -357,7 +357,7 @@ func main() {
     println(x)
 }
 "#;
-    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop");
+    let (diagnostics, symbols) = Backend::analyse_document(code, "test.sop", true);
 
     // Should have NO diagnostics for valid code
     assert!(

@@ -1413,8 +1413,11 @@ dependencies = [
 name = "sopls"
 version = "0.8.1"
 dependencies = [
+ "clap",
  "futures",
  "miette",
+ "serde",
+ "serde_json",
  "soppo",
  "tokio",
  "tower 0.5.2",

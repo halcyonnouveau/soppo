@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use clap::Parser;
 use miette::Diagnostic as MietteDiagnostic;
 use soppo::build::{typecheck, typecheck_to_typed_with_symbols, typecheck_workspace};
 use soppo::error::{SoppoError, SoppoErrors};
@@ -17,6 +18,15 @@ use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+
+/// Command-line options for the language server
+#[derive(Parser)]
+#[command(name = "sopls", about = "Soppo language server")]
+pub struct Cli {
+    /// Disable the sniff linter
+    #[arg(long)]
+    pub no_sniff: bool,
+}
 
 /// Convert a Soppo span to an LSP range.
 /// Soppo uses 1-based line/col, LSP uses 0-based.
@@ -299,6 +309,27 @@ struct Workspace {
     typed_files: HashMap<FileId, soppo::types::TypedFile>,
     /// Diagnostics per file (type errors, unused variables, etc.)
     diagnostics: HashMap<FileId, Vec<SoppoError>>,
+    /// Sniff linter configuration from sop.mod
+    sniff_config: LintConfig,
+}
+
+/// LSP initialization options from the editor
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+struct InitOptions {
+    sniff: SniffOptions,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(default)]
+struct SniffOptions {
+    enabled: bool,
+}
+
+impl Default for SniffOptions {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 #[derive(Debug)]
@@ -310,30 +341,40 @@ pub struct Backend {
     open_documents: Arc<RwLock<HashMap<PathBuf, String>>>,
     /// Workspace state (initialised on first file open if project found)
     workspace: Arc<RwLock<Option<Workspace>>>,
+    /// Whether sniff linting is enabled (can be disabled via CLI or initializationOptions)
+    sniff_enabled: Arc<RwLock<bool>>,
 }
 
 impl Backend {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: Client, sniff_enabled: bool) -> Self {
         Self {
             client,
             documents: Arc::new(RwLock::new(HashMap::new())),
             open_documents: Arc::new(RwLock::new(HashMap::new())),
             workspace: Arc::new(RwLock::new(None)),
+            sniff_enabled: Arc::new(RwLock::new(sniff_enabled)),
         }
     }
 
     /// Analyse a document, returning diagnostics and symbol table (single-file mode)
-    pub fn analyse_document(text: &str, filename: &str) -> (Vec<Diagnostic>, Option<SymbolTable>) {
+    pub fn analyse_document(
+        text: &str,
+        filename: &str,
+        sniff_enabled: bool,
+    ) -> (Vec<Diagnostic>, Option<SymbolTable>) {
         match typecheck_to_typed_with_symbols(text, filename) {
             Ok(result) => {
-                // Run sniff linter on successful typecheck
-                let config = LintConfig::default();
-                let warnings = sniff::lint_file(&result.typed_file, filename, text, &config);
-
-                let diagnostics = warnings
-                    .iter()
-                    .map(|w| lint_warning_to_diagnostic(w, text))
-                    .collect();
+                // Run sniff linter on successful typecheck (if enabled)
+                let diagnostics = if sniff_enabled {
+                    let config = LintConfig::default();
+                    let warnings = sniff::lint_file(&result.typed_file, filename, text, &config);
+                    warnings
+                        .iter()
+                        .map(|w| lint_warning_to_diagnostic(w, text))
+                        .collect()
+                } else {
+                    vec![]
+                };
 
                 (diagnostics, Some(result.symbols))
             }
@@ -366,7 +407,7 @@ impl Backend {
         }
     }
 
-    /// Try to discover a project from a file path and initialize workspace
+    /// Try to discover a project from a file path and initialise workspace
     async fn try_init_workspace(&self, file_path: &Path) -> bool {
         // Already initialised?
         if self.workspace.read().await.is_some() {
@@ -381,6 +422,17 @@ impl Backend {
         match typecheck_workspace(start_dir, &open_docs) {
             Ok(result) => {
                 let mut ws = self.workspace.write().await;
+                // Build LintConfig from sop.mod sniff settings
+                let sniff_config = result
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.sniff.as_ref())
+                    .and_then(|s| s.ignore.as_ref())
+                    .map(|ignored| LintConfig {
+                        ignored: ignored.iter().cloned().collect(),
+                    })
+                    .unwrap_or_default();
+
                 *ws = Some(Workspace {
                     project_root: result.project_root,
                     file_registry: result.file_registry,
@@ -388,6 +440,7 @@ impl Backend {
                     symbol_tables: result.symbol_tables,
                     typed_files: result.typed_files,
                     diagnostics: result.diagnostics,
+                    sniff_config,
                 });
                 true
             }
@@ -418,6 +471,17 @@ impl Backend {
         match typecheck_workspace(&project_root, &open_docs) {
             Ok(result) => {
                 let mut ws = self.workspace.write().await;
+                // Build LintConfig from sop.mod sniff settings
+                let sniff_config = result
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.sniff.as_ref())
+                    .and_then(|s| s.ignore.as_ref())
+                    .map(|ignored| LintConfig {
+                        ignored: ignored.iter().cloned().collect(),
+                    })
+                    .unwrap_or_default();
+
                 *ws = Some(Workspace {
                     project_root: result.project_root,
                     file_registry: result.file_registry,
@@ -425,6 +489,7 @@ impl Backend {
                     symbol_tables: result.symbol_tables,
                     typed_files: result.typed_files,
                     diagnostics: result.diagnostics,
+                    sniff_config,
                 });
                 Ok(())
             }
@@ -472,7 +537,8 @@ impl Backend {
             .and_then(|mut s| s.next_back())
             .unwrap_or("input.sop");
 
-        let (diagnostics, symbols) = Self::analyse_document(&text, filename);
+        let sniff_enabled = *self.sniff_enabled.read().await;
+        let (diagnostics, symbols) = Self::analyse_document(&text, filename, sniff_enabled);
 
         // Update document state
         self.documents
@@ -494,7 +560,6 @@ impl Backend {
         };
 
         let open_docs = self.open_documents.read().await;
-        let config = LintConfig::default();
 
         // Publish diagnostics for each file
         for file_id in ws.file_registry.file_ids() {
@@ -512,8 +577,10 @@ impl Backend {
                 .map(|errors| errors.iter().flat_map(soppo_error_to_diagnostics).collect())
                 .unwrap_or_default();
 
-            // Run sniff on files without compile errors
-            if diagnostics.is_empty()
+            // Run sniff on files without compile errors (if enabled)
+            let sniff_enabled = *self.sniff_enabled.read().await;
+            if sniff_enabled
+                && diagnostics.is_empty()
                 && let Some(typed_file) = ws.typed_files.get(&file_id)
             {
                 // Get source text
@@ -528,7 +595,8 @@ impl Backend {
                         .and_then(|n| n.to_str())
                         .unwrap_or("input.sop");
 
-                    let warnings = sniff::lint_file(typed_file, filename, &source, &config);
+                    let warnings =
+                        sniff::lint_file(typed_file, filename, &source, &ws.sniff_config);
                     diagnostics.extend(
                         warnings
                             .iter()
@@ -680,7 +748,17 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Parse initializationOptions if present
+        if let Some(opts) = params.initialization_options
+            && let Ok(init_opts) = serde_json::from_value::<InitOptions>(opts)
+        {
+            // Editor can disable sniff via initializationOptions
+            if !init_opts.sniff.enabled {
+                *self.sniff_enabled.write().await = false;
+            }
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -1691,10 +1769,11 @@ impl LanguageServer for Backend {
 }
 
 /// Run the LSP server on stdin/stdout
-pub async fn run_server() {
+pub async fn run_server(cli: Cli) {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(Backend::new);
+    let sniff_enabled = !cli.no_sniff;
+    let (service, socket) = LspService::new(|client| Backend::new(client, sniff_enabled));
     Server::new(stdin, stdout, socket).serve(service).await;
 }

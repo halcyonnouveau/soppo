@@ -29,6 +29,8 @@ pub struct WorkspaceResult {
     pub typed_files: HashMap<FileId, TypedFile>,
     /// Diagnostics per file
     pub diagnostics: HashMap<FileId, Vec<SoppoError>>,
+    /// Optional sop.mod configuration
+    pub config: Option<crate::config::SopConfig>,
 }
 
 /// Build a project from a directory containing go.mod.
@@ -489,6 +491,7 @@ pub fn typecheck_workspace(
             symbol_tables: HashMap::new(),
             typed_files: HashMap::new(),
             diagnostics: HashMap::new(),
+            config: project.config,
         });
     }
 
@@ -580,6 +583,7 @@ pub fn typecheck_workspace(
         symbol_tables,
         typed_files,
         diagnostics,
+        config: project.config,
     })
 }
 

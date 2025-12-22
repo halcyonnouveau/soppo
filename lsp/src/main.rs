@@ -1,4 +1,8 @@
+use clap::Parser;
+use sopls::Cli;
+
 #[tokio::main]
 async fn main() {
-    sopls::run_server().await;
+    let cli = Cli::parse();
+    sopls::run_server(cli).await;
 }
