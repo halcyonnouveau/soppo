@@ -11,4 +11,4 @@ expression: output
     · ╰──── use `?` instead
  31 │         return "Connected on port {port}", nil
     ╰────
-  help: Replace `if err != nil { ... }` with `?`
+  help: replace `if err != nil { ... }` with `?`

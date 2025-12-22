@@ -1,0 +1,52 @@
+---
+source: tests/sniff.rs
+expression: output
+---
+  ⚠ Unreachable code
+   ╭─[unreachable.sop:7:2]
+ 6 │     return
+ 7 │     fmt.Println("never runs")  // should warn
+   ·     ────────────┬────────────
+   ·                 ╰── this code will never execute
+ 8 │ }
+   ╰────
+
+
+  ⚠ Unreachable code
+    ╭─[unreachable.sop:13:3]
+ 12 │         break
+ 13 │         fmt.Println("never runs")  // should warn
+    ·         ────────────┬────────────
+    ·                     ╰── this code will never execute
+ 14 │     }
+    ╰────
+
+
+  ⚠ Unreachable code
+    ╭─[unreachable.sop:20:3]
+ 19 │         continue
+ 20 │         fmt.Println("never runs")  // should warn
+    ·         ────────────┬────────────
+    ·                     ╰── this code will never execute
+ 21 │     }
+    ╰────
+
+
+  ⚠ Unreachable code
+    ╭─[unreachable.sop:37:2]
+ 36 │     }
+ 37 │     fmt.Println("never runs")  // should warn
+    ·     ────────────┬────────────
+    ·                 ╰── this code will never execute
+ 38 │ }
+    ╰────
+
+
+  ⚠ Unreachable code
+    ╭─[unreachable.sop:48:3]
+ 47 │         return
+ 48 │         fmt.Println("nested unreachable")  // should warn
+    ·         ────────────────┬────────────────
+    ·                         ╰── this code will never execute
+ 49 │     }
+    ╰────

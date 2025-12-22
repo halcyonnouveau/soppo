@@ -33,7 +33,7 @@ Detects `if err != nil { ... }` patterns that could use the `?` operator.
 ```go
 result, err := doSomething()
 if err != nil {
-    return "", err
+	return "", err
 }
 ```
 
@@ -52,8 +52,8 @@ Warns when a variable declaration shadows a variable from an outer scope.
 ```go
 x := 1
 if condition {
-    x := 2  // warning: `x` shadows a variable from an outer scope
-    fmt.Println(x)
+	x := 2  // warning: `x` shadows a variable from an outer scope
+	fmt.Println(x)
 }
 ```
 
@@ -62,9 +62,31 @@ Shadowing can lead to subtle bugs where you accidentally use the wrong variable.
 ```go
 x := 1
 if condition {
-    innerX := 2
-    fmt.Println(innerX)
+	innerX := 2
+	fmt.Println(innerX)
 }
 ```
 
 Error types are allowed to shadow (reusing `err` is idiomatic). Import shadowing is a compile error, not a lint warning.
+
+### `unreachable`
+
+Warns when code can never be executed because it follows a terminating statement like `return`, `break`, or `continue`.
+
+```go
+func example() {
+	return
+	fmt.Println("hello")  // warning: unreachable code
+}
+```
+
+This also detects unreachable code after an `if` where both branches terminate:
+
+```go
+if condition {
+	return
+} else {
+	return
+}
+fmt.Println("hello")  // warning: unreachable code
+```

@@ -55,9 +55,10 @@ fn check_block(block: &TypedBlock, source_name: &str, source_code: &str) -> Vec<
                     source_code,
                 )
                 .with_help(format!(
-                    "Replace `if {} != nil {{ ... }}` with `?`",
+                    "replace `if {} != nil {{ ... }}` with `?`",
                     err_name
                 ));
+
                 warnings.push(warning);
             }
         }

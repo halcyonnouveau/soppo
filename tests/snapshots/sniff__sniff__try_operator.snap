@@ -11,7 +11,7 @@ expression: output
     · ╰──── use `?` instead
  21 │         return "Connected on port {port}", nil
     ╰────
-  help: Replace `if err != nil { ... }` with `?`
+  help: replace `if err != nil { ... }` with `?`
 
 
   ⚠ Consider using the `?` operator
@@ -23,7 +23,7 @@ expression: output
     · ╰──── use `?` instead
  36 │     
     ╰────
-  help: Replace `if err != nil { ... }` with `?`
+  help: replace `if err != nil { ... }` with `?`
 
 
   ⚠ Consider using the `?` operator
@@ -35,7 +35,7 @@ expression: output
     · ╰──── use `?` instead
  41 │     
     ╰────
-  help: Replace `if err2 != nil { ... }` with `?`
+  help: replace `if err2 != nil { ... }` with `?`
 
 
   ⚠ Consider using the `?` operator
@@ -48,4 +48,4 @@ expression: output
     · ╰──── use `?` instead
  51 │         fmt.Println(result)
     ╰────
-  help: Replace `if err != nil { ... }` with `?`
+  help: replace `if err != nil { ... }` with `?`

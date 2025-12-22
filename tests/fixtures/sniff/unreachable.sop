@@ -1,0 +1,50 @@
+package main
+
+import "fmt"
+
+func afterReturn() {
+	return
+	fmt.Println("never runs")  // should warn
+}
+
+func afterBreak() {
+	for {
+		break
+		fmt.Println("never runs")  // should warn
+	}
+}
+
+func afterContinue() {
+	for i := 0; i < 10; i++ {
+		continue
+		fmt.Println("never runs")  // should warn
+	}
+}
+
+func conditionalReturn(x int) int {
+	if x > 0 {
+		return 1
+	}
+	return 0  // no warning - only one branch returns
+}
+
+func bothBranchesTerminate() {
+	if true {
+		return
+	} else {
+		return
+	}
+	fmt.Println("never runs")  // should warn
+}
+
+func noWarning() {
+	fmt.Println("hello")
+	fmt.Println("world")
+}
+
+func nestedUnreachable() {
+	if true {
+		return
+		fmt.Println("nested unreachable")  // should warn
+	}
+}
