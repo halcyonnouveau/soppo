@@ -40,12 +40,24 @@ expression: output
 
   ⚠ Consider using the `?` operator
     ╭─[try_operator.sop:47:2]
- 46 │         result, err := connect()
- 47 │ ╭─▶     if err != nil {
- 48 │ │           fmt.Println("Error: {err}")
- 49 │ │           return
- 50 │ ├─▶     }
+ 46 │     func shortCircuit() error {
+ 47 │ ╭─▶     if _, err := parsePort("8080"); err != nil {
+ 48 │ │           return err
+ 49 │ ├─▶     }
     · ╰──── use `?` instead
- 51 │         fmt.Println(result)
+ 50 │         return nil
+    ╰────
+  help: replace `if err := ...; err != nil { ... }` with `? err { ... }`
+
+
+  ⚠ Consider using the `?` operator
+    ╭─[try_operator.sop:55:2]
+ 54 │         result, err := connect()
+ 55 │ ╭─▶     if err != nil {
+ 56 │ │           fmt.Println("Error: {err}")
+ 57 │ │           return
+ 58 │ ├─▶     }
+    · ╰──── use `?` instead
+ 59 │         fmt.Println(result)
     ╰────
   help: replace `if err != nil { ... }` with `?`

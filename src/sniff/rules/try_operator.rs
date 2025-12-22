@@ -63,6 +63,11 @@ fn check_block(block: &TypedBlock, source_name: &str, source_code: &str) -> Vec<
             }
         }
 
+        // Check for short-circuit if: `if err := call(); err != nil { ... }`
+        if let Some(warning) = check_short_circuit_if(&block.stmts[i], source_name, source_code) {
+            warnings.push(warning);
+        }
+
         // Recursively check nested blocks
         warnings.extend(check_stmt_nested(&block.stmts[i], source_name, source_code));
     }
@@ -127,6 +132,42 @@ fn check_if_err_nil(
         && is_err_nil_check(condition, err_name)
     {
         return Some(stmt.span);
+    }
+    None
+}
+
+/// Check for short-circuit if: `if err := call(); err != nil { ... }`
+fn check_short_circuit_if(
+    stmt: &TypedStmt,
+    source_name: &str,
+    source_code: &str,
+) -> Option<LintWarning> {
+    if let TypedStmtKind::If {
+        init: Some(init),
+        condition,
+        ..
+    } = &stmt.kind
+    {
+        // Check if init assigns an error variable
+        if let Some(err_name) = get_error_var_from_stmt(init) {
+            // Check if condition is `err != nil`
+            if is_err_nil_check(condition, &err_name) {
+                return Some(
+                    LintWarning::new(
+                        "try_operator",
+                        "Consider using the `?` operator",
+                        stmt.span,
+                        "use `?` instead",
+                        source_name,
+                        source_code,
+                    )
+                    .with_help(format!(
+                        "replace `if {} := ...; {} != nil {{ ... }}` with `? {} {{ ... }}`",
+                        err_name, err_name, err_name
+                    )),
+                );
+            }
+        }
     }
     None
 }

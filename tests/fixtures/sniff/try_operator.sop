@@ -42,6 +42,14 @@ func multipleChecks() error {
 	return nil
 }
 
+// Short-circuit if pattern - should also warn
+func shortCircuit() error {
+	if _, err := parsePort("8080"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	result, err := connect()
 	if err != nil {
