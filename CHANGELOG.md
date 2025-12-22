@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0](https://github.com/halcyonnouveau/soppo/compare/v0.8.1...v0.9.0) - 2025-12-22
+
+### Added
+
+- *(sniff)* try op lint check short circuit if
+- add version marker to generated Go files
+- *(lsp)* add sniff configuration support
+- *(sniff)* add unreachable code rule
+- *(sniff)* add shadow rule
+- *(playground)* compress shareable base64 code
+- helpful error when using switch instead of match
+- missing return detection
+- add sniff command to lint code
+
+### Fixed
+
+- improve error messages for module resolution failures
+- auto-discover project for external Go module resolution
+- qualified return type
+- newlines in function calls
+
 ## [0.8.1](https://github.com/halcyonnouveau/soppo/compare/v0.8.0...v0.8.1) - 2025-12-21
 
 ### Added
