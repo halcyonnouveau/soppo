@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1766643693046,
+  "lastUpdate": 1766652877297,
   "repoUrl": "https://github.com/halcyonnouveau/soppo",
   "entries": {
     "Benchmark": [
@@ -6839,6 +6839,120 @@ window.BENCHMARK_DATA = {
             "name": "compile/file/basic_go",
             "value": 25094318,
             "range": "± 75192",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "committer": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "distinct": true,
+          "id": "270cb51b258d486553838d6be1b7feee7a862157",
+          "message": "feat: add attribute system for compile-time validated metadata",
+          "timestamp": "2025-12-25T19:50:07+11:00",
+          "tree_id": "83e2734292fe2d3e67db3c0a2b004a1490568e8f",
+          "url": "https://github.com/halcyonnouveau/soppo/commit/270cb51b258d486553838d6be1b7feee7a862157"
+        },
+        "date": 1766652876449,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse/file/guessing_game",
+            "value": 133001,
+            "range": "± 762",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/file_processor",
+            "value": 296165,
+            "range": "± 11773",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/http_server",
+            "value": 266927,
+            "range": "± 4644",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/todo_cli",
+            "value": 1896074,
+            "range": "± 93467",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/basic_go",
+            "value": 21313001,
+            "range": "± 52978",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/guessing_game",
+            "value": 2266579,
+            "range": "± 5746",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/file_processor",
+            "value": 4086034,
+            "range": "± 11746",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/http_server",
+            "value": 8796845,
+            "range": "± 29683",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/todo_cli",
+            "value": 5216823,
+            "range": "± 11071",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/basic_go",
+            "value": 28000819,
+            "range": "± 378872",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/guessing_game",
+            "value": 2304384,
+            "range": "± 16202",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/file_processor",
+            "value": 4125466,
+            "range": "± 12573",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/http_server",
+            "value": 8837131,
+            "range": "± 47268",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/todo_cli",
+            "value": 5251095,
+            "range": "± 29505",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/basic_go",
+            "value": 28040466,
+            "range": "± 631237",
             "unit": "ns/iter"
           }
         ]
