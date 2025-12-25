@@ -404,17 +404,22 @@ import (
 	"github.com/halcyonnouveau/soppo/runtime"
 )
 
-type Route struct {
-	Path   string
-	Method string
+type Method enum {
+	Get
+	Post
 }
 
-[Route{Path: "/users", Method: "GET"}]
+type Route struct {
+	Path   string
+	Method Method
+}
+
+[Route{Path: "/users", Method: Method.Get}]
 func getUsers() string {
 	return "users"
 }
 
-[Route{Path: "/users", Method: "POST"}]
+[Route{Path: "/users", Method: Method.Post}]
 func createUser() string {
 	return "created"
 }

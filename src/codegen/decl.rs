@@ -693,6 +693,38 @@ impl Codegen {
                 field,
                 span: field_span,
             } => {
+                // Check if this is an enum variant like Method.Get
+                if let crate::syntax::ExprKind::Ident(type_name) = &inner.kind
+                    && self.global_state.is_enum(type_name)
+                {
+                    // Enum variant: Method.Get -> MethodGet
+                    let variant_name = format!("{}{}", type_name, field);
+                    return Ok(crate::types::ast::TypedExprKind::Ident(variant_name));
+                }
+
+                // Check if this is a cross-package enum variant like pkg.Method.Get
+                if let crate::syntax::ExprKind::Field {
+                    expr: pkg_expr,
+                    field: type_name,
+                    ..
+                } = &inner.kind
+                    && let crate::syntax::ExprKind::Ident(pkg_name) = &pkg_expr.kind
+                    && self.global_state.is_soppo_enum(pkg_name, type_name)
+                {
+                    // Cross-package enum: pkg.Method.Get -> pkg.MethodGet
+                    let variant_name = format!("{}{}", type_name, field);
+                    let pkg_typed = Box::new(crate::types::ast::TypedExpr {
+                        kind: crate::types::ast::TypedExprKind::Ident(pkg_name.clone()),
+                        ty: crate::types::Type::simple("package"),
+                        span: pkg_expr.span,
+                    });
+                    return Ok(crate::types::ast::TypedExprKind::Field {
+                        expr: pkg_typed,
+                        field: variant_name,
+                        span: *field_span,
+                    });
+                }
+
                 // Qualified access like pkg.Const
                 let inner_kind = self.expr_kind_to_typed(&inner.kind, inner.span)?;
                 let inner_typed = Box::new(crate::types::ast::TypedExpr {

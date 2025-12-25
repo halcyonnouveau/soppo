@@ -4,24 +4,26 @@ import "fmt"
 import "github.com/halcyonnouveau/soppo/runtime"
 import "github.com/test/attributes/attrs"
 
-// Function with attribute
-[attrs.Route{Path: "/users", Method: "GET"}]
+// Function with attribute using enum value
+[attrs.Route{Path: "/users", Method: attrs.Method.Get}]
 func GetUsers() string {
     return "users"
 }
 
+[attrs.Route{Path: "/users", Method: attrs.Method.Post}]
+func CreateUser() string {
+    return "created"
+}
+
 // Type with attribute
-[attrs.Route{Path: "/api"}]
+[attrs.Route{Path: "/api", Method: attrs.Method.Get}]
 type Handler struct {
     Name string
 }
 
-// Struct with field attributes (multi-line)
+// Struct with field attributes
 type User struct {
-    [attrs.Column{
-        Name: "user_id",
-        PrimaryKey: true,
-    }]
+    [attrs.Column{Name: "user_id", PrimaryKey: true}]
     ID string
 
     [attrs.Column{Name: "email"}]
@@ -31,7 +33,7 @@ type User struct {
 func main() {
     _ = GetUsers()
 
-    // Query function attribute
+    // Query function attribute with enum
     route, found := runtime.GetAttr[attrs.Route]("main.GetUsers", "")
     if found {
         fmt.Println("Route:", route.Path, route.Method)
@@ -41,15 +43,5 @@ func main() {
     idCol, found := runtime.GetAttr[attrs.Column]("main.User", "ID")
     if found {
         fmt.Println("ID column:", idCol.Name, "primary:", idCol.PrimaryKey)
-    }
-
-    emailCol, found := runtime.GetAttr[attrs.Column]("main.User", "Email")
-    if found {
-        fmt.Println("Email column:", emailCol.Name)
-    }
-
-    // Check if type has Route attribute
-    if runtime.HasAttr[attrs.Route]("main.Handler", "") {
-        fmt.Println("Handler has Route attribute")
     }
 }

@@ -957,6 +957,47 @@ impl Infer {
         None
     }
 
+    /// Look up all fields of a Go struct type
+    /// Returns a list of (field_name, field_type) pairs
+    pub(super) fn lookup_go_struct_fields(
+        &mut self,
+        package_name: &str,
+        type_name: &str,
+    ) -> Option<Vec<(String, Type)>> {
+        let (import_path, _, _, _) = self.imports.get(package_name)?;
+        let import_path = import_path.clone();
+        self.mark_import_used(package_name);
+
+        let pkg = self
+            .go_cache
+            .get_or_parse(&import_path, self.project.as_ref())
+            .ok()?;
+
+        // Get the type definition
+        let type_def = pkg.types.get(type_name)?;
+
+        // Only works for structs
+        if type_def.kind != "struct" {
+            return None;
+        }
+
+        let fields: Vec<(String, Type)> = type_def
+            .fields
+            .iter()
+            .map(|field| {
+                let mut field_ty = Self::parse_go_type_with_module(&field.ty, package_name);
+                if pkg.soppo_generated
+                    && let Type::Con { nullable, .. } = &mut field_ty
+                {
+                    *nullable = field.nullable;
+                }
+                (field.name.clone(), field_ty)
+            })
+            .collect();
+
+        Some(fields)
+    }
+
     /// Look up a method on a Go type
     /// Returns (type, location, doc_comment) if found
     pub(super) fn lookup_go_method(

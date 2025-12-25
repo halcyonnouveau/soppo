@@ -11,14 +11,58 @@ use crate::types::ctx::TypeDefKind;
 use crate::types::{SymbolInfo, SymbolKind, Type};
 
 impl Infer {
-    /// Process attributes and mark any imported packages as used.
-    /// For qualified attribute names like "pkg.Attr", marks "pkg" as used.
+    /// Process attributes: mark imports as used and type-check arguments.
     fn process_attributes(&mut self, attributes: &[Attribute]) {
         for attr in attributes {
+            // Skip builtin attributes like MustUse
+            if attr.name == "MustUse" || attr.name == "Deprecated" {
+                continue;
+            }
+
             // Check if this is a qualified name like "pkg.Attr"
-            if let Some(dot_pos) = attr.name.find('.') {
-                let pkg_name = &attr.name[..dot_pos];
-                self.mark_import_used(pkg_name);
+            let (pkg_name, type_name) = if let Some(dot_pos) = attr.name.find('.') {
+                let pkg = &attr.name[..dot_pos];
+                let ty = &attr.name[dot_pos + 1..];
+                self.mark_import_used(pkg);
+                (Some(pkg), ty)
+            } else {
+                (None, attr.name.as_str())
+            };
+
+            // Look up the attribute type to validate arguments
+            let field_types: Option<Vec<(String, Type)>> = if let Some(pkg) = pkg_name {
+                // Cross-package: look up in imported package
+                self.lookup_go_struct_fields(pkg, type_name)
+            } else {
+                // Local: look up in current scope
+                self.global_state
+                    .lookup_type(type_name)
+                    .and_then(|def| match &def.kind {
+                        TypeDefKind::Struct { fields } => {
+                            Some(fields.iter().map(|(n, t)| (n.clone(), t.clone())).collect())
+                        }
+                        _ => None,
+                    })
+            };
+
+            // If we found the type, validate the arguments
+            if let Some(fields) = field_types {
+                for (arg_name, arg_expr) in &attr.args {
+                    // Check field exists
+                    if let Some((_, expected_ty)) = fields.iter().find(|(n, _)| n == arg_name) {
+                        // Type-check the argument expression (unify emits error on mismatch)
+                        let typed_expr = self.infer_expr(arg_expr);
+                        self.unify(&typed_expr.ty, expected_ty, &arg_expr.span);
+                    } else {
+                        self.emit_error(SoppoError::Type {
+                            message: format!(
+                                "unknown field `{}` in attribute `{}`",
+                                arg_name, attr.name
+                            ),
+                            span: attr.span,
+                        });
+                    }
+                }
             }
         }
     }

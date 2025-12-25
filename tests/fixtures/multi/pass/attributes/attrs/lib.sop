@@ -1,9 +1,17 @@
 package attrs
 
+// HTTP method enum
+type Method enum {
+    Get
+    Post
+    Put
+    Delete
+}
+
 // HTTP route attribute
 type Route struct {
     Path   string
-    Method string
+    Method Method
 }
 
 // Database column attribute

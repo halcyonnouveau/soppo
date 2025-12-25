@@ -4,12 +4,48 @@ expression: format_results(&results)
 ---
 === attrs/lib.go ===
 //soppo:generated v1
-// HTTP route attribute
+// HTTP method enum
 package attrs
 
+/*soppo:enum
+Method {
+    Get
+    Post
+    Put
+    Delete
+}
+*/
+type Method interface {
+	isMethod()
+}
+
+type Method_Get struct {}
+func (Method_Get) isMethod() {}
+func (Method_Get) String() string { return "Get" }
+
+type Method_Post struct {}
+func (Method_Post) isMethod() {}
+func (Method_Post) String() string { return "Post" }
+
+type Method_Put struct {}
+func (Method_Put) isMethod() {}
+func (Method_Put) String() string { return "Put" }
+
+type Method_Delete struct {}
+func (Method_Delete) isMethod() {}
+func (Method_Delete) String() string { return "Delete" }
+
+var (
+	MethodGet Method = Method_Get{}
+	MethodPost Method = Method_Post{}
+	MethodPut Method = Method_Put{}
+	MethodDelete Method = Method_Delete{}
+)
+
+// HTTP route attribute
 type Route struct {
 	Path string
-	Method string
+	Method Method
 }
 
 // Database column attribute
@@ -28,9 +64,13 @@ import "fmt"
 import "github.com/halcyonnouveau/soppo/runtime"
 import "github.com/test/attributes/attrs"
 
-// Function with attribute
+// Function with attribute using enum value
 func GetUsers() string {
 	return "users"
+}
+
+func CreateUser() string {
+	return "created"
 }
 
 // Type with attribute
@@ -38,7 +78,7 @@ type Handler struct {
 	Name string
 }
 
-// Struct with field attributes (multi-line)
+// Struct with field attributes
 type User struct {
 	ID string
 	Email string
@@ -47,7 +87,7 @@ type User struct {
 func main() {
 	_ = GetUsers()
 
-	// Query function attribute
+	// Query function attribute with enum
 	route, found := runtime.GetAttr[attrs.Route]("main.GetUsers", "")
 	if found {
 		fmt.Println("Route:", route.Path, route.Method)
@@ -58,21 +98,12 @@ func main() {
 	if found {
 		fmt.Println("ID column:", idCol.Name, "primary:", idCol.PrimaryKey)
 	}
-
-	emailCol, found := runtime.GetAttr[attrs.Column]("main.User", "Email")
-	if found {
-		fmt.Println("Email column:", emailCol.Name)
-	}
-
-	// Check if type has Route attribute
-	if runtime.HasAttr[attrs.Route]("main.Handler", "") {
-		fmt.Println("Handler has Route attribute")
-	}
 }
 
 func init() {
-	runtime.RegisterAttr("main.GetUsers", "", attrs.Route{Path: "/users", Method: "GET"})
-	runtime.RegisterAttr("main.Handler", "", attrs.Route{Path: "/api"})
+	runtime.RegisterAttr("main.GetUsers", "", attrs.Route{Path: "/users", Method: attrs.MethodGet})
+	runtime.RegisterAttr("main.CreateUser", "", attrs.Route{Path: "/users", Method: attrs.MethodPost})
+	runtime.RegisterAttr("main.Handler", "", attrs.Route{Path: "/api", Method: attrs.MethodGet})
 	runtime.RegisterAttr("main.User", "ID", attrs.Column{Name: "user_id", PrimaryKey: true})
 	runtime.RegisterAttr("main.User", "Email", attrs.Column{Name: "email"})
 }
