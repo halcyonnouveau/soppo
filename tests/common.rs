@@ -125,10 +125,18 @@ fn build_test_project(
     let temp = TempDir::new().expect("Failed to create temp dir");
     let root = temp.path();
 
-    // Create go.mod
+    // Get the path to the soppo runtime package
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let runtime_path = manifest_dir.join("runtime");
+
+    // Create go.mod with require and replace directives for soppo runtime
     fs::write(
         root.join("go.mod"),
-        format!("module {}\n\ngo 1.25\n", module_name),
+        format!(
+            "module {}\n\ngo 1.25\n\nrequire github.com/halcyonnouveau/soppo/runtime v0.0.0\n\nreplace github.com/halcyonnouveau/soppo/runtime => {}\n",
+            module_name,
+            runtime_path.display()
+        ),
     )
     .expect("Failed to write go.mod");
 

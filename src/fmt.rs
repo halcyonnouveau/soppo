@@ -1,9 +1,9 @@
 use crate::error::SoppoError;
 use crate::syntax::{
-    Arm, AssignOp, BinOp, Block, Comment, ConstDecl, Decl, EnumVariant, Expr, ExprKind, Field,
-    FieldPattern, File, FileId, FuncDecl, Generic, Import, IntFormat, InterfaceMethod, Literal,
-    Param, Parser, Pattern, PatternKind, SelectCase, SelectCaseKind, Stmt, StmtKind, StringPart,
-    TypeAnnotation, TypeDecl, TypeKind, UnaryOp,
+    Arm, AssignOp, Attribute, BinOp, Block, Comment, ConstDecl, Decl, EnumVariant, Expr, ExprKind,
+    Field, FieldPattern, File, FileId, FuncDecl, Generic, Import, IntFormat, InterfaceMethod,
+    Literal, Param, Parser, Pattern, PatternKind, SelectCase, SelectCaseKind, Stmt, StmtKind,
+    StringPart, TypeAnnotation, TypeDecl, TypeKind, UnaryOp,
 };
 
 /// Formatter for emitting formatted Soppo code
@@ -144,6 +144,30 @@ impl Formatter {
     fn dedent(&mut self) {
         if self.indent_level > 0 {
             self.indent_level -= 1;
+        }
+    }
+
+    /// Format a single attribute: `[Name]` or `[pkg.Name{field: value}]`
+    fn format_attribute(&self, attr: &Attribute) -> String {
+        let mut result = format!("[{}", attr.name);
+        if !attr.args.is_empty() {
+            result.push('{');
+            let args: Vec<String> = attr
+                .args
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, self.format_expr(v)))
+                .collect();
+            result.push_str(&args.join(", "));
+            result.push('}');
+        }
+        result.push(']');
+        result
+    }
+
+    /// Emit attributes, each on its own line
+    fn emit_attributes(&mut self, attrs: &[Attribute]) {
+        for attr in attrs {
+            self.emit_line(&self.format_attribute(attr));
         }
     }
 
@@ -305,6 +329,9 @@ impl Formatter {
     }
 
     fn format_type_decl(&mut self, t: &TypeDecl) {
+        // Attributes first
+        self.emit_attributes(&t.attributes);
+
         if let Some(doc) = &t.doc_comment {
             for line in doc.lines() {
                 self.emit_line(&format!("//{}", line));
@@ -373,17 +400,28 @@ impl Formatter {
 
     fn format_enum_variant(&mut self, variant: &EnumVariant) {
         match variant {
-            EnumVariant::Unit { ident } => {
+            EnumVariant::Unit { ident, attributes } => {
+                self.emit_attributes(attributes);
                 self.emit_line(&ident.name);
             }
-            EnumVariant::Single { ident, ty } => {
+            EnumVariant::Single {
+                ident,
+                ty,
+                attributes,
+            } => {
+                self.emit_attributes(attributes);
                 self.emit_indent();
                 self.emit(&ident.name);
                 self.emit(" ");
                 self.emit(&Self::format_type_annotation(ty));
                 self.output.push('\n');
             }
-            EnumVariant::Struct { ident, fields } => {
+            EnumVariant::Struct {
+                ident,
+                fields,
+                attributes,
+            } => {
+                self.emit_attributes(attributes);
                 self.emit_indent();
                 self.emit(&format!("{} struct {{\n", ident.name));
                 self.indent();
@@ -413,6 +451,10 @@ impl Formatter {
     fn format_field_aligned(&mut self, field: &Field, max_name_len: usize, max_type_len: usize) {
         let line = field.ident.span.start.line;
         self.emit_comments_before(line);
+
+        // Emit field attributes
+        self.emit_attributes(&field.attributes);
+
         self.emit_indent();
 
         let name = &field.ident.name;
@@ -477,6 +519,9 @@ impl Formatter {
     }
 
     fn format_func_decl(&mut self, f: &FuncDecl) {
+        // Attributes first
+        self.emit_attributes(&f.attributes);
+
         if let Some(doc) = &f.doc_comment {
             for line in doc.lines() {
                 self.emit_line(&format!("//{}", line));

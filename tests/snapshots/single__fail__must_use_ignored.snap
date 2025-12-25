@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::unused_must_use
+
+  × Unused result of `[MustUse]` function `compute`
+    ╭─[must_use_ignored.sop:9:5]
+  8 │ func main() {
+  9 │     compute()
+    ·     ────┬────
+    ·         ╰── result must be used
+ 10 │ }
+    ╰────
+  help: use the result, or assign to `_` to suppress this error

@@ -189,19 +189,24 @@ impl Resolver {
             .unwrap_or("")
             .trim_start_matches('/');
 
-        // Build path in module cache: $GOMODCACHE/module@version/subpath
-        // Note: version is appended directly (no path separator) - e.g., toml@v1.5.0
-        let encoded_path = format!(
-            "{}@{}",
-            encode_module_path(&module_info.path),
-            module_info.version
-        );
-        let cache_path = self.gomodcache.join(encoded_path);
+        // If go list returns a Dir field (e.g., for replace directives), use it directly
+        // Otherwise, build path in module cache: $GOMODCACHE/module@version/subpath
+        let base_dir = if let Some(dir) = &module_info.dir {
+            PathBuf::from(dir)
+        } else {
+            // Note: version is appended directly (no path separator) - e.g., toml@v1.5.0
+            let encoded_path = format!(
+                "{}@{}",
+                encode_module_path(&module_info.path),
+                module_info.version
+            );
+            self.gomodcache.join(encoded_path)
+        };
 
         let source_dir = if subpath.is_empty() {
-            cache_path
+            base_dir
         } else {
-            cache_path.join(subpath)
+            base_dir.join(subpath)
         };
 
         if !source_dir.exists() {
@@ -236,6 +241,8 @@ fn get_go_env(name: &str) -> Result<String> {
 struct ModuleInfo {
     path: String,
     version: String,
+    /// Actual directory for the module (present when using replace directives)
+    dir: Option<String>,
 }
 
 /// Get module info using `go list -m -json`

@@ -193,6 +193,26 @@
 (variant_pattern
   binding: (identifier) @variable)
 
+; Soppo: attributes
+(attribute
+  "[" @punctuation.bracket
+  "]" @punctuation.bracket)
+
+(attribute
+  name: (identifier) @attribute)
+
+(attribute
+  name: (qualified_type
+    package: (package_identifier) @namespace
+    name: (type_identifier) @attribute))
+
+(attribute_arguments
+  "{" @punctuation.bracket
+  "}" @punctuation.bracket)
+
+(attribute_argument
+  name: (identifier) @property)
+
 ; Builtins
 ((identifier) @function.builtin
   (#any-of? @function.builtin

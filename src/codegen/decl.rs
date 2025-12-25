@@ -163,7 +163,7 @@ impl Codegen {
                     self.format_generic_brackets(&decl.generics)
                 ));
                 self.indent();
-                for (name, ty, tag) in fields {
+                for (name, ty, tag, _attrs) in fields {
                     let tag_str = tag.as_ref().map(|t| format!("`{}`", t)).unwrap_or_default();
                     // Add //soppo:nilable comment for nullable pointer/slice/interface fields
                     let nilable_comment = if ty.is_nullable() {
@@ -217,7 +217,7 @@ impl Codegen {
                 // Variant structs
                 for variant in variants {
                     let variant_ident = match variant {
-                        TypedEnumVariant::Unit { ident } => ident,
+                        TypedEnumVariant::Unit { ident, .. } => ident,
                         TypedEnumVariant::Single { ident, .. } => ident,
                         TypedEnumVariant::Struct { ident, .. } => ident,
                     };
@@ -281,7 +281,7 @@ impl Codegen {
                     self.emit_line("var (");
                     self.indent();
                     for variant in unit_variants {
-                        if let TypedEnumVariant::Unit { ident } = variant {
+                        if let TypedEnumVariant::Unit { ident, .. } = variant {
                             let type_name = format!("{}_{}", decl.ident, ident);
                             let var_name = format!("{}{}", decl.ident, ident);
                             self.emit_line(&format!(
@@ -297,7 +297,7 @@ impl Codegen {
                 // Generate constructor functions for variants with data
                 for variant in variants {
                     match variant {
-                        TypedEnumVariant::Single { ident, ty } => {
+                        TypedEnumVariant::Single { ident, ty, .. } => {
                             let func_name = format!("{}{}", decl.ident, ident);
                             let type_name = format!("{}_{}", decl.ident, ident);
                             self.emit_line(&format!(
@@ -316,7 +316,7 @@ impl Codegen {
                             self.dedent();
                             self.emit_line("}");
                         }
-                        TypedEnumVariant::Unit { ident } if !decl.generics.is_empty() => {
+                        TypedEnumVariant::Unit { ident, .. } if !decl.generics.is_empty() => {
                             // Generic unit variants need constructor functions
                             let func_name = format!("{}{}", decl.ident, ident);
                             let type_name = format!("{}_{}", decl.ident, ident);
@@ -517,8 +517,213 @@ impl Codegen {
             self.emit_line("");
         }
 
+        // Generate init() function for attribute registration if there are non-builtin attributes
+        self.gen_attr_init(file)?;
+
         let decls = std::mem::replace(&mut self.output, saved_output);
         Ok(decls)
+    }
+
+    /// Builtin attributes that the compiler handles directly (no runtime registration)
+    const BUILTIN_ATTRS: &'static [&'static str] = &["MustUse", "Deprecated"];
+
+    /// Check if an attribute is a builtin (handled by compiler, not registered at runtime)
+    fn is_builtin_attr(name: &str) -> bool {
+        Self::BUILTIN_ATTRS.contains(&name)
+    }
+
+    /// Generate init() function for attribute registration
+    fn gen_attr_init(&mut self, file: &TypedFile) -> crate::error::SoppoResult<()> {
+        // Collect all non-builtin attributes from functions and types
+        let mut registrations: Vec<(String, String, String)> = Vec::new();
+
+        for decl in &file.decls {
+            match decl {
+                TypedDecl::Func(func) => {
+                    for attr in &func.attributes {
+                        if !Self::is_builtin_attr(&attr.name) {
+                            // Function: target is "pkg.FuncName", field is ""
+                            let target = format!("{}.{}", file.package, func.ident.name);
+                            let attr_literal = self.format_attr_literal(attr)?;
+                            registrations.push((target, String::new(), attr_literal));
+                        }
+                    }
+                }
+                TypedDecl::Type(type_decl) => {
+                    for attr in &type_decl.attributes {
+                        if !Self::is_builtin_attr(&attr.name) {
+                            // Type: target is "pkg.TypeName", field is ""
+                            let target = format!("{}.{}", file.package, type_decl.ident.name);
+                            let attr_literal = self.format_attr_literal(attr)?;
+                            registrations.push((target, String::new(), attr_literal));
+                        }
+                    }
+
+                    // Struct field attributes
+                    if let TypedTypeKind::Struct { fields } = &type_decl.kind {
+                        for (field_name, _, _, attrs) in fields {
+                            for attr in attrs {
+                                if !Self::is_builtin_attr(&attr.name) {
+                                    // Field: target is "pkg.TypeName", field is "FieldName"
+                                    let target =
+                                        format!("{}.{}", file.package, type_decl.ident.name);
+                                    let attr_literal = self.format_attr_literal(attr)?;
+                                    registrations.push((target, field_name.clone(), attr_literal));
+                                }
+                            }
+                        }
+                    }
+
+                    // Enum variant attributes
+                    if let TypedTypeKind::Enum { variants } = &type_decl.kind {
+                        for variant in variants {
+                            let (variant_name, attrs) = match variant {
+                                TypedEnumVariant::Unit { ident, attributes } => {
+                                    (ident.name.clone(), attributes)
+                                }
+                                TypedEnumVariant::Single {
+                                    ident, attributes, ..
+                                } => (ident.name.clone(), attributes),
+                                TypedEnumVariant::Struct {
+                                    ident, attributes, ..
+                                } => (ident.name.clone(), attributes),
+                            };
+
+                            for attr in attrs {
+                                if !Self::is_builtin_attr(&attr.name) {
+                                    // Variant: target is "pkg.EnumName", field is "VariantName"
+                                    let target =
+                                        format!("{}.{}", file.package, type_decl.ident.name);
+                                    let attr_literal = self.format_attr_literal(attr)?;
+                                    registrations.push((
+                                        target,
+                                        variant_name.clone(),
+                                        attr_literal,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // If no registrations, skip init() generation
+        if registrations.is_empty() {
+            return Ok(());
+        }
+
+        // Add runtime import
+        self.needed_imports
+            .insert("github.com/halcyonnouveau/soppo/runtime".to_string());
+
+        // Generate init() function
+        self.emit_line("func init() {");
+        self.indent();
+        for (target, field, attr_literal) in registrations {
+            self.emit_indent();
+            self.emit(format!(
+                "runtime.RegisterAttr(\"{}\", \"{}\", {})\n",
+                target, field, attr_literal
+            ));
+        }
+        self.dedent();
+        self.emit_line("}");
+
+        Ok(())
+    }
+
+    /// Format an attribute as a Go struct literal
+    fn format_attr_literal(
+        &mut self,
+        attr: &crate::syntax::Attribute,
+    ) -> crate::error::SoppoResult<String> {
+        if attr.args.is_empty() {
+            Ok(format!("{}{{}}", attr.name))
+        } else {
+            let mut args = Vec::new();
+            for (k, v) in &attr.args {
+                let expr_str = self.format_expr_to_string(v)?;
+                args.push(format!("{}: {}", k, expr_str));
+            }
+            Ok(format!("{}{{{}}}", attr.name, args.join(", ")))
+        }
+    }
+
+    /// Format an expression to a Go string (for attribute arguments)
+    fn format_expr_to_string(
+        &mut self,
+        expr: &crate::syntax::Expr,
+    ) -> crate::error::SoppoResult<String> {
+        // Save current output, generate expr, then restore
+        let saved = std::mem::take(&mut self.output);
+        // Create a typed expr for the literal values
+        let kind = self.expr_kind_to_typed(&expr.kind, expr.span)?;
+        let typed = crate::types::ast::TypedExpr {
+            kind,
+            ty: crate::types::Type::simple("any"),
+            span: expr.span,
+        };
+        self.gen_expr(&typed);
+        let result = std::mem::replace(&mut self.output, saved);
+        Ok(result)
+    }
+
+    /// Convert untyped ExprKind to TypedExprKind (for attribute arguments)
+    fn expr_kind_to_typed(
+        &self,
+        kind: &crate::syntax::ExprKind,
+        span: Span,
+    ) -> crate::error::SoppoResult<crate::types::ast::TypedExprKind> {
+        match kind {
+            crate::syntax::ExprKind::Integer(n, fmt) => {
+                Ok(crate::types::ast::TypedExprKind::Integer(*n, *fmt))
+            }
+            crate::syntax::ExprKind::Float(f) => Ok(crate::types::ast::TypedExprKind::Float(*f)),
+            crate::syntax::ExprKind::String(s) => {
+                Ok(crate::types::ast::TypedExprKind::String(s.clone()))
+            }
+            crate::syntax::ExprKind::Bool(b) => Ok(crate::types::ast::TypedExprKind::Bool(*b)),
+            crate::syntax::ExprKind::Ident(name) => {
+                Ok(crate::types::ast::TypedExprKind::Ident(name.clone()))
+            }
+            crate::syntax::ExprKind::Field {
+                expr: inner,
+                field,
+                span: field_span,
+            } => {
+                // Qualified access like pkg.Const
+                let inner_kind = self.expr_kind_to_typed(&inner.kind, inner.span)?;
+                let inner_typed = Box::new(crate::types::ast::TypedExpr {
+                    kind: inner_kind,
+                    ty: crate::types::Type::simple("any"),
+                    span: inner.span,
+                });
+                Ok(crate::types::ast::TypedExprKind::Field {
+                    expr: inner_typed,
+                    field: field.clone(),
+                    span: *field_span,
+                })
+            }
+            crate::syntax::ExprKind::Unary { op, operand } => {
+                // Unary like -1
+                let inner_kind = self.expr_kind_to_typed(&operand.kind, operand.span)?;
+                let inner_typed = Box::new(crate::types::ast::TypedExpr {
+                    kind: inner_kind,
+                    ty: crate::types::Type::simple("any"),
+                    span: operand.span,
+                });
+                Ok(crate::types::ast::TypedExprKind::Unary {
+                    op: *op,
+                    operand: inner_typed,
+                })
+            }
+            _ => Err(crate::error::SoppoError::Type {
+                message: "unsupported expression in attribute argument".to_string(),
+                span,
+            }),
+        }
     }
 
     /// Get the span of a typed declaration
@@ -628,13 +833,13 @@ impl Codegen {
         // Variants
         for variant in variants {
             match variant {
-                TypedEnumVariant::Unit { ident } => {
+                TypedEnumVariant::Unit { ident, .. } => {
                     self.emit_line(&format!("    {}", ident));
                 }
-                TypedEnumVariant::Single { ident, ty } => {
+                TypedEnumVariant::Single { ident, ty, .. } => {
                     self.emit_line(&format!("    {} {}", ident, type_to_go_string(ty)));
                 }
-                TypedEnumVariant::Struct { ident, fields } => {
+                TypedEnumVariant::Struct { ident, fields, .. } => {
                     self.emit_line(&format!("    {} {{", ident));
                     for (name, ty) in fields {
                         self.emit_line(&format!("        {} {}", name, type_to_go_string(ty)));

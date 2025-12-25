@@ -1,0 +1,13 @@
+package attrs
+
+// HTTP route attribute
+type Route struct {
+    Path   string
+    Method string
+}
+
+// Database column attribute
+type Column struct {
+    Name       string
+    PrimaryKey bool
+}

@@ -1,6 +1,8 @@
 use super::Infer;
 use crate::error::{SoppoError, SoppoResult};
-use crate::syntax::{Block, ConstDecl, Decl, EnumVariant, File, FuncDecl, TypeDecl, TypeKind};
+use crate::syntax::{
+    Attribute, Block, ConstDecl, Decl, EnumVariant, File, FuncDecl, TypeDecl, TypeKind,
+};
 use crate::types::ast::{
     TypedBlock, TypedConstDecl, TypedDecl, TypedEnumVariant, TypedFile, TypedFuncDecl, TypedImport,
     TypedImportKind, TypedInterfaceMethod, TypedParam, TypedTypeDecl, TypedTypeKind, TypedVarDecl,
@@ -9,6 +11,18 @@ use crate::types::ctx::TypeDefKind;
 use crate::types::{SymbolInfo, SymbolKind, Type};
 
 impl Infer {
+    /// Process attributes and mark any imported packages as used.
+    /// For qualified attribute names like "pkg.Attr", marks "pkg" as used.
+    fn process_attributes(&mut self, attributes: &[Attribute]) {
+        for attr in attributes {
+            // Check if this is a qualified name like "pkg.Attr"
+            if let Some(dot_pos) = attr.name.find('.') {
+                let pkg_name = &attr.name[..dot_pos];
+                self.mark_import_used(pkg_name);
+            }
+        }
+    }
+
     /// Infer the type of a function body, adding named return parameters to scope.
     /// Continues checking all statements even if some have errors.
     /// Returns the TypedBlock for the function body.
@@ -165,6 +179,9 @@ impl Infer {
     pub fn infer_func_decl(&mut self, func: &FuncDecl) -> SoppoResult<TypedFuncDecl> {
         self.push_scope();
 
+        // Process attributes and mark any imports as used
+        self.process_attributes(&func.attributes);
+
         // Save old generic params and set up new ones for this function
         // For function declarations, we use Type::simple with the param name (not type variables)
         // so that codegen outputs the actual parameter name like "T"
@@ -286,6 +303,7 @@ impl Infer {
             body: typed_body,
             span: func.span,
             doc_comment: func.doc_comment.clone(),
+            attributes: func.attributes.clone(),
         })
     }
 
@@ -428,6 +446,9 @@ impl Infer {
 
     /// Type check an enum/struct declaration and return TypedTypeDecl.
     pub fn infer_type_decl(&mut self, type_decl: &TypeDecl) -> SoppoResult<TypedTypeDecl> {
+        // Process attributes and mark any imports as used
+        self.process_attributes(&type_decl.attributes);
+
         // Record type definition for LSP
         self.record_symbol(
             type_decl.ident.span,
@@ -474,11 +495,23 @@ impl Infer {
                 // Register the enum type in the global state
                 self.global_state.register_type(type_decl);
 
+                // Process attributes on enum variants
+                for variant in variants {
+                    let attrs = match variant {
+                        EnumVariant::Unit { attributes, .. } => attributes,
+                        EnumVariant::Single { attributes, .. } => attributes,
+                        EnumVariant::Struct { attributes, .. } => attributes,
+                    };
+                    self.process_attributes(attrs);
+                }
+
                 // Build typed variants and register constructors
                 let typed_variants: Vec<_> = variants
                     .iter()
                     .map(|variant| match variant {
-                        EnumVariant::Unit { ident, .. } => {
+                        EnumVariant::Unit {
+                            ident, attributes, ..
+                        } => {
                             // Unit variants are just values of the enum type
                             let enum_ty = Type::simple(&type_decl.ident.name);
                             if let Some(scope) = self.scopes.first_mut() {
@@ -494,9 +527,15 @@ impl Infer {
                             }
                             TypedEnumVariant::Unit {
                                 ident: ident.clone(),
+                                attributes: attributes.clone(),
                             }
                         }
-                        EnumVariant::Single { ident, ty, .. } => {
+                        EnumVariant::Single {
+                            ident,
+                            ty,
+                            attributes,
+                            ..
+                        } => {
                             // Single value variants are functions: T -> EnumType
                             let value_ty = self.resolve_type(ty);
                             let enum_ty = Type::simple(&type_decl.ident.name);
@@ -515,9 +554,15 @@ impl Infer {
                             TypedEnumVariant::Single {
                                 ident: ident.clone(),
                                 ty: value_ty,
+                                attributes: attributes.clone(),
                             }
                         }
-                        EnumVariant::Struct { ident, fields, .. } => {
+                        EnumVariant::Struct {
+                            ident,
+                            fields,
+                            attributes,
+                            ..
+                        } => {
                             // Struct variants are functions: (field1, field2, ...) -> EnumType
                             let field_types: Vec<(String, Type)> = fields
                                 .iter()
@@ -541,6 +586,7 @@ impl Infer {
                             TypedEnumVariant::Struct {
                                 ident: ident.clone(),
                                 fields: field_types,
+                                attributes: attributes.clone(),
                             }
                         }
                     })
@@ -555,14 +601,25 @@ impl Infer {
                 // Register the struct type with proper field types
                 self.global_state.register_type(type_decl);
 
+                // Process attributes on struct fields
+                for field in fields {
+                    self.process_attributes(&field.attributes);
+                }
+
                 // Store field types for later field access validation
-                let field_types: Vec<(String, Type, Option<String>)> = fields
+                let field_types: Vec<(
+                    String,
+                    Type,
+                    Option<String>,
+                    Vec<crate::syntax::Attribute>,
+                )> = fields
                     .iter()
                     .map(|f| {
                         (
                             f.ident.name.clone(),
                             self.resolve_type(&f.ty),
                             f.tag.clone(),
+                            f.attributes.clone(),
                         )
                     })
                     .collect();
@@ -577,7 +634,7 @@ impl Infer {
                     type_def.kind = TypeDefKind::Struct {
                         fields: field_types
                             .iter()
-                            .map(|(name, ty, _)| (name.clone(), ty.clone()))
+                            .map(|(name, ty, _, _)| (name.clone(), ty.clone()))
                             .collect(),
                     };
                 }
@@ -623,6 +680,7 @@ impl Infer {
             kind: typed_kind,
             span: type_decl.span,
             doc_comment: type_decl.doc_comment.clone(),
+            attributes: type_decl.attributes.clone(),
         })
     }
 
@@ -645,6 +703,7 @@ impl Infer {
                             body: TypedBlock::new(vec![], func.body.span),
                             span: func.span,
                             doc_comment: func.doc_comment.clone(),
+                            attributes: func.attributes.clone(),
                         })
                     }
                 }
@@ -669,6 +728,7 @@ impl Infer {
                         },
                         span: type_decl.span,
                         doc_comment: type_decl.doc_comment.clone(),
+                        attributes: type_decl.attributes.clone(),
                     })
                 }
             },

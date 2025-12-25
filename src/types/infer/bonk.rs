@@ -58,7 +58,7 @@ fn bonk_type_decl(t: &mut TypedTypeDecl, subs: &HashMap<i32, Type>) {
             }
         }
         TypedTypeKind::Struct { fields } => {
-            for (_, ty, _) in fields {
+            for (_, ty, _, _) in fields {
                 bonk_type(ty, subs);
             }
         }

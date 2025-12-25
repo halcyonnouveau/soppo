@@ -302,6 +302,17 @@ pub enum SoppoError {
         #[label("unused variable")]
         span: Span,
     },
+
+    #[error("Unused result of `[MustUse]` function `{name}`")]
+    #[diagnostic(
+        code(soppo::unused_must_use),
+        help("use the result, or assign to `_` to suppress this error")
+    )]
+    UnusedMustUse {
+        name: String,
+        #[label("result must be used")]
+        span: Span,
+    },
 }
 
 fn format_cycle(cycle: &[(String, String)]) -> String {

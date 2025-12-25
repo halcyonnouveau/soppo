@@ -77,6 +77,7 @@ fn func_def_to_type_no_params_no_return() {
         span: None,
         name_span: None,
         doc_comment: None,
+        must_use: false,
     };
     let result = Backend::func_def_to_type(&func_def);
     assert_eq!(result, "func()");
@@ -95,6 +96,7 @@ fn func_def_to_type_with_params_and_return() {
         span: None,
         name_span: None,
         doc_comment: None,
+        must_use: false,
     };
     let result = Backend::func_def_to_type(&func_def);
     assert_eq!(result, "func(a int, b int) int");
@@ -113,6 +115,7 @@ fn func_def_to_type_multiple_returns() {
         span: None,
         name_span: None,
         doc_comment: None,
+        must_use: false,
     };
     let result = Backend::func_def_to_type(&func_def);
     assert_eq!(result, "func(a int, b int) (int, int)");

@@ -166,6 +166,8 @@ pub struct FuncDef {
     pub name_span: Option<Span>,
     /// Documentation comment for this function
     pub doc_comment: Option<String>,
+    /// Whether this function has the MustUse attribute
+    pub must_use: bool,
 }
 
 /// Constant definition in a module
@@ -310,6 +312,10 @@ impl GlobalCtxt {
     /// Register a function definition
     pub fn register_function(&mut self, func_decl: &FuncDecl) {
         let current_module = self.current_module.clone();
+
+        // Check for MustUse attribute
+        let must_use = func_decl.attributes.iter().any(|a| a.is("MustUse"));
+
         let func_def = FuncDef {
             name: func_decl.ident.name.clone(),
             generics: func_decl
@@ -335,6 +341,7 @@ impl GlobalCtxt {
             span: Some(func_decl.span),
             name_span: Some(func_decl.ident.span),
             doc_comment: func_decl.doc_comment.clone(),
+            must_use,
         };
 
         // If this is a method (has receiver), register it by receiver type
@@ -534,6 +541,7 @@ mod tests {
             kind: TypeKind::Enum { variants: vec![] },
             span: Span::dummy(),
             doc_comment: None,
+            attributes: vec![],
         };
 
         gs.register_type(&type_decl);
@@ -562,6 +570,7 @@ mod tests {
             kind: TypeKind::Enum { variants: vec![] },
             span: Span::dummy(),
             doc_comment: None,
+            attributes: vec![],
         };
 
         gs.register_type(&type_decl);

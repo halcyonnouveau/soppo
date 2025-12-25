@@ -353,3 +353,163 @@ x := "Value: {x}, literal: {{y}}"
         (interpreted_string_literal_content)
         (interpreted_string_literal_content)
         (interpreted_string_literal_content)))))
+
+================================================================================
+Simple attribute on function
+================================================================================
+
+[MustUse]
+func foo() int {
+  return 1
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (attribute
+      name: (identifier))
+    name: (identifier)
+    parameters: (parameter_list)
+    result: (type_identifier)
+    body: (block
+      (statement_list
+        (return_statement
+          (expression_list
+            (int_literal)))))))
+
+================================================================================
+Qualified attribute with arguments
+================================================================================
+
+[http.Get{Path: "/users"}]
+func GetUsers() []User {
+  return nil
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (attribute
+      name: (qualified_type
+        package: (package_identifier)
+        name: (type_identifier))
+      arguments: (attribute_arguments
+        (attribute_argument
+          name: (identifier)
+          value: (interpreted_string_literal
+            (interpreted_string_literal_content)))))
+    name: (identifier)
+    parameters: (parameter_list)
+    result: (slice_type
+      element: (type_identifier))
+    body: (block
+      (statement_list
+        (return_statement
+          (expression_list
+            (nil)))))))
+
+================================================================================
+Multiple attributes on function
+================================================================================
+
+[MustUse]
+[Deprecated]
+func oldFunc() error {
+  return nil
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (attribute
+      name: (identifier))
+    (attribute
+      name: (identifier))
+    name: (identifier)
+    parameters: (parameter_list)
+    result: (type_identifier)
+    body: (block
+      (statement_list
+        (return_statement
+          (expression_list
+            (nil)))))))
+
+================================================================================
+Attribute on type declaration
+================================================================================
+
+[Serializable]
+type User struct {
+  Name string
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type_declaration
+    (attribute
+      name: (identifier))
+    (type_spec
+      name: (type_identifier)
+      type: (struct_type
+        (field_declaration_list
+          (field_declaration
+            name: (field_identifier)
+            type: (type_identifier)))))))
+
+================================================================================
+Attribute on struct field
+================================================================================
+
+type User struct {
+  [db.Column{Name: "user_id"}]
+  ID string
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type_declaration
+    (type_spec
+      name: (type_identifier)
+      type: (struct_type
+        (field_declaration_list
+          (field_declaration
+            (attribute
+              name: (qualified_type
+                package: (package_identifier)
+                name: (type_identifier))
+              arguments: (attribute_arguments
+                (attribute_argument
+                  name: (identifier)
+                  value: (interpreted_string_literal
+                    (interpreted_string_literal_content)))))
+            name: (field_identifier)
+            type: (type_identifier)))))))
+
+================================================================================
+Attribute on enum variant
+================================================================================
+
+type Status enum {
+  [Deprecated]
+  Old
+  New
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (type_declaration
+    (type_spec
+      name: (type_identifier)
+      type: (enum_type
+        (enum_variant
+          (attribute
+            name: (identifier))
+          name: (identifier))
+        (enum_variant
+          name: (identifier))))))

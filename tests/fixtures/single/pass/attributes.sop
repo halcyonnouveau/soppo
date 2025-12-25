@@ -1,0 +1,27 @@
+package main
+
+// MustUse attribute - result must be used
+[MustUse]
+func compute() int {
+    return 42
+}
+
+[MustUse]
+func getValue() (int, error) {
+    return 42, nil
+}
+
+func main() {
+    // Using the MustUse result
+    x := compute()
+    _ = x
+
+    // Using in an expression
+    y := compute() + 1
+    _ = y
+
+    // Assigning to multiple values
+    v, err := getValue()
+    _ = v
+    _ = err
+}

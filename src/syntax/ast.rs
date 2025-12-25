@@ -63,6 +63,23 @@ impl PartialEq<String> for Ident {
     }
 }
 
+/// An attribute like `[MustUse]` or `[http.Get{Path: "/users"}]`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Attribute {
+    /// The attribute name (e.g., "MustUse", "http.Get")
+    pub name: String,
+    /// Optional struct literal arguments: `[attr{key: value}]`
+    pub args: Vec<(String, Expr)>,
+    pub span: Span,
+}
+
+impl Attribute {
+    /// Check if this attribute has a specific name
+    pub fn is(&self, name: &str) -> bool {
+        self.name == name
+    }
+}
+
 /// A complete source file
 #[derive(Debug, Clone)]
 pub struct File {
@@ -132,6 +149,7 @@ pub struct VarDecl {
 /// Type declaration (enum, struct, alias)
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
+    pub attributes: Vec<Attribute>,
     pub ident: Ident,
     pub generics: Vec<Generic>,
     pub kind: TypeKind,
@@ -180,16 +198,28 @@ pub struct Generic {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EnumVariant {
     /// Unit variant: Red
-    Unit { ident: Ident },
+    Unit {
+        attributes: Vec<Attribute>,
+        ident: Ident,
+    },
     /// Single value variant: Text string
-    Single { ident: Ident, ty: TypeAnnotation },
+    Single {
+        attributes: Vec<Attribute>,
+        ident: Ident,
+        ty: TypeAnnotation,
+    },
     /// Struct variant: Circle struct { Radius float64 }
-    Struct { ident: Ident, fields: Vec<Field> },
+    Struct {
+        attributes: Vec<Attribute>,
+        ident: Ident,
+        fields: Vec<Field>,
+    },
 }
 
 /// Struct field
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
+    pub attributes: Vec<Attribute>,
     pub ident: Ident,
     pub ty: TypeAnnotation,
     pub tag: Option<String>,
@@ -207,6 +237,7 @@ pub struct TypeAnnotation {
 /// Function declaration
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncDecl {
+    pub attributes: Vec<Attribute>,
     pub receiver: Option<Param>,
     pub ident: Ident,
     pub generics: Vec<Generic>,

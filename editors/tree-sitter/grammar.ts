@@ -1,6 +1,7 @@
 /// <reference types="tree-sitter-cli/dsl" />
 
 const PREC = {
+  attribute: 8,
   primary: 7,
   unary: 6,
   multiplicative: 5,
@@ -183,6 +184,34 @@ export default grammar({
         $.import_declaration,
       ),
 
+    // Soppo: attributes like [MustUse] or [http.Get{Path: "/users"}]
+    attribute: ($) =>
+      prec(
+        PREC.attribute,
+        seq(
+          "[",
+          field("name", choice($.identifier, $.qualified_type)),
+          field("arguments", optional($.attribute_arguments)),
+          "]",
+        ),
+      ),
+
+    attribute_arguments: ($) =>
+      prec(
+        PREC.attribute,
+        seq(
+          "{",
+          optional(seq(commaSep1($.attribute_argument), optional(","))),
+          "}",
+        ),
+      ),
+
+    attribute_argument: ($) =>
+      prec(
+        PREC.attribute,
+        seq(field("name", $.identifier), ":", field("value", $._expression)),
+      ),
+
     package_clause: ($) => seq("package", $._package_identifier),
 
     import_declaration: ($) =>
@@ -260,6 +289,7 @@ export default grammar({
       prec.right(
         1,
         seq(
+          repeat($.attribute),
           "func",
           field("name", $.identifier),
           field("type_parameters", optional($.type_parameter_list)),
@@ -273,6 +303,7 @@ export default grammar({
       prec.right(
         1,
         seq(
+          repeat($.attribute),
           "func",
           field("receiver", $.parameter_list),
           field("name", $._field_identifier),
@@ -321,6 +352,7 @@ export default grammar({
 
     type_declaration: ($) =>
       seq(
+        repeat($.attribute),
         "type",
         choice(
           $.type_spec,
@@ -387,6 +419,7 @@ export default grammar({
 
     enum_variant: ($) =>
       seq(
+        repeat($.attribute),
         field("name", $.identifier),
         // Data variant: Ok int, Some T, Circle struct { ... }
         optional(field("type", $._type)),
@@ -443,6 +476,7 @@ export default grammar({
 
     field_declaration: ($) =>
       seq(
+        repeat($.attribute),
         choice(
           seq(
             commaSep1(field("name", $._field_identifier)),

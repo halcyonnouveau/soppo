@@ -1,0 +1,10 @@
+package main
+
+[MustUse]
+func compute() int {
+    return 42
+}
+
+func main() {
+    compute()
+}

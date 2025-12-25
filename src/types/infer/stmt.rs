@@ -1261,7 +1261,24 @@ impl Infer {
 
             StmtKind::Continue => TypedStmtKind::Continue,
 
-            StmtKind::Expr(expr) => TypedStmtKind::Expr(self.infer_expr(expr)),
+            StmtKind::Expr(expr) => {
+                let typed_expr = self.infer_expr(expr);
+
+                // Check for MustUse: if this is a call to a must_use function, emit an error
+                if let ExprKind::Call { func, .. } = &expr.kind
+                    && let Some(func_name) = self.get_callee_name(func)
+                    && let Some(func_def) = self.global_state.lookup_function(&func_name)
+                    && func_def.must_use
+                    && !func_def.return_types.is_empty()
+                {
+                    self.emit_error(SoppoError::UnusedMustUse {
+                        name: func_name,
+                        span: expr.span,
+                    });
+                }
+
+                TypedStmtKind::Expr(typed_expr)
+            }
 
             StmtKind::CompoundAssign { target, op, value } => {
                 // Compound assignment: x += value
@@ -1635,28 +1652,35 @@ impl Infer {
                         let typed_variants = variants
                             .iter()
                             .map(|v| match v {
-                                EnumVariant::Unit { ident } => {
-                                    crate::types::ast::TypedEnumVariant::Unit {
-                                        ident: ident.clone(),
-                                    }
-                                }
-                                EnumVariant::Single { ident, ty } => {
-                                    crate::types::ast::TypedEnumVariant::Single {
-                                        ident: ident.clone(),
-                                        ty: self.resolve_type(ty),
-                                    }
-                                }
-                                EnumVariant::Struct { ident, fields } => {
-                                    crate::types::ast::TypedEnumVariant::Struct {
-                                        ident: ident.clone(),
-                                        fields: fields
-                                            .iter()
-                                            .map(|f| {
-                                                (f.ident.name.clone(), self.resolve_type(&f.ty))
-                                            })
-                                            .collect(),
-                                    }
-                                }
+                                EnumVariant::Unit {
+                                    ident, attributes, ..
+                                } => crate::types::ast::TypedEnumVariant::Unit {
+                                    ident: ident.clone(),
+                                    attributes: attributes.clone(),
+                                },
+                                EnumVariant::Single {
+                                    ident,
+                                    ty,
+                                    attributes,
+                                    ..
+                                } => crate::types::ast::TypedEnumVariant::Single {
+                                    ident: ident.clone(),
+                                    ty: self.resolve_type(ty),
+                                    attributes: attributes.clone(),
+                                },
+                                EnumVariant::Struct {
+                                    ident,
+                                    fields,
+                                    attributes,
+                                    ..
+                                } => crate::types::ast::TypedEnumVariant::Struct {
+                                    ident: ident.clone(),
+                                    fields: fields
+                                        .iter()
+                                        .map(|f| (f.ident.name.clone(), self.resolve_type(&f.ty)))
+                                        .collect(),
+                                    attributes: attributes.clone(),
+                                },
                             })
                             .collect();
                         crate::types::ast::TypedTypeKind::Enum {
@@ -1671,6 +1695,7 @@ impl Infer {
                                     f.ident.name.clone(),
                                     self.resolve_type(&f.ty),
                                     f.tag.clone(),
+                                    f.attributes.clone(),
                                 )
                             })
                             .collect();
@@ -1707,6 +1732,7 @@ impl Infer {
                     kind: typed_kind,
                     span: type_decl.span,
                     doc_comment: type_decl.doc_comment.clone(),
+                    attributes: type_decl.attributes.clone(),
                 })
             }
         };

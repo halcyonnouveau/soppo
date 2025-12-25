@@ -1,13 +1,97 @@
 use super::Parser;
 use crate::error::{SoppoError, SoppoResult};
 use crate::syntax::ast::{
-    ConstDecl, Decl, DoctestCode, EnumVariant, Expr, ExprKind, Field, File, FuncDecl, Generic,
-    Ident, Import, InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind, VarDecl,
+    Attribute, ConstDecl, Decl, DoctestCode, EnumVariant, Expr, ExprKind, Field, File, FuncDecl,
+    Generic, Ident, Import, InterfaceMethod, Param, TypeAnnotation, TypeDecl, TypeKind, VarDecl,
 };
 use crate::syntax::lexer::Token;
 use crate::syntax::source::Span;
 
 impl Parser {
+    /// Parse a single attribute: `[name]` or `[name{field: expr, ...}]`
+    fn parse_attribute(&mut self) -> SoppoResult<Attribute> {
+        let start_span = self.expect(Token::LBracket)?;
+
+        // Parse the attribute name (possibly qualified: pkg.Attr)
+        let (first_name, _) = self.parse_identifier("attribute")?;
+        let name = if self.consume(&Token::Dot) {
+            let (second_name, _) = self.parse_identifier("attribute")?;
+            format!("{}.{}", first_name, second_name)
+        } else {
+            first_name
+        };
+
+        // Check for optional struct literal arguments: [attr{key: value}]
+        let args = if self.consume(&Token::LBrace) {
+            let mut args = Vec::new();
+            // Skip newlines after opening brace (multi-line attributes)
+            self.skip_terminators();
+            while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                let (key, _) = self.parse_identifier("attribute argument")?;
+                self.expect(Token::Colon)?;
+                let value = self.parse_expr()?;
+                args.push((key, value));
+
+                // Skip newlines after value
+                self.skip_terminators();
+
+                if !self.consume(&Token::Comma) {
+                    break;
+                }
+                // Skip newlines after comma (handles trailing comma)
+                self.skip_terminators();
+            }
+            self.expect(Token::RBrace)?;
+            args
+        } else {
+            Vec::new()
+        };
+
+        let end_span = self.expect(Token::RBracket)?;
+
+        Ok(Attribute {
+            name,
+            args,
+            span: self.merge_spans(start_span, end_span),
+        })
+    }
+
+    /// Parse zero or more attributes: `[attr1] [attr2]`
+    fn parse_attributes(&mut self) -> SoppoResult<Vec<Attribute>> {
+        let mut attrs = Vec::new();
+        loop {
+            // Skip newlines between attributes
+            self.skip_terminators();
+
+            if !matches!(self.peek(), Some(Token::LBracket)) {
+                break;
+            }
+            // Need to peek ahead to distinguish [Attr] from [N]Type (array type)
+            // Attributes have an identifier after [, arrays have a number or ]
+            if self.is_attribute_start() {
+                attrs.push(self.parse_attribute()?);
+            } else {
+                break;
+            }
+        }
+        Ok(attrs)
+    }
+
+    /// Check if the next tokens look like an attribute start [Ident...] rather than [N]Type
+    fn is_attribute_start(&self) -> bool {
+        // Save position and check
+        if !matches!(self.peek(), Some(Token::LBracket)) {
+            return false;
+        }
+        // Look at the token after [
+        // If it's an identifier (not a number, not ]), it's likely an attribute
+        if let Some(next) = self.peek_at(1) {
+            matches!(next, Token::Ident(_))
+        } else {
+            false
+        }
+    }
+
     /// Parse function parameter
     fn parse_param(&mut self) -> SoppoResult<Param> {
         // Go syntax: name Type (no colon)
@@ -349,8 +433,11 @@ impl Parser {
         Ok(generics)
     }
 
-    /// Parse function declaration
+    /// Parse function declaration with optional attributes
     pub fn parse_func_decl(&mut self) -> SoppoResult<FuncDecl> {
+        // Parse optional attributes before 'func'
+        let attributes = self.parse_attributes()?;
+
         let start_span = self.expect(Token::Func)?;
         let doc_comment = self.get_doc_comment(start_span.start.line);
 
@@ -381,6 +468,7 @@ impl Parser {
         let body = self.parse_block()?;
 
         Ok(FuncDecl {
+            attributes,
             receiver,
             ident: Ident::new(name, name_span),
             generics,
@@ -392,8 +480,11 @@ impl Parser {
         })
     }
 
-    /// Parse type declaration (enum or struct)
+    /// Parse type declaration (enum or struct) with optional attributes
     pub(super) fn parse_type_decl(&mut self) -> SoppoResult<TypeDecl> {
+        // Parse optional attributes before 'type'
+        let attributes = self.parse_attributes()?;
+
         let start_span = self.expect(Token::Type)?;
         let doc_comment = self.get_doc_comment(start_span.start.line);
 
@@ -471,6 +562,7 @@ impl Parser {
         };
 
         Ok(TypeDecl {
+            attributes,
             ident: Ident::new(name, name_span),
             generics,
             kind,
@@ -479,8 +571,11 @@ impl Parser {
         })
     }
 
-    /// Parse enum variant
+    /// Parse enum variant with optional attributes
     fn parse_enum_variant(&mut self) -> SoppoResult<EnumVariant> {
+        // Parse optional attributes before variant name
+        let attributes = self.parse_attributes()?;
+
         let (name, name_span) = self.parse_identifier("variant")?;
 
         // Check for data: Single Type or Struct { fields }
@@ -508,12 +603,14 @@ impl Parser {
             let _ = self.expect(Token::RBrace)?;
 
             Ok(EnumVariant::Struct {
+                attributes,
                 ident: Ident::new(name, name_span),
                 fields,
             })
         } else if self.is_terminator() {
             // Terminator after variant name - unit variant (like Go struct embedded field on its own line)
             Ok(EnumVariant::Unit {
+                attributes,
                 ident: Ident::new(name, name_span),
             })
         } else if matches!(
@@ -524,12 +621,14 @@ impl Parser {
             let ty = self.parse_type()?;
 
             Ok(EnumVariant::Single {
+                attributes,
                 ident: Ident::new(name, name_span),
                 ty,
             })
         } else {
             // Unit variant
             Ok(EnumVariant::Unit {
+                attributes,
                 ident: Ident::new(name, name_span),
             })
         }
@@ -537,7 +636,11 @@ impl Parser {
 
     /// Parse struct fields (supports grouped names like `X, Y int`)
     /// Returns a Vec because `X, Y int` produces multiple Field entries
+    /// Attributes apply to all fields in a group: `[attr] X, Y int`
     pub fn parse_fields(&mut self) -> SoppoResult<Vec<Field>> {
+        // Parse optional attributes before field names
+        let attributes = self.parse_attributes()?;
+
         // Collect all field names (comma-separated)
         let mut names: Vec<Ident> = Vec::new();
 
@@ -567,10 +670,11 @@ impl Parser {
             _ => None,
         };
 
-        // Create a Field for each name
+        // Create a Field for each name (attributes apply to all)
         let fields = names
             .into_iter()
             .map(|name| Field {
+                attributes: attributes.clone(),
                 ident: name,
                 ty: ty.clone(),
                 tag: tag.clone(),
@@ -630,6 +734,15 @@ impl Parser {
             Some(Token::Var) => Ok(Decl::Var(self.parse_var_decl()?)),
             Some(Token::Func) => Ok(Decl::Func(self.parse_func_decl()?)),
             Some(Token::Type) => Ok(Decl::Type(self.parse_type_decl()?)),
+            // Attributes can precede func or type declarations
+            Some(Token::LBracket) if self.is_attribute_start() => {
+                // Peek ahead past attributes to determine declaration type
+                // For now, parse_func_decl and parse_type_decl handle their own attributes
+                // We need to peek to see if it's func or type after the attributes
+                // Since both parse_func_decl and parse_type_decl call parse_attributes first,
+                // we just need to figure out which one to call
+                self.parse_decl_with_attributes()
+            }
             Some(tok) => Err(SoppoError::Parse {
                 message: format!("Expected declaration, found {}", tok),
                 span: self.peek_span(),
@@ -638,6 +751,136 @@ impl Parser {
                 message: "Expected declaration".to_string(),
                 span: Span::dummy(),
             }),
+        }
+    }
+
+    /// Parse a declaration that starts with attributes
+    fn parse_decl_with_attributes(&mut self) -> SoppoResult<Decl> {
+        // Parse the attributes
+        let attributes = self.parse_attributes()?;
+
+        // Skip newlines between attributes and declaration
+        self.skip_terminators();
+
+        // Now check what keyword follows
+        match self.peek() {
+            Some(Token::Func) => {
+                // Put attributes back by creating the FuncDecl directly
+                let start_span = self.expect(Token::Func)?;
+                let doc_comment = self.get_doc_comment(start_span.start.line);
+
+                let receiver = if self.consume(&Token::LParen) {
+                    let param = self.parse_param()?;
+                    self.expect(Token::RParen)?;
+                    Some(param)
+                } else {
+                    None
+                };
+
+                let (name, name_span) = self.parse_identifier("function")?;
+                self.validate_identifier(&name, &name_span)?;
+                let generics = self.parse_generics()?;
+                self.expect(Token::LParen)?;
+                let params = self.parse_param_list()?;
+                self.expect(Token::RParen)?;
+                let returns = self.parse_return_list()?;
+                let body = self.parse_block()?;
+
+                Ok(Decl::Func(FuncDecl {
+                    attributes,
+                    receiver,
+                    ident: Ident::new(name, name_span),
+                    generics,
+                    params,
+                    returns,
+                    body: body.clone(),
+                    span: self.merge_spans(start_span, body.span),
+                    doc_comment,
+                }))
+            }
+            Some(Token::Type) => {
+                // Similar for type declarations
+                let start_span = self.expect(Token::Type)?;
+                let doc_comment = self.get_doc_comment(start_span.start.line);
+
+                let (name, name_span) = self.parse_identifier("type")?;
+                self.validate_identifier(&name, &name_span)?;
+                let generics = self.parse_generics()?;
+
+                let (kind, end_span) = self.parse_type_kind()?;
+
+                Ok(Decl::Type(TypeDecl {
+                    attributes,
+                    ident: Ident::new(name, name_span),
+                    generics,
+                    kind,
+                    span: self.merge_spans(start_span, end_span),
+                    doc_comment,
+                }))
+            }
+            Some(tok) => Err(SoppoError::Parse {
+                message: format!(
+                    "Attributes can only precede func or type declarations, found {}",
+                    tok
+                ),
+                span: self.peek_span(),
+            }),
+            None => Err(SoppoError::Parse {
+                message: "Expected func or type after attributes".to_string(),
+                span: Span::dummy(),
+            }),
+        }
+    }
+
+    /// Parse the kind part of a type declaration (enum, struct, interface, alias, or definition)
+    fn parse_type_kind(&mut self) -> SoppoResult<(TypeKind, Span)> {
+        if self.consume(&Token::Enum) {
+            self.expect(Token::LBrace)?;
+            self.skip_terminators();
+
+            let mut variants = Vec::new();
+            while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                let variant = self.parse_enum_variant()?;
+                variants.push(variant);
+                self.skip_terminators();
+            }
+
+            let end_span = self.expect(Token::RBrace)?;
+            Ok((TypeKind::Enum { variants }, end_span))
+        } else if self.consume(&Token::Struct) {
+            self.expect(Token::LBrace)?;
+            self.skip_terminators();
+
+            let mut fields = Vec::new();
+            while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                let parsed_fields = self.parse_fields()?;
+                fields.extend(parsed_fields);
+                self.skip_terminators();
+            }
+
+            let end_span = self.expect(Token::RBrace)?;
+            Ok((TypeKind::Struct { fields }, end_span))
+        } else if self.consume(&Token::Interface) {
+            self.expect(Token::LBrace)?;
+            self.skip_terminators();
+
+            let mut methods = Vec::new();
+            while !matches!(self.peek(), Some(Token::RBrace) | None) {
+                let method = self.parse_interface_method()?;
+                methods.push(method);
+                self.skip_terminators();
+            }
+
+            let end_span = self.expect(Token::RBrace)?;
+            Ok((TypeKind::Interface { methods }, end_span))
+        } else if self.consume(&Token::Assign) {
+            let target = self.parse_type()?;
+            let end_span = target.span;
+            Ok((TypeKind::Alias { target }, end_span))
+        } else {
+            let target = self.parse_type()?;
+            let end_span = target.span;
+            Ok((TypeKind::Definition { target }, end_span))
         }
     }
 

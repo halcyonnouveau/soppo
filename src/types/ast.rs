@@ -596,6 +596,7 @@ pub struct TypedTypeDecl {
     pub kind: TypedTypeKind,
     pub span: Span,
     pub doc_comment: Option<String>,
+    pub attributes: Vec<crate::syntax::Attribute>,
 }
 
 /// Typed type declaration kind
@@ -612,8 +613,8 @@ pub enum TypedTypeKind {
         variants: Vec<TypedEnumVariant>,
     },
     Struct {
-        /// Resolved field types
-        fields: Vec<(String, Type, Option<String>)>, // (name, type, tag)
+        /// Resolved field types with attributes
+        fields: Vec<(String, Type, Option<String>, Vec<crate::syntax::Attribute>)>, // (name, type, tag, attributes)
     },
     Interface {
         methods: Vec<TypedInterfaceMethod>,
@@ -625,14 +626,17 @@ pub enum TypedTypeKind {
 pub enum TypedEnumVariant {
     Unit {
         ident: Ident,
+        attributes: Vec<crate::syntax::Attribute>,
     },
     Single {
         ident: Ident,
         ty: Type,
+        attributes: Vec<crate::syntax::Attribute>,
     },
     Struct {
         ident: Ident,
         fields: Vec<(String, Type)>,
+        attributes: Vec<crate::syntax::Attribute>,
     },
 }
 
@@ -655,6 +659,7 @@ pub struct TypedFuncDecl {
     pub body: TypedBlock,
     pub span: Span,
     pub doc_comment: Option<String>,
+    pub attributes: Vec<crate::syntax::Attribute>,
 }
 
 /// Import kind - Go or Soppo module

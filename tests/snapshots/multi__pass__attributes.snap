@@ -1,0 +1,78 @@
+---
+source: tests/multi.rs
+expression: format_results(&results)
+---
+=== attrs/lib.go ===
+//soppo:generated v1
+// HTTP route attribute
+package attrs
+
+type Route struct {
+	Path string
+	Method string
+}
+
+// Database column attribute
+type Column struct {
+	Name string
+	PrimaryKey bool
+}
+
+
+
+=== cmd/main.go ===
+//soppo:generated v1
+package main
+
+import "fmt"
+import "github.com/halcyonnouveau/soppo/runtime"
+import "github.com/test/attributes/attrs"
+
+// Function with attribute
+func GetUsers() string {
+	return "users"
+}
+
+// Type with attribute
+type Handler struct {
+	Name string
+}
+
+// Struct with field attributes (multi-line)
+type User struct {
+	ID string
+	Email string
+}
+
+func main() {
+	_ = GetUsers()
+
+	// Query function attribute
+	route, found := runtime.GetAttr[attrs.Route]("main.GetUsers", "")
+	if found {
+		fmt.Println("Route:", route.Path, route.Method)
+	}
+
+	// Query struct field attributes
+	idCol, found := runtime.GetAttr[attrs.Column]("main.User", "ID")
+	if found {
+		fmt.Println("ID column:", idCol.Name, "primary:", idCol.PrimaryKey)
+	}
+
+	emailCol, found := runtime.GetAttr[attrs.Column]("main.User", "Email")
+	if found {
+		fmt.Println("Email column:", emailCol.Name)
+	}
+
+	// Check if type has Route attribute
+	if runtime.HasAttr[attrs.Route]("main.Handler", "") {
+		fmt.Println("Handler has Route attribute")
+	}
+}
+
+func init() {
+	runtime.RegisterAttr("main.GetUsers", "", attrs.Route{Path: "/users", Method: "GET"})
+	runtime.RegisterAttr("main.Handler", "", attrs.Route{Path: "/api"})
+	runtime.RegisterAttr("main.User", "ID", attrs.Column{Name: "user_id", PrimaryKey: true})
+	runtime.RegisterAttr("main.User", "Email", attrs.Column{Name: "email"})
+}

@@ -2576,6 +2576,17 @@ impl Infer {
         }
     }
 
+    /// Extract the function name from a call expression's callee
+    pub(super) fn get_callee_name(&self, callee: &Expr) -> Option<String> {
+        match &callee.kind {
+            // Simple function call: foo()
+            ExprKind::Ident(name) => Some(name.clone()),
+            // Method/field call: x.foo() or pkg.Func()
+            ExprKind::Field { field, .. } => Some(field.clone()),
+            _ => None,
+        }
+    }
+
     /// Check if an expression supports the comma-ok idiom and return the types.
     ///
     /// Returns `None` if the expression doesn't support comma-ok.

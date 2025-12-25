@@ -271,6 +271,56 @@ Format specifiers follow Go's `fmt` verbs (`d`, `x`, `b`, `f`, `e`, `s`, `t`, `v
 > [!TIP]
 > Use `{{` and `}}` to escape literal braces.
 
+## Attributes
+
+Attributes attach compile-time validated metadata to declarations. Unlike struct tags, attributes are type-checked structs that can be applied to functions, types, fields, and enum variants.
+
+```go
+import "myapp/http"
+import "myapp/db"
+
+[http.Get{Path: "/users/{id}"}]
+func GetUser(id string) (User, error) {
+    // ...
+}
+
+type User struct {
+    [db.Column{Name: "user_id", PrimaryKey: true}]
+    ID string
+
+    [db.Column{Name: "email"}]
+    Email string
+}
+```
+
+Any struct can be used as an attribute. Attributes are registered at `init()` and queried via the runtime package:
+
+```go
+import "github.com/halcyonnouveau/soppo/runtime"
+
+// Discover all routes dynamically
+for _, target := range runtime.AllTargets() {
+    if route, ok := runtime.GetAttr[http.Get](target, ""); ok {
+        router.GET(route.Path, handlers[target])
+    }
+}
+
+// Query a specific target
+col := runtime.GetAttr[db.Column]("main.User", "ID") ?
+fmt.Println(col.Name)  // "user_id"
+```
+
+Target naming uses `"pkg.Name"` for functions/types and `"pkg.Type", "Field"` for struct fields and enum variants. Use `runtime.AllTargets()` to discover all attributed declarations and `runtime.AllFields(target)` for struct fields.
+
+Some attributes are handled directly by the compiler and don't need imports:
+
+```go
+[MustUse]
+func OpenFile(path string) (*File, error) { ... }
+
+OpenFile("data.txt")  // ERROR: must use return value
+```
+
 ## Go Interop and Imports
 
 ```go

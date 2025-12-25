@@ -187,6 +187,7 @@ fn arb_field() -> impl Strategy<Value = Field> {
         ident,
         ty,
         tag: None,
+        attributes: vec![],
     })
 }
 
@@ -206,13 +207,24 @@ fn arb_generic() -> impl Strategy<Value = Generic> {
 fn arb_enum_variant() -> impl Strategy<Value = EnumVariant> {
     prop_oneof![
         // Unit variant
-        arb_ident().prop_map(|ident| EnumVariant::Unit { ident }),
+        arb_ident().prop_map(|ident| EnumVariant::Unit {
+            ident,
+            attributes: vec![],
+        }),
         // Single value variant
-        (arb_ident(), arb_type_annotation())
-            .prop_map(|(ident, ty)| EnumVariant::Single { ident, ty }),
+        (arb_ident(), arb_type_annotation()).prop_map(|(ident, ty)| EnumVariant::Single {
+            ident,
+            ty,
+            attributes: vec![],
+        }),
         // Struct variant
-        (arb_ident(), prop::collection::vec(arb_field(), 1..4))
-            .prop_map(|(ident, fields)| EnumVariant::Struct { ident, fields }),
+        (arb_ident(), prop::collection::vec(arb_field(), 1..4)).prop_map(|(ident, fields)| {
+            EnumVariant::Struct {
+                ident,
+                fields,
+                attributes: vec![],
+            }
+        }),
     ]
 }
 
@@ -278,6 +290,7 @@ fn arb_type_decl() -> impl Strategy<Value = TypeDecl> {
             kind,
             span: Span::dummy(),
             doc_comment: None,
+            attributes: vec![],
         })
 }
 
@@ -305,6 +318,7 @@ fn arb_func_decl() -> impl Strategy<Value = FuncDecl> {
             body,
             span: Span::dummy(),
             doc_comment: None,
+            attributes: vec![],
         })
 }
 
