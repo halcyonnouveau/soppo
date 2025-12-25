@@ -31,6 +31,10 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # Copy the sop binary (static, no glibc dependency)
 COPY --from=rust-builder /build/target/x86_64-unknown-linux-musl/release/sop /usr/local/bin/sop
 
+# Copy soppo runtime package
+COPY runtime /go/src/github.com/halcyonnouveau/soppo/runtime
+ENV GOPATH="/go"
+
 # Copy the built SvelteKit app
 COPY --from=web-builder /build/build ./build
 COPY --from=web-builder /build/package.json ./

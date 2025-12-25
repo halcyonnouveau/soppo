@@ -23,14 +23,27 @@ async function runSopCompiler(
   const tempDir = join(tmpdir(), `soppo-${randomUUID()}`);
   const inputFile = join(tempDir, "main.sop");
   const outputFile = join(tempDir, "main.go");
+  const goModFile = join(tempDir, "go.mod");
 
   try {
     await mkdir(tempDir, { recursive: true });
     await writeFile(inputFile, source);
+    await writeFile(
+      goModFile,
+      `module playground
+
+go 1.25
+
+require github.com/halcyonnouveau/soppo/runtime v0.1.0
+
+replace github.com/halcyonnouveau/soppo/runtime => /go/src/github.com/halcyonnouveau/soppo/runtime
+`,
+    );
 
     return new Promise((resolve) => {
       // sop build <file> outputs to <file>.go in same directory
-      const proc = spawn("sop", ["build", inputFile]);
+      // Run from tempDir so go.mod is found
+      const proc = spawn("sop", ["build", "main.sop"], { cwd: tempDir });
       let stderr = "";
 
       proc.stderr.on("data", (data) => {
