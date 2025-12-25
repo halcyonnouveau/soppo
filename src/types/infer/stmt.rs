@@ -407,7 +407,7 @@ impl Infer {
                 };
 
                 if let Err(e) =
-                    self.insert_var(ident.name.clone(), const_ty.clone(), Some(ident.span))
+                    self.insert_const(ident.name.clone(), const_ty.clone(), Some(ident.span))
                 {
                     self.emit_error(e);
                 }
@@ -444,7 +444,8 @@ impl Infer {
                     } else {
                         typed_value.ty.clone()
                     };
-                    if let Err(e) = self.insert_var(ident.name.clone(), var_ty, Some(ident.span)) {
+                    if let Err(e) = self.insert_const(ident.name.clone(), var_ty, Some(ident.span))
+                    {
                         self.emit_error(e);
                     }
                 }
@@ -462,6 +463,18 @@ impl Infer {
 
                 // Special case: blank identifier accepts any type
                 let is_blank = matches!(&target.kind, ExprKind::Ident(name) if name == "_");
+
+                // Check if assigning to an immutable binding (const)
+                if let ExprKind::Ident(name) = &target.kind
+                    && let Some((mutable, decl_span)) = self.check_var_mutable(name)
+                    && !mutable
+                {
+                    self.emit_error(SoppoError::AssignToConst {
+                        name: name.clone(),
+                        span: stmt.span,
+                        decl_span: decl_span.unwrap_or(stmt.span),
+                    });
+                }
 
                 if !is_blank && !typed_target.ty.is_error() && !typed_value.ty.is_error() {
                     let target_ty_sub = self.substitute(typed_target.ty.clone());
@@ -1252,6 +1265,18 @@ impl Infer {
 
             StmtKind::CompoundAssign { target, op, value } => {
                 // Compound assignment: x += value
+                // Check if assigning to an immutable binding (const)
+                if let ExprKind::Ident(name) = &target.kind
+                    && let Some((mutable, decl_span)) = self.check_var_mutable(name)
+                    && !mutable
+                {
+                    self.emit_error(SoppoError::AssignToConst {
+                        name: name.clone(),
+                        span: stmt.span,
+                        decl_span: decl_span.unwrap_or(stmt.span),
+                    });
+                }
+
                 // Check that target and value types are compatible
                 let typed_target = self.infer_expr(target);
                 let typed_value = self.infer_expr(value);
@@ -1267,6 +1292,17 @@ impl Infer {
 
             StmtKind::IncDec { target, is_inc } => {
                 // Increment/decrement: x++ or x--
+                // Check if assigning to an immutable binding (const)
+                if let ExprKind::Ident(name) = &target.kind
+                    && let Some((mutable, decl_span)) = self.check_var_mutable(name)
+                    && !mutable
+                {
+                    self.emit_error(SoppoError::AssignToConst {
+                        name: name.clone(),
+                        span: stmt.span,
+                        decl_span: decl_span.unwrap_or(stmt.span),
+                    });
+                }
                 // Just infer the target type (should be numeric)
                 let typed_target = self.infer_expr(target);
                 TypedStmtKind::IncDec {

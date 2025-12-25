@@ -102,8 +102,14 @@ fn resolve_stdlib_package(pkg_name: &str) -> Option<String> {
     }
 }
 
-/// Scope entry: (type, definition span, used flag)
-type ScopeEntry = (Type, Option<Span>, bool);
+/// Scope entry for a variable or constant
+#[derive(Debug, Clone)]
+pub(super) struct ScopeEntry {
+    ty: Type,
+    def_span: Option<Span>,
+    used: bool,
+    mutable: bool,
+}
 
 /// Kind of import
 #[derive(Debug, Clone)]
@@ -1929,8 +1935,8 @@ impl Infer {
             // Collect unused variables and sort by span for deterministic order
             let mut unused: Vec<_> = scope
                 .iter()
-                .filter(|(name, (_, span, used))| !used && *name != "_" && span.is_some())
-                .map(|(name, (_, span, _))| (name.clone(), span.unwrap()))
+                .filter(|(name, entry)| !entry.used && *name != "_" && entry.def_span.is_some())
+                .map(|(name, entry)| (name.clone(), entry.def_span.unwrap()))
                 .collect();
 
             // Sort by source position (byte offset)
@@ -1988,19 +1994,73 @@ impl Infer {
 
         // Check if the variable is already declared in the current scope
         if let Some(scope) = self.scopes.last()
-            && let Some((_, prev_span, _)) = scope.get(&name)
-            && let (Some(span), Some(prev)) = (def_span, prev_span)
+            && let Some(entry) = scope.get(&name)
+            && let (Some(span), Some(prev)) = (def_span, entry.def_span)
         {
             return Err(SoppoError::Redeclared {
                 name,
                 span,
-                prev_span: *prev,
+                prev_span: prev,
             });
         }
 
         if let Some(scope) = self.scopes.last_mut() {
             // Insert with used=false, will be marked used when accessed via lookup_var
-            scope.insert(name, (ty, def_span, false));
+            scope.insert(
+                name,
+                ScopeEntry {
+                    ty,
+                    def_span,
+                    used: false,
+                    mutable: true, // short declarations (:=) are mutable
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Insert a constant into the current scope
+    /// Constants are immutable and cannot be reassigned
+    pub(super) fn insert_const(
+        &mut self,
+        name: String,
+        ty: Type,
+        def_span: Option<Span>,
+    ) -> SoppoResult<()> {
+        // Blank identifier `_` is special - it discards values and can be used multiple times
+        if name == "_" {
+            return Ok(());
+        }
+
+        // Check if the variable name shadows an imported package
+        if self.is_imported_package(&name)
+            && let Some(span) = def_span
+        {
+            return Err(SoppoError::ShadowsImport { name, span });
+        }
+
+        // Check if the variable is already declared in the current scope
+        if let Some(scope) = self.scopes.last()
+            && let Some(entry) = scope.get(&name)
+            && let (Some(span), Some(prev)) = (def_span, entry.def_span)
+        {
+            return Err(SoppoError::Redeclared {
+                name,
+                span,
+                prev_span: prev,
+            });
+        }
+
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(
+                name,
+                ScopeEntry {
+                    ty,
+                    def_span,
+                    used: false,
+                    mutable: false, // constants are immutable
+                },
+            );
         }
         Ok(())
     }
@@ -2021,7 +2081,15 @@ impl Infer {
     pub(super) fn update_var(&mut self, name: String, ty: Type, def_span: Option<Span>) {
         if let Some(scope) = self.scopes.last_mut() {
             // Insert with used=false, will be marked used when accessed via lookup_var
-            scope.insert(name, (ty, def_span, false));
+            scope.insert(
+                name,
+                ScopeEntry {
+                    ty,
+                    def_span,
+                    used: false,
+                    mutable: true,
+                },
+            );
         }
     }
 
@@ -2050,7 +2118,7 @@ impl Infer {
                         .scopes
                         .last()
                         .and_then(|s| s.get(name))
-                        .and_then(|(_, span, _)| *span)
+                        .and_then(|entry| entry.def_span)
                         .unwrap_or(*span),
                 });
             }
@@ -2089,9 +2157,9 @@ impl Infer {
     /// Also marks the variable as used
     pub(super) fn lookup_var(&mut self, name: &str) -> Option<(Type, Option<Span>)> {
         for scope in self.scopes.iter_mut().rev() {
-            if let Some((ty, span, used)) = scope.get_mut(name) {
-                *used = true;
-                return Some((ty.clone(), *span));
+            if let Some(entry) = scope.get_mut(name) {
+                entry.used = true;
+                return Some((entry.ty.clone(), entry.def_span));
             }
         }
         None
@@ -2101,8 +2169,18 @@ impl Infer {
     /// Use this for internal type checking that shouldn't count as a reference.
     pub(super) fn lookup_var_type(&self, name: &str) -> Option<Type> {
         for scope in self.scopes.iter().rev() {
-            if let Some((ty, _, _)) = scope.get(name) {
-                return Some(ty.clone());
+            if let Some(entry) = scope.get(name) {
+                return Some(entry.ty.clone());
+            }
+        }
+        None
+    }
+
+    /// Check if a variable is mutable. Returns (is_mutable, def_span) if found.
+    pub(super) fn check_var_mutable(&self, name: &str) -> Option<(bool, Option<Span>)> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(entry) = scope.get(name) {
+                return Some((entry.mutable, entry.def_span));
             }
         }
         None
@@ -2112,8 +2190,8 @@ impl Infer {
     /// Used for `_ = var` patterns that suppress unused variable warnings
     pub(super) fn mark_var_used(&mut self, name: &str) {
         for scope in self.scopes.iter_mut().rev() {
-            if let Some((_, _, used)) = scope.get_mut(name) {
-                *used = true;
+            if let Some(entry) = scope.get_mut(name) {
+                entry.used = true;
                 return;
             }
         }

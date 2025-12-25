@@ -126,7 +126,12 @@ impl Infer {
         if let Some(scope) = self.scopes.first_mut() {
             scope.insert(
                 func.ident.name.clone(),
-                (func_ty.clone(), Some(func.span), false),
+                super::ScopeEntry {
+                    ty: func_ty.clone(),
+                    def_span: Some(func.span),
+                    used: false,
+                    mutable: false, // functions are not mutable
+                },
             );
         }
 
@@ -307,7 +312,12 @@ impl Infer {
         if let Some(scope) = self.scopes.first_mut() {
             scope.insert(
                 const_decl.ident.name.clone(),
-                (const_ty.clone(), Some(const_decl.span), false),
+                super::ScopeEntry {
+                    ty: const_ty.clone(),
+                    def_span: Some(const_decl.span),
+                    used: false,
+                    mutable: false, // constants are immutable
+                },
             );
         }
 
@@ -379,7 +389,12 @@ impl Infer {
         if let Some(scope) = self.scopes.first_mut() {
             scope.insert(
                 var_decl.ident.name.clone(),
-                (var_ty.clone(), Some(var_decl.span), true), // true = mutable
+                super::ScopeEntry {
+                    ty: var_ty.clone(),
+                    def_span: Some(var_decl.span),
+                    used: false,
+                    mutable: true, // var declarations are mutable
+                },
             );
         }
 
@@ -467,8 +482,15 @@ impl Infer {
                             // Unit variants are just values of the enum type
                             let enum_ty = Type::simple(&type_decl.ident.name);
                             if let Some(scope) = self.scopes.first_mut() {
-                                scope
-                                    .insert(ident.name.clone(), (enum_ty, Some(ident.span), false));
+                                scope.insert(
+                                    ident.name.clone(),
+                                    super::ScopeEntry {
+                                        ty: enum_ty,
+                                        def_span: Some(ident.span),
+                                        used: false,
+                                        mutable: false,
+                                    },
+                                );
                             }
                             TypedEnumVariant::Unit {
                                 ident: ident.clone(),
@@ -482,7 +504,12 @@ impl Infer {
                             if let Some(scope) = self.scopes.first_mut() {
                                 scope.insert(
                                     ident.name.clone(),
-                                    (constructor_ty, Some(ident.span), false),
+                                    super::ScopeEntry {
+                                        ty: constructor_ty,
+                                        def_span: Some(ident.span),
+                                        used: false,
+                                        mutable: false,
+                                    },
                                 );
                             }
                             TypedEnumVariant::Single {
@@ -503,7 +530,12 @@ impl Infer {
                             if let Some(scope) = self.scopes.first_mut() {
                                 scope.insert(
                                     ident.name.clone(),
-                                    (constructor_ty, Some(ident.span), false),
+                                    super::ScopeEntry {
+                                        ty: constructor_ty,
+                                        def_span: Some(ident.span),
+                                        used: false,
+                                        mutable: false,
+                                    },
                                 );
                             }
                             TypedEnumVariant::Struct {

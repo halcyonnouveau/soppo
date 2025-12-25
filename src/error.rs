@@ -156,6 +156,19 @@ pub enum SoppoError {
         span: Span,
     },
 
+    #[error("Cannot assign to constant `{name}`")]
+    #[diagnostic(
+        code(soppo::assign_to_const),
+        help("constants cannot be reassigned; use `var` for a mutable binding")
+    )]
+    AssignToConst {
+        name: String,
+        #[label("cannot assign to constant")]
+        span: Span,
+        #[label("constant declared here")]
+        decl_span: Span,
+    },
+
     #[error("Cannot assign `nil` to non-nilable type `{ty}`")]
     #[diagnostic(
         code(soppo::nil_to_non_nilable),

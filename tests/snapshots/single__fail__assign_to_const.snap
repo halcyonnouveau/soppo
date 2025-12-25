@@ -1,0 +1,18 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::assign_to_const
+
+  × Cannot assign to constant `x`
+   ╭─[assign_to_const.sop:4:8]
+ 3 │ func main() {
+ 4 │     const x = 10
+   ·           ┬
+   ·           ╰── constant declared here
+ 5 │     x = 20
+   ·     ───┬──
+   ·        ╰── cannot assign to constant
+ 6 │ }
+   ╰────
+  help: constants cannot be reassigned; use `var` for a mutable binding
