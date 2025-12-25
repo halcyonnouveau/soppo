@@ -388,6 +388,56 @@ func main() {
 `,
   },
   {
+    slug: "attributes",
+    title: "Attributes",
+    content: `Attributes attach compile-time validated metadata to declarations. They use bracket syntax and can be applied to functions, types, struct fields, and enum variants.
+
+Any struct can be used as an attribute. Attributes are registered at \`init()\` and can be queried at runtime via the \`runtime\` package. This enables patterns like automatic route registration or ORM field mapping.
+
+The \`MustUse\` builtin is handled by the compiler and errors if a return value is discarded.
+
+**Try it:** Comment out the \`_ = validate()\` line to see the MustUse error.`,
+    code: `package main
+
+import (
+	"fmt"
+	"github.com/halcyonnouveau/soppo/runtime"
+)
+
+type Route struct {
+	Path   string
+	Method string
+}
+
+[Route{Path: "/users", Method: "GET"}]
+func getUsers() string {
+	return "users"
+}
+
+[Route{Path: "/users", Method: "POST"}]
+func createUser() string {
+	return "created"
+}
+
+[MustUse]
+func validate() error {
+	return nil
+}
+
+func main() {
+	// Discover all routes dynamically
+	for _, target := range runtime.AllTargets() {
+		if route, ok := runtime.GetAttr[Route](target, ""); ok {
+			fmt.Println("{route.Method} {route.Path} -> {target}")
+		}
+	}
+
+	// MustUse: return value must be used
+	_ = validate()
+}
+`,
+  },
+  {
     slug: "named-args",
     title: "Named Args",
     content: `Soppo supports named arguments at call sites. This makes code clearer when functions have multiple parameters of the same type.
