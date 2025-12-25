@@ -109,13 +109,26 @@ impl Codegen {
     pub(crate) fn gen_const_decl(&mut self, decl: &TypedConstDecl) {
         // Doc comments are emitted via emit_comments_before in gen_typed_file
         self.emit_indent();
-        self.emit("const ");
-        self.emit(&decl.ident.name);
-        if decl.has_explicit_type {
-            self.emit(" ");
-            self.emit(type_to_go_string(&decl.const_ty));
+        // Use Go's const for compile-time constant expressions,
+        // otherwise use var (immutability is enforced by Soppo)
+        if Self::is_go_const_expr(&decl.value) {
+            self.emit("const ");
+            self.emit(&decl.ident.name);
+            if decl.has_explicit_type {
+                self.emit(" ");
+                self.emit(type_to_go_string(&decl.const_ty));
+            }
+            self.emit(" = ");
+        } else {
+            // Runtime value: emit as var (Soppo prevents reassignment)
+            self.emit("var ");
+            self.emit(&decl.ident.name);
+            if decl.has_explicit_type {
+                self.emit(" ");
+                self.emit(type_to_go_string(&decl.const_ty));
+            }
+            self.emit(" = ");
         }
-        self.emit(" = ");
         self.gen_expr(&decl.value);
         self.emit("\n");
     }

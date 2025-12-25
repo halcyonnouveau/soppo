@@ -108,6 +108,69 @@ impl Codegen {
         }
     }
 
+    /// Check if a typed expression is a Go-compatible constant expression.
+    /// Go const only allows compile-time constant expressions (literals, arithmetic on literals, etc.)
+    /// For non-const expressions, we need to emit `var` instead.
+    pub(crate) fn is_go_const_expr(expr: &crate::types::ast::TypedExpr) -> bool {
+        use crate::types::ast::TypedExprKind;
+
+        match &expr.kind {
+            // Literals are always const
+            TypedExprKind::Integer(_, _)
+            | TypedExprKind::Float(_)
+            | TypedExprKind::String(_)
+            | TypedExprKind::RawString(_)
+            | TypedExprKind::Rune(_)
+            | TypedExprKind::Bool(_) => true,
+
+            // Binary operations are const if both operands are const
+            TypedExprKind::Binary { left, right, .. } => {
+                Self::is_go_const_expr(left) && Self::is_go_const_expr(right)
+            }
+
+            // Unary operations are const if the operand is const
+            TypedExprKind::Unary { operand, .. } => Self::is_go_const_expr(operand),
+
+            // Parenthesised expressions are const if the inner is const
+            TypedExprKind::Paren(expr) => Self::is_go_const_expr(expr),
+
+            // Type conversions to basic types are const if the value is const
+            TypedExprKind::TypeConversion { target_ty, value } => {
+                let ty_name = match target_ty {
+                    Type::Con { sym, .. } => &sym.name,
+                    _ => return false,
+                };
+                // Only basic type conversions are allowed in const
+                matches!(
+                    ty_name.as_str(),
+                    "int"
+                        | "int8"
+                        | "int16"
+                        | "int32"
+                        | "int64"
+                        | "uint"
+                        | "uint8"
+                        | "uint16"
+                        | "uint32"
+                        | "uint64"
+                        | "float32"
+                        | "float64"
+                        | "string"
+                        | "rune"
+                        | "byte"
+                ) && Self::is_go_const_expr(value)
+            }
+
+            // Identifiers could be const if they reference other constants,
+            // but we can't easily determine this, so we conservatively return false
+            // (the Go compiler will error if we emit `var` for an iota-based const)
+            TypedExprKind::Ident(_) => false,
+
+            // Everything else (function calls, struct literals, etc.) is not const
+            _ => false,
+        }
+    }
+
     /// Set comments for the codegen (sorted by byte position)
     pub(crate) fn set_comments(&mut self, mut comments: Vec<Comment>) {
         comments.sort_by_key(|c| c.span.byte_start);

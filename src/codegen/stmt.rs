@@ -125,14 +125,23 @@ impl Codegen {
                 value,
             } => {
                 self.emit_indent();
-                self.emit("const ");
-                self.emit(&ident.name);
-                if *has_explicit_type {
-                    self.emit(" ");
-                    self.emit(type_to_go_string(const_ty));
+                // Use Go's const for compile-time constant expressions,
+                // otherwise use var (immutability is enforced by Soppo)
+                if Self::is_go_const_expr(value) {
+                    self.emit("const ");
+                    self.emit(&ident.name);
+                    if *has_explicit_type {
+                        self.emit(" ");
+                        self.emit(type_to_go_string(const_ty));
+                    }
+                    self.emit(" = ");
+                    self.gen_expr(value);
+                } else {
+                    // Runtime value: emit as var (Soppo prevents reassignment)
+                    self.emit(&ident.name);
+                    self.emit(" := ");
+                    self.gen_expr(value);
                 }
-                self.emit(" = ");
-                self.gen_expr(value);
                 self.emit_stmt_end(stmt_line);
             }
 
@@ -143,23 +152,42 @@ impl Codegen {
                 values,
             } => {
                 self.emit_indent();
-                self.emit("const ");
-                for (i, ident) in idents.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
+                // Use Go's const only if ALL values are compile-time constants
+                let all_const = values.iter().all(Self::is_go_const_expr);
+                if all_const {
+                    self.emit("const ");
+                    for (i, ident) in idents.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(&ident.name);
                     }
-                    self.emit(&ident.name);
-                }
-                if *has_explicit_type {
-                    self.emit(" ");
-                    self.emit(type_to_go_string(const_ty));
-                }
-                self.emit(" = ");
-                for (i, value) in values.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
+                    if *has_explicit_type {
+                        self.emit(" ");
+                        self.emit(type_to_go_string(const_ty));
                     }
-                    self.gen_expr(value);
+                    self.emit(" = ");
+                    for (i, value) in values.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.gen_expr(value);
+                    }
+                } else {
+                    // Runtime values: emit as var (Soppo prevents reassignment)
+                    for (i, ident) in idents.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(&ident.name);
+                    }
+                    self.emit(" := ");
+                    for (i, value) in values.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.gen_expr(value);
+                    }
                 }
                 self.emit_stmt_end(stmt_line);
             }
