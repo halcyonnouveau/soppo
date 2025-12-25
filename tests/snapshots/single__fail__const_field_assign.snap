@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::assign_to_const_field
+
+  × Cannot assign to const field `ID`
+    ╭─[const_field_assign.sop:9:5]
+  8 │     u := User{ID: "123"}
+  9 │     u.ID = "456"  // ERROR: cannot assign to const field
+    ·     ──┬─
+    ·       ╰── cannot assign to const field
+ 10 │ }
+    ╰────
+  help: const fields cannot be reassigned after struct creation

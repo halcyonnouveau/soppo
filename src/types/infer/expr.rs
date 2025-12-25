@@ -881,7 +881,7 @@ impl Infer {
                         // Build map of field name -> type
                         let field_types: std::collections::HashMap<_, _> = field_defs
                             .iter()
-                            .map(|(name, ty)| (name.as_str(), ty.clone()))
+                            .map(|(name, ty, _is_const)| (name.as_str(), ty.clone()))
                             .collect();
 
                         // Type check each field
@@ -891,7 +891,7 @@ impl Infer {
                                 Some(name.clone())
                             } else {
                                 // Positional field - get name from struct definition
-                                field_defs.get(idx).map(|(name, _)| name.clone())
+                                field_defs.get(idx).map(|(name, _, _)| name.clone())
                             };
 
                             // Get field type - either by name or by position
@@ -1943,7 +1943,9 @@ impl Infer {
                 } = &type_def.kind
             {
                 // Check if the field exists
-                if let Some((_, field_ty)) = struct_fields.iter().find(|(f, _)| f == field) {
+                if let Some((_, field_ty, _is_const)) =
+                    struct_fields.iter().find(|(f, _, _)| f == field)
+                {
                     // Record field access for LSP
                     self.record_symbol(
                         *span,

@@ -1,0 +1,41 @@
+---
+source: tests/single.rs
+expression: output
+---
+//soppo:generated v1
+package main
+
+type User struct {
+	ID string //soppo:const
+	Name string
+}
+
+type Point struct {
+	X int //soppo:const
+	Y int //soppo:const
+}
+
+type Config struct {
+	Host string //soppo:const
+	Port int //soppo:const
+}
+
+// Test nilable + const combination
+type Session struct {
+	Token *string //soppo:nilable,const
+	Expiry int
+}
+
+func main() {
+	u := User{ID: "123", Name: "Bob"}
+	u.Name = "Alice" // OK - mutable field
+
+	p := Point{X: 1, Y: 2}
+	println(p.X, p.Y) // OK - reading const fields
+
+	c := Config{Host: "localhost", Port: 8080}
+	println(c.Host) // OK - reading
+
+	s := Session{Token: nil, Expiry: 3600}
+	println(s.Expiry) // OK - reading
+}

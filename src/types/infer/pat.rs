@@ -105,8 +105,8 @@ impl Infer {
                             found_type = true;
                             for (field_name, field_pattern) in fields {
                                 if let FieldPattern::Bind(binding_ident) = field_pattern
-                                    && let Some((_, field_ty)) =
-                                        struct_fields.iter().find(|(name, _)| name == field_name)
+                                    && let Some((_, field_ty, _)) =
+                                        struct_fields.iter().find(|(name, _, _)| name == field_name)
                                 {
                                     bindings.push((binding_ident.name.clone(), field_ty.clone()));
                                 }
@@ -227,8 +227,8 @@ impl Infer {
                         } => {
                             for (field_name, field_pattern) in fields {
                                 if let FieldPattern::Bind(binding_ident) = field_pattern
-                                    && let Some((_, field_ty)) =
-                                        struct_fields.iter().find(|(name, _)| name == field_name)
+                                    && let Some((_, field_ty, _)) =
+                                        struct_fields.iter().find(|(name, _, _)| name == field_name)
                                 {
                                     bindings.insert(binding_ident.name.clone(), field_ty.clone());
                                 }
@@ -385,7 +385,7 @@ impl Infer {
                                 fields: struct_fields,
                             } => struct_fields
                                 .iter()
-                                .map(|(name, ty)| (name.as_str(), ty.clone()))
+                                .map(|(name, ty, _is_const)| (name.as_str(), ty.clone()))
                                 .collect(),
                             _ => std::collections::HashMap::new(),
                         }

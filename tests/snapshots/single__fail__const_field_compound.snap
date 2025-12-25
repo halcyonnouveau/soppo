@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::assign_to_const_field
+
+  × Cannot assign to const field `Value`
+    ╭─[const_field_compound.sop:9:5]
+  8 │     c := Counter{Value: 0}
+  9 │     c.Value++  // ERROR: cannot assign to const field
+    ·     ───┬───
+    ·        ╰── cannot assign to const field
+ 10 │ }
+    ╰────
+  help: const fields cannot be reassigned after struct creation

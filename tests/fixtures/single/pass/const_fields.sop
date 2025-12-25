@@ -1,0 +1,35 @@
+package main
+
+type User struct {
+    const ID string
+    Name string
+}
+
+type Point struct {
+    const X, Y int
+}
+
+type Config const struct {
+    Host string
+    Port int
+}
+
+// Test nilable + const combination
+type Session struct {
+    const Token ?*string
+    Expiry int
+}
+
+func main() {
+    u := User{ID: "123", Name: "Bob"}
+    u.Name = "Alice"  // OK - mutable field
+
+    p := Point{X: 1, Y: 2}
+    println(p.X, p.Y)  // OK - reading const fields
+
+    c := Config{Host: "localhost", Port: 8080}
+    println(c.Host)  // OK - reading
+
+    s := Session{Token: nil, Expiry: 3600}
+    println(s.Expiry)  // OK - reading
+}

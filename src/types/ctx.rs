@@ -78,7 +78,9 @@ pub enum TypeDefKind {
         variants: Vec<EnumVariant>,
     },
     Struct {
-        fields: Vec<(String, Type)>,
+        /// Fields: (name, type, is_const)
+        /// is_const is true if either the field has `const` or the whole type is `const`
+        fields: Vec<(String, Type, bool)>,
     },
     Interface {
         methods: Vec<MethodSig>,
@@ -281,7 +283,11 @@ impl GlobalCtxt {
                 TypeKind::Struct { fields } => TypeDefKind::Struct {
                     fields: fields
                         .iter()
-                        .map(|f| (f.ident.name.clone(), Type::from_ast(&f.ty)))
+                        .map(|f| {
+                            // Field is const if either it has `const` or the whole type is `const`
+                            let is_const = f.is_const || type_decl.is_const;
+                            (f.ident.name.clone(), Type::from_ast(&f.ty), is_const)
+                        })
                         .collect(),
                 },
                 TypeKind::Interface { methods } => TypeDefKind::Interface {
@@ -542,6 +548,7 @@ mod tests {
             span: Span::dummy(),
             doc_comment: None,
             attributes: vec![],
+            is_const: false,
         };
 
         gs.register_type(&type_decl);
@@ -571,6 +578,7 @@ mod tests {
             span: Span::dummy(),
             doc_comment: None,
             attributes: vec![],
+            is_const: false,
         };
 
         gs.register_type(&type_decl);

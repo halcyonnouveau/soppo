@@ -476,6 +476,25 @@ impl Infer {
                     });
                 }
 
+                // Check if assigning to a const field
+                if let ExprKind::Field { expr, field, .. } = &target.kind {
+                    let expr_ty = self.infer_expr(expr).ty;
+                    if self.check_field_is_const(&expr_ty, field) {
+                        self.emit_error(SoppoError::AssignToConstField {
+                            field: field.clone(),
+                            span: target.span,
+                        });
+                    }
+                }
+
+                // Check if assigning to a string index (invalid in Go)
+                if let ExprKind::Index { expr, .. } = &target.kind {
+                    let expr_ty = self.infer_expr(expr).ty;
+                    if self.is_string_type(&expr_ty) {
+                        self.emit_error(SoppoError::StringIndexAssign { span: target.span });
+                    }
+                }
+
                 if !is_blank && !typed_target.ty.is_error() && !typed_value.ty.is_error() {
                     let target_ty_sub = self.substitute(typed_target.ty.clone());
 
@@ -1294,6 +1313,25 @@ impl Infer {
                     });
                 }
 
+                // Check if assigning to a const field
+                if let ExprKind::Field { expr, field, .. } = &target.kind {
+                    let expr_ty = self.infer_expr(expr).ty;
+                    if self.check_field_is_const(&expr_ty, field) {
+                        self.emit_error(SoppoError::AssignToConstField {
+                            field: field.clone(),
+                            span: target.span,
+                        });
+                    }
+                }
+
+                // Check if assigning to a string index (invalid in Go)
+                if let ExprKind::Index { expr, .. } = &target.kind {
+                    let expr_ty = self.infer_expr(expr).ty;
+                    if self.is_string_type(&expr_ty) {
+                        self.emit_error(SoppoError::StringIndexAssign { span: target.span });
+                    }
+                }
+
                 // Check that target and value types are compatible
                 let typed_target = self.infer_expr(target);
                 let typed_value = self.infer_expr(value);
@@ -1320,6 +1358,26 @@ impl Infer {
                         decl_span: decl_span.unwrap_or(stmt.span),
                     });
                 }
+
+                // Check if assigning to a const field
+                if let ExprKind::Field { expr, field, .. } = &target.kind {
+                    let expr_ty = self.infer_expr(expr).ty;
+                    if self.check_field_is_const(&expr_ty, field) {
+                        self.emit_error(SoppoError::AssignToConstField {
+                            field: field.clone(),
+                            span: target.span,
+                        });
+                    }
+                }
+
+                // Check if assigning to a string index (invalid in Go)
+                if let ExprKind::Index { expr, .. } = &target.kind {
+                    let expr_ty = self.infer_expr(expr).ty;
+                    if self.is_string_type(&expr_ty) {
+                        self.emit_error(SoppoError::StringIndexAssign { span: target.span });
+                    }
+                }
+
                 // Just infer the target type (should be numeric)
                 let typed_target = self.infer_expr(target);
                 TypedStmtKind::IncDec {
@@ -1691,11 +1749,14 @@ impl Infer {
                         let typed_fields = fields
                             .iter()
                             .map(|f| {
+                                // Field is const if either it has `const` or the whole type is `const`
+                                let is_const = f.is_const || type_decl.is_const;
                                 (
                                     f.ident.name.clone(),
                                     self.resolve_type(&f.ty),
                                     f.tag.clone(),
                                     f.attributes.clone(),
+                                    is_const,
                                 )
                             })
                             .collect();

@@ -176,13 +176,20 @@ impl Codegen {
                     self.format_generic_brackets(&decl.generics)
                 ));
                 self.indent();
-                for (name, ty, tag, _attrs) in fields {
+                for (name, ty, tag, _attrs, is_const) in fields {
                     let tag_str = tag.as_ref().map(|t| format!("`{}`", t)).unwrap_or_default();
-                    // Add //soppo:nilable comment for nullable pointer/slice/interface fields
-                    let nilable_comment = if ty.is_nullable() {
-                        " //soppo:nilable"
+                    // Build soppo markers (comma-separated if multiple)
+                    let mut markers = Vec::new();
+                    if ty.is_nullable() {
+                        markers.push("nilable");
+                    }
+                    if *is_const {
+                        markers.push("const");
+                    }
+                    let soppo_comment = if markers.is_empty() {
+                        String::new()
                     } else {
-                        ""
+                        format!(" //soppo:{}", markers.join(","))
                     };
                     let go_type = type_to_go_string(ty);
                     // Check if this is an anonymous struct type (needs multiline formatting)
@@ -191,7 +198,7 @@ impl Codegen {
                             name,
                             &go_type,
                             &tag_str,
-                            nilable_comment,
+                            &soppo_comment,
                         );
                     } else {
                         let tag_with_space = if tag_str.is_empty() {
@@ -201,7 +208,7 @@ impl Codegen {
                         };
                         self.emit_line(&format!(
                             "{} {}{}{}",
-                            name, go_type, tag_with_space, nilable_comment
+                            name, go_type, tag_with_space, soppo_comment
                         ));
                     }
                 }
@@ -574,7 +581,7 @@ impl Codegen {
 
                     // Struct field attributes
                     if let TypedTypeKind::Struct { fields } = &type_decl.kind {
-                        for (field_name, _, _, attrs) in fields {
+                        for (field_name, _, _, attrs, _) in fields {
                             for attr in attrs {
                                 if !Self::is_builtin_attr(&attr.name) {
                                     // Field: target is "pkg.TypeName", field is "FieldName"

@@ -1,0 +1,10 @@
+package main
+
+type User struct {
+    const ID string
+}
+
+func main() {
+    u := User{ID: "123"}
+    u.ID = "456"  // ERROR: cannot assign to const field
+}

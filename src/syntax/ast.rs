@@ -155,6 +155,7 @@ pub struct TypeDecl {
     pub kind: TypeKind,
     pub span: Span,
     pub doc_comment: Option<String>,
+    pub is_const: bool, // const type (all fields are const)
 }
 
 /// Kind of type declaration
@@ -223,6 +224,7 @@ pub struct Field {
     pub ident: Ident,
     pub ty: TypeAnnotation,
     pub tag: Option<String>,
+    pub is_const: bool, // const field (cannot be reassigned)
 }
 
 /// Type annotation (before type checking)

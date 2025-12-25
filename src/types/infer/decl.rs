@@ -5,7 +5,8 @@ use crate::syntax::{
 };
 use crate::types::ast::{
     TypedBlock, TypedConstDecl, TypedDecl, TypedEnumVariant, TypedFile, TypedFuncDecl, TypedImport,
-    TypedImportKind, TypedInterfaceMethod, TypedParam, TypedTypeDecl, TypedTypeKind, TypedVarDecl,
+    TypedImportKind, TypedInterfaceMethod, TypedParam, TypedStructField, TypedTypeDecl,
+    TypedTypeKind, TypedVarDecl,
 };
 use crate::types::ctx::TypeDefKind;
 use crate::types::{SymbolInfo, SymbolKind, Type};
@@ -38,9 +39,12 @@ impl Infer {
                 self.global_state
                     .lookup_type(type_name)
                     .and_then(|def| match &def.kind {
-                        TypeDefKind::Struct { fields } => {
-                            Some(fields.iter().map(|(n, t)| (n.clone(), t.clone())).collect())
-                        }
+                        TypeDefKind::Struct { fields } => Some(
+                            fields
+                                .iter()
+                                .map(|(n, t, _is_const)| (n.clone(), t.clone()))
+                                .collect(),
+                        ),
                         _ => None,
                     })
             };
@@ -651,19 +655,17 @@ impl Infer {
                 }
 
                 // Store field types for later field access validation
-                let field_types: Vec<(
-                    String,
-                    Type,
-                    Option<String>,
-                    Vec<crate::syntax::Attribute>,
-                )> = fields
+                let field_types: Vec<TypedStructField> = fields
                     .iter()
                     .map(|f| {
+                        // Field is const if either it has `const` or the whole type is `const`
+                        let is_const = f.is_const || type_decl.is_const;
                         (
                             f.ident.name.clone(),
                             self.resolve_type(&f.ty),
                             f.tag.clone(),
                             f.attributes.clone(),
+                            is_const,
                         )
                     })
                     .collect();
@@ -678,7 +680,7 @@ impl Infer {
                     type_def.kind = TypeDefKind::Struct {
                         fields: field_types
                             .iter()
-                            .map(|(name, ty, _, _)| (name.clone(), ty.clone()))
+                            .map(|(name, ty, _, _, is_const)| (name.clone(), ty.clone(), *is_const))
                             .collect(),
                     };
                 }

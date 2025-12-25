@@ -481,6 +481,7 @@ impl Parser {
     }
 
     /// Parse type declaration (enum or struct) with optional attributes
+    /// Supports `type Name const struct` for whole-struct const (all fields are const)
     pub(super) fn parse_type_decl(&mut self) -> SoppoResult<TypeDecl> {
         // Parse optional attributes before 'type'
         let attributes = self.parse_attributes()?;
@@ -493,6 +494,9 @@ impl Parser {
 
         // Parse optional generics [T any, U any]
         let generics = self.parse_generics()?;
+
+        // Check for const keyword before struct/enum (e.g., `type Config const struct`)
+        let is_const = self.consume(&Token::Const);
 
         // Check for 'enum', 'struct', or type alias
         let (kind, end_span) = if self.consume(&Token::Enum) {
@@ -568,6 +572,7 @@ impl Parser {
             kind,
             span: self.merge_spans(start_span, end_span),
             doc_comment,
+            is_const,
         })
     }
 
@@ -637,9 +642,13 @@ impl Parser {
     /// Parse struct fields (supports grouped names like `X, Y int`)
     /// Returns a Vec because `X, Y int` produces multiple Field entries
     /// Attributes apply to all fields in a group: `[attr] X, Y int`
+    /// Supports const fields: `const X, Y int`
     pub fn parse_fields(&mut self) -> SoppoResult<Vec<Field>> {
         // Parse optional attributes before field names
         let attributes = self.parse_attributes()?;
+
+        // Check for const keyword
+        let is_const = self.consume(&Token::Const);
 
         // Collect all field names (comma-separated)
         let mut names: Vec<Ident> = Vec::new();
@@ -678,6 +687,7 @@ impl Parser {
                 ident: name,
                 ty: ty.clone(),
                 tag: tag.clone(),
+                is_const,
             })
             .collect();
 
@@ -807,6 +817,9 @@ impl Parser {
                 self.validate_identifier(&name, &name_span)?;
                 let generics = self.parse_generics()?;
 
+                // Check for const keyword before struct/enum
+                let is_const = self.consume(&Token::Const);
+
                 let (kind, end_span) = self.parse_type_kind()?;
 
                 Ok(Decl::Type(TypeDecl {
@@ -816,6 +829,7 @@ impl Parser {
                     kind,
                     span: self.merge_spans(start_span, end_span),
                     doc_comment,
+                    is_const,
                 }))
             }
             Some(tok) => Err(SoppoError::Parse {

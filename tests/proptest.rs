@@ -188,6 +188,7 @@ fn arb_field() -> impl Strategy<Value = Field> {
         ty,
         tag: None,
         attributes: vec![],
+        is_const: false,
     })
 }
 
@@ -291,6 +292,7 @@ fn arb_type_decl() -> impl Strategy<Value = TypeDecl> {
             span: Span::dummy(),
             doc_comment: None,
             attributes: vec![],
+            is_const: false,
         })
 }
 

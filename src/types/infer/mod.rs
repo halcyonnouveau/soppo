@@ -2227,6 +2227,34 @@ impl Infer {
         None
     }
 
+    /// Check if a field is const in a struct type.
+    /// Returns Some(field_name) if the field is const, None otherwise.
+    pub(super) fn check_field_is_const(&self, struct_ty: &Type, field_name: &str) -> bool {
+        let struct_ty = self.substitute(struct_ty.clone());
+        if let Type::Con { sym, .. } = &struct_ty {
+            // Handle qualified type names (pkg.Type)
+            let type_name = sym.name.split('.').next_back().unwrap_or(&sym.name);
+
+            // Check in local module
+            if let Some(type_def) = self.global_state.lookup_type(type_name)
+                && let crate::types::ctx::TypeDefKind::Struct { fields } = &type_def.kind
+                && let Some((_, _, is_const)) = fields.iter().find(|(n, _, _)| n == field_name)
+            {
+                return *is_const;
+            }
+        }
+        false
+    }
+
+    /// Check if a type is a string type.
+    pub(super) fn is_string_type(&self, ty: &Type) -> bool {
+        let ty = self.substitute(ty.clone());
+        if let Type::Con { sym, .. } = &ty {
+            return sym.name == "string";
+        }
+        false
+    }
+
     /// Mark a variable as used without looking up its type
     /// Used for `_ = var` patterns that suppress unused variable warnings
     pub(super) fn mark_var_used(&mut self, name: &str) {

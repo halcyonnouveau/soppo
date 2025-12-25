@@ -369,6 +369,8 @@ export default grammar({
       seq(
         field("name", $._type_identifier),
         field("type_parameters", optional($.type_parameter_list)),
+        // Soppo: const struct (type Config const struct { ... })
+        optional("const"),
         field("type", $._type),
       ),
 
@@ -479,6 +481,8 @@ export default grammar({
         repeat($.attribute),
         choice(
           seq(
+            // Soppo: const fields (const ID string)
+            optional("const"),
             commaSep1(field("name", $._field_identifier)),
             field("type", $._type),
           ),

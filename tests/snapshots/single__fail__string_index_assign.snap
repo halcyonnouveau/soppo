@@ -1,0 +1,15 @@
+---
+source: tests/single.rs
+expression: result.unwrap_err()
+---
+Error: soppo::string_index_assign
+
+  × Cannot assign to string index
+   ╭─[string_index_assign.sop:5:5]
+ 4 │     s := "hello"
+ 5 │     s[0] = 120  // ERROR: cannot assign to string index
+   ·     ──┬─
+   ·       ╰── cannot assign to string index
+ 6 │ }
+   ╰────
+  help: strings are immutable, use a []byte or []rune for mutable characters

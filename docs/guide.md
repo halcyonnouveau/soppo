@@ -231,6 +231,45 @@ func getError() error {
 
 This prevents a Go gotcha where a non-nil interface can wrap a nil pointer.
 
+## Immutability
+
+Go has no way to mark values as immutable after creation. Soppo extends `const` to work with runtime values and adds const struct fields.
+
+Soppo's `const` works with any value, not just compile-time literals:
+
+```go
+const config = loadConfig()  // runtime value - OK in Soppo
+const maxSize = 100          // literal - also OK
+
+config = newConfig           // ERROR: cannot reassign const
+```
+
+Mark individual fields or entire structs as `const` to prevent reassignment after creation:
+
+```go
+type User struct {
+	const ID string    // immutable after creation
+	Name string        // mutable
+}
+
+// Or mark the entire struct
+type Config const struct {
+	Host string        // all fields are const
+	Port int
+}
+
+func main() {
+	u := User{ID: "123", Name: "Bob"}
+	u.Name = "Alice"   // OK
+	u.ID = "456"       // ERROR: cannot assign to const field
+	
+	c := Config{Host: "localhost", Port: 8080}
+	c.Host = "other"   // ERROR: cannot assign to const field
+}
+```
+
+Const fields use shallow immutability - only direct assignment is prevented. Mutating the contents of a slice or map field is still allowed.
+
 ## Named Arguments
 
 Positional arguments can be unclear when multiple parameters share the same type. Named arguments make call sites self-documenting without requiring wrapper structs.
@@ -281,15 +320,15 @@ import "myapp/db"
 
 [http.Get{Path: "/users/{id}"}]
 func GetUser(id string) (User, error) {
-    // ...
+	// ...
 }
 
 type User struct {
-    [db.Column{Name: "user_id", PrimaryKey: true}]
-    ID string
-
-    [db.Column{Name: "email"}]
-    Email string
+	[db.Column{Name: "user_id", PrimaryKey: true}]
+	ID string
+	
+	[db.Column{Name: "email"}]
+	Email string
 }
 ```
 
@@ -300,9 +339,9 @@ import "github.com/halcyonnouveau/soppo/runtime"
 
 // Discover all routes dynamically
 for _, target := range runtime.AllTargets() {
-    if route, ok := runtime.GetAttr[http.Get](target, ""); ok {
-        router.GET(route.Path, handlers[target])
-    }
+	if route, ok := runtime.GetAttr[http.Get](target, ""); ok {
+		router.GET(route.Path, handlers[target])
+	}
 }
 
 // Query a specific target

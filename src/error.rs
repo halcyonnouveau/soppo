@@ -169,6 +169,27 @@ pub enum SoppoError {
         decl_span: Span,
     },
 
+    #[error("Cannot assign to const field `{field}`")]
+    #[diagnostic(
+        code(soppo::assign_to_const_field),
+        help("const fields cannot be reassigned after struct creation")
+    )]
+    AssignToConstField {
+        field: String,
+        #[label("cannot assign to const field")]
+        span: Span,
+    },
+
+    #[error("Cannot assign to string index")]
+    #[diagnostic(
+        code(soppo::string_index_assign),
+        help("strings are immutable, use a []byte or []rune for mutable characters")
+    )]
+    StringIndexAssign {
+        #[label("cannot assign to string index")]
+        span: Span,
+    },
+
     #[error("Cannot assign `nil` to non-nilable type `{ty}`")]
     #[diagnostic(
         code(soppo::nil_to_non_nilable),

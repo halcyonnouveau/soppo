@@ -92,6 +92,8 @@ pub struct Field {
     pub ty: String,
     /// Whether this field is nullable (from //soppo:nilable marker)
     pub nullable: bool,
+    /// Whether this field is const (from //soppo:const marker)
+    pub is_const: bool,
 }
 
 /// Constant definition
@@ -309,6 +311,7 @@ fn parse_soppo_enum(text: &str) -> Option<SoppoTypeDef> {
                         name: parts[0].to_string(),
                         ty: parts[1].to_string(),
                         nullable: false,
+                        is_const: false,
                     });
                 }
             }
@@ -329,6 +332,7 @@ fn parse_soppo_enum(text: &str) -> Option<SoppoTypeDef> {
                     name: "Value".to_string(),
                     ty: parts[1].to_string(),
                     nullable: false,
+                    is_const: false,
                 });
             }
             st.variants.push(v);
@@ -765,6 +769,7 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                     let mut names = Vec::new();
                     let mut ty = String::new();
                     let mut nullable = false;
+                    let mut is_const = false;
 
                     // Get the line number of this field declaration for matching trailing comment
                     let field_end_line = field_decl.end_position().row;
@@ -776,11 +781,11 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                                 names.push(node_text(field_child, source).to_string());
                             }
                             "comment" => {
-                                // Check for //soppo:nilable marker (inline comment within declaration)
+                                // Check for //soppo:X,Y markers (inline comment within declaration)
                                 let comment_text = node_text(field_child, source);
-                                if comment_text.contains("soppo:nilable") {
-                                    nullable = true;
-                                }
+                                let (n, c) = parse_soppo_markers(comment_text);
+                                nullable = nullable || n;
+                                is_const = is_const || c;
                             }
                             _ if is_type_node(field_child.kind()) => {
                                 ty = extract_type_string(field_child, source);
@@ -790,14 +795,14 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                     }
 
                     // Check if the next sibling is a comment on the same line
-                    // (trailing comment like `Email *string //soppo:nilable`)
+                    // (trailing comment like `Email *string //soppo:nilable,const`)
                     if i + 1 < children.len() {
                         let next = children[i + 1];
                         if next.kind() == "comment" && next.start_position().row == field_end_line {
                             let comment_text = node_text(next, source);
-                            if comment_text.contains("soppo:nilable") {
-                                nullable = true;
-                            }
+                            let (n, c) = parse_soppo_markers(comment_text);
+                            nullable = nullable || n;
+                            is_const = is_const || c;
                         }
                     }
 
@@ -807,6 +812,7 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                             name: ty.clone(),
                             ty,
                             nullable,
+                            is_const,
                         });
                     } else {
                         for name in names {
@@ -814,6 +820,7 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                                 name,
                                 ty: ty.clone(),
                                 nullable,
+                                is_const,
                             });
                         }
                     }
@@ -1335,6 +1342,33 @@ fn is_type_node(kind: &str) -> bool {
             | "parameter_list"
             | "variadic_parameter_declaration"
     )
+}
+
+/// Parse //soppo:X,Y markers from a comment, returning (nullable, is_const)
+fn parse_soppo_markers(comment: &str) -> (bool, bool) {
+    let mut nullable = false;
+    let mut is_const = false;
+
+    // Look for //soppo: prefix and extract the marker value
+    if let Some(idx) = comment.find("//soppo:") {
+        let markers_start = idx + "//soppo:".len();
+        // Take everything after //soppo: up to whitespace or end of line
+        let markers_str = &comment[markers_start..];
+        let markers_end = markers_str
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(markers_str.len());
+        let markers = &markers_str[..markers_end];
+
+        for marker in markers.split(',') {
+            match marker.trim() {
+                "nilable" => nullable = true,
+                "const" => is_const = true,
+                _ => {}
+            }
+        }
+    }
+
+    (nullable, is_const)
 }
 
 fn node_text<'a>(node: tree_sitter::Node, source: &'a str) -> &'a str {

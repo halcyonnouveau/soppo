@@ -7,6 +7,15 @@
 use super::ty::Type;
 use crate::syntax::{AssignOp, BinOp, Generic, Ident, IntFormat, Literal, Span, UnaryOp};
 
+/// A typed struct field: (name, type, tag, attributes, is_const)
+pub type TypedStructField = (
+    String,
+    Type,
+    Option<String>,
+    Vec<crate::syntax::Attribute>,
+    bool,
+);
+
 /// A typed expression with its inferred type
 #[derive(Debug, Clone)]
 pub struct TypedExpr {
@@ -614,7 +623,7 @@ pub enum TypedTypeKind {
     },
     Struct {
         /// Resolved field types with attributes
-        fields: Vec<(String, Type, Option<String>, Vec<crate::syntax::Attribute>)>, // (name, type, tag, attributes)
+        fields: Vec<TypedStructField>,
     },
     Interface {
         methods: Vec<TypedInterfaceMethod>,

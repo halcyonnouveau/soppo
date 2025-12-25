@@ -1,0 +1,10 @@
+package main
+
+type Config const struct {
+    Host string
+}
+
+func main() {
+    c := Config{Host: "localhost"}
+    c.Host = "other"  // ERROR: cannot assign to const field
+}

@@ -368,7 +368,12 @@ impl Formatter {
                 self.emit_line("}");
             }
             TypeKind::Struct { fields } => {
-                self.emit(" struct {\n");
+                // Emit "const struct" if the whole type is const
+                if t.is_const {
+                    self.emit(" const struct {\n");
+                } else {
+                    self.emit(" struct {\n");
+                }
                 self.indent();
                 // Calculate alignment widths
                 let (max_name_len, max_type_len) = self.calc_field_alignment(fields);
@@ -440,7 +445,13 @@ impl Formatter {
         let mut max_name_len = 0;
         let mut max_type_len = 0;
         for field in fields {
-            max_name_len = max_name_len.max(field.ident.name.len());
+            // Account for "const " prefix (6 chars) if the field is const
+            let name_len = if field.is_const {
+                "const ".len() + field.ident.name.len()
+            } else {
+                field.ident.name.len()
+            };
+            max_name_len = max_name_len.max(name_len);
             let type_str = Self::format_type_annotation(&field.ty);
             max_type_len = max_type_len.max(type_str.len());
         }
@@ -457,13 +468,25 @@ impl Formatter {
 
         self.emit_indent();
 
+        // Emit const keyword if field is const
+        if field.is_const {
+            self.emit("const ");
+        }
+
         let name = &field.ident.name;
         let type_str = Self::format_type_annotation(&field.ty);
+
+        // Calculate effective name length (including "const " prefix if present)
+        let effective_name_len = if field.is_const {
+            "const ".len() + name.len()
+        } else {
+            name.len()
+        };
 
         // Pad name to align types
         self.emit(name);
         if max_name_len > 0 {
-            let name_padding = max_name_len - name.len() + 1;
+            let name_padding = max_name_len - effective_name_len + 1;
             self.emit(&" ".repeat(name_padding));
         } else {
             self.emit(" ");

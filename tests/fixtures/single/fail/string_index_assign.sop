@@ -1,0 +1,6 @@
+package main
+
+func main() {
+    s := "hello"
+    s[0] = 120  // ERROR: cannot assign to string index
+}

@@ -1,0 +1,10 @@
+package main
+
+type Counter struct {
+    const Value int
+}
+
+func main() {
+    c := Counter{Value: 0}
+    c.Value++  // ERROR: cannot assign to const field
+}
