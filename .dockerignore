@@ -1,7 +1,0 @@
-target/
-www/playground/node_modules/
-www/playground/.svelte-kit/
-www/playground/build/
-.git/
-*.md
-tests/
