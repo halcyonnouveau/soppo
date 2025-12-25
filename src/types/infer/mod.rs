@@ -393,6 +393,7 @@ impl Infer {
                             kind: SymbolKind::Type,
                             doc_comment,
                             go_location,
+                            is_const: false,
                         },
                     );
                 }
@@ -416,6 +417,7 @@ impl Infer {
                     kind: SymbolKind::Type,
                     doc_comment: type_def.doc_comment,
                     go_location: None,
+                    is_const: type_def.is_const,
                 },
             );
         }
@@ -2185,6 +2187,7 @@ impl Infer {
                         kind: SymbolKind::Variable,
                         doc_comment: None,
                         go_location: None,
+                        is_const: false,
                     },
                 );
             }

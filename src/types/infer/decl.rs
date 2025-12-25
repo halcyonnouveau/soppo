@@ -213,6 +213,7 @@ impl Infer {
                 kind,
                 doc_comment: func.doc_comment.clone(),
                 go_location: None,
+                is_const: false,
             },
         );
 
@@ -403,6 +404,7 @@ impl Infer {
                 kind: SymbolKind::Constant,
                 doc_comment: const_decl.doc_comment.clone(),
                 go_location: None,
+                is_const: false,
             },
         );
 
@@ -480,6 +482,7 @@ impl Infer {
                 kind: SymbolKind::Variable,
                 doc_comment: None,
                 go_location: None,
+                is_const: false,
             },
         );
 
@@ -508,6 +511,7 @@ impl Infer {
                 kind: SymbolKind::Type,
                 doc_comment: type_decl.doc_comment.clone(),
                 go_location: None,
+                is_const: type_decl.is_const,
             },
         );
 

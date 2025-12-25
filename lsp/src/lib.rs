@@ -831,8 +831,26 @@ impl LanguageServer for Backend {
                 SymbolKind::Variable => format!("var {} {}", symbol.name, symbol.ty),
                 SymbolKind::Parameter => format!("{} {}", symbol.name, symbol.ty),
                 SymbolKind::Constant => format!("const {} {}", symbol.name, symbol.ty),
-                SymbolKind::Type => format!("type {} {}", symbol.name, symbol.ty),
-                SymbolKind::Field => format!("{} {}", symbol.name, symbol.ty),
+                SymbolKind::Type => {
+                    if symbol.is_const {
+                        // Insert "const " before "struct" in the type string
+                        let ty_str = symbol.ty.to_string();
+                        if ty_str.starts_with("struct") {
+                            format!("type {} const {}", symbol.name, ty_str)
+                        } else {
+                            format!("type {} {}", symbol.name, ty_str)
+                        }
+                    } else {
+                        format!("type {} {}", symbol.name, symbol.ty)
+                    }
+                }
+                SymbolKind::Field => {
+                    if symbol.is_const {
+                        format!("const {} {}", symbol.name, symbol.ty)
+                    } else {
+                        format!("{} {}", symbol.name, symbol.ty)
+                    }
+                }
                 SymbolKind::Variant => symbol.name.clone(),
                 SymbolKind::Package => format!("package {}", symbol.name),
                 SymbolKind::Function | SymbolKind::Method => {

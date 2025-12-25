@@ -62,6 +62,8 @@ pub struct TypeDef {
     pub name_span: Option<Span>,
     /// Documentation comment for this type
     pub doc_comment: Option<String>,
+    /// Whether this is a const type (all fields immutable)
+    pub is_const: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +310,7 @@ impl GlobalCtxt {
             span: Some(type_decl.span),
             name_span: Some(type_decl.ident.span),
             doc_comment: type_decl.doc_comment.clone(),
+            is_const: type_decl.is_const,
         };
 
         self.current_module_mut()

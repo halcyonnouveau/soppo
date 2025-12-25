@@ -171,6 +171,7 @@ impl Infer {
                             kind,
                             doc_comment,
                             go_location: None,
+                            is_const: false,
                         },
                     );
                     return Ok(TypedExpr::new(TypedExprKind::Ident(name.clone()), ty, span));
@@ -203,6 +204,7 @@ impl Infer {
                             kind: SymbolKind::Function,
                             doc_comment: func_def.doc_comment.clone(),
                             go_location: None,
+                            is_const: false,
                         },
                     );
                     return Ok(TypedExpr::new(TypedExprKind::Ident(name.clone()), ty, span));
@@ -220,6 +222,7 @@ impl Infer {
                             kind: SymbolKind::Constant,
                             doc_comment: const_def.doc_comment.clone(),
                             go_location: None,
+                            is_const: false,
                         },
                     );
                     return Ok(TypedExpr::new(
@@ -874,6 +877,7 @@ impl Infer {
                             kind: SymbolKind::Type,
                             doc_comment: type_def.doc_comment.clone(),
                             go_location: None,
+                            is_const: type_def.is_const,
                         },
                     );
 
@@ -1444,6 +1448,7 @@ impl Infer {
                         kind: SymbolKind::Package,
                         doc_comment: Some(format!("import \"{}\"", import_path)),
                         go_location: None,
+                        is_const: false,
                     },
                 );
             }
@@ -1467,6 +1472,7 @@ impl Infer {
                             kind: SymbolKind::Function,
                             doc_comment,
                             go_location: None,
+                            is_const: false,
                         },
                     );
                     return Ok(FieldAccessResult::PackageMember {
@@ -1491,6 +1497,7 @@ impl Infer {
                             kind: SymbolKind::Type,
                             doc_comment,
                             go_location: None,
+                            is_const: false,
                         },
                     );
                     return Ok(FieldAccessResult::PackageMember {
@@ -1515,6 +1522,7 @@ impl Infer {
                             kind: SymbolKind::Constant,
                             doc_comment,
                             go_location: None,
+                            is_const: false,
                         },
                     );
                     return Ok(FieldAccessResult::PackageMember {
@@ -1546,6 +1554,7 @@ impl Infer {
                         kind: SymbolKind::Function,
                         doc_comment,
                         go_location,
+                        is_const: false,
                     },
                 );
                 return Ok(FieldAccessResult::PackageMember {
@@ -1567,6 +1576,7 @@ impl Infer {
                         kind: SymbolKind::Type,
                         doc_comment,
                         go_location,
+                        is_const: false,
                     },
                 );
                 return Ok(FieldAccessResult::PackageMember {
@@ -1848,6 +1858,7 @@ impl Infer {
                     kind: SymbolKind::Method,
                     doc_comment,
                     go_location,
+                    is_const: false,
                 },
             );
             return Ok(FieldAccessResult::Field { ty: method_ty });
@@ -1881,6 +1892,7 @@ impl Infer {
                         kind: SymbolKind::Method,
                         doc_comment: method.doc_comment.clone(),
                         go_location: None,
+                        is_const: false,
                     },
                 );
                 return Ok(FieldAccessResult::Field { ty: method_ty });
@@ -1943,7 +1955,7 @@ impl Infer {
                 } = &type_def.kind
             {
                 // Check if the field exists
-                if let Some((_, field_ty, _is_const)) =
+                if let Some((_, field_ty, is_const)) =
                     struct_fields.iter().find(|(f, _, _)| f == field)
                 {
                     // Record field access for LSP
@@ -1957,6 +1969,7 @@ impl Infer {
                             kind: SymbolKind::Field,
                             doc_comment: None,
                             go_location: None,
+                            is_const: *is_const,
                         },
                     );
                     return Ok(FieldAccessResult::Field {
@@ -1986,6 +1999,7 @@ impl Infer {
                                 kind: SymbolKind::Method,
                                 doc_comment: method.doc_comment.clone(),
                                 go_location: None,
+                                is_const: false,
                             },
                         );
                         return Ok(FieldAccessResult::Field { ty: method_ty });
@@ -2028,6 +2042,7 @@ impl Infer {
                         kind: SymbolKind::Method,
                         doc_comment: method.doc_comment.clone(),
                         go_location: None,
+                        is_const: false,
                     },
                 );
                 return Ok(FieldAccessResult::Field { ty: method_ty });
@@ -2535,6 +2550,7 @@ impl Infer {
                             kind: SymbolKind::Function,
                             doc_comment,
                             go_location: None,
+                            is_const: false,
                         },
                     );
 
@@ -2599,6 +2615,7 @@ impl Infer {
                             kind: SymbolKind::Type,
                             doc_comment,
                             go_location: None,
+                            is_const: false,
                         },
                     );
 
@@ -2637,6 +2654,7 @@ impl Infer {
                         kind: SymbolKind::Type,
                         doc_comment,
                         go_location,
+                        is_const: false,
                     },
                 );
 

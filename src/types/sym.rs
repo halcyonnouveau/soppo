@@ -26,6 +26,8 @@ pub struct SymbolInfo {
     /// Source location for Go package symbols (file path + line/col)
     /// Used for goto-definition in external Go packages
     pub go_location: Option<SourceLocation>,
+    /// Whether this is a const field (for struct fields)
+    pub is_const: bool,
 }
 
 /// What kind of symbol this is
@@ -140,6 +142,7 @@ mod tests {
                 kind: SymbolKind::Variable,
                 doc_comment: None,
                 go_location: None,
+                is_const: false,
             },
         );
 
@@ -175,6 +178,7 @@ mod tests {
                 kind: SymbolKind::Variable,
                 doc_comment: None,
                 go_location: None,
+                is_const: false,
             },
         );
 
@@ -188,6 +192,7 @@ mod tests {
                 kind: SymbolKind::Function,
                 doc_comment: None,
                 go_location: None,
+                is_const: false,
             },
         );
 
