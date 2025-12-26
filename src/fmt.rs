@@ -361,27 +361,76 @@ impl Formatter {
             TypeKind::Enum { variants } => {
                 self.emit(" enum {\n");
                 self.indent();
-                for variant in variants {
-                    self.format_enum_variant(variant);
+
+                // Group variants by contiguous blocks
+                // A new group starts when there's a blank line, comment, or attribute
+                // Each group is aligned independently
+                let groups = self.group_enum_variants(variants);
+
+                for (group_idx, group) in groups.iter().enumerate() {
+                    // Emit blank line between groups (except before first)
+                    if group_idx > 0 {
+                        self.output.push('\n');
+                    }
+
+                    // Calculate max name length for this group only
+                    let max_name_len = group
+                        .iter()
+                        .map(|v| match v {
+                            EnumVariant::Unit { ident, .. } => ident.name.len(),
+                            EnumVariant::Single { ident, .. } => ident.name.len(),
+                            EnumVariant::Struct { ident, .. } => ident.name.len(),
+                        })
+                        .max()
+                        .unwrap_or(0);
+
+                    for variant in group {
+                        self.format_enum_variant_aligned(variant, max_name_len);
+                    }
                 }
+
                 self.dedent();
                 self.emit_line("}");
             }
             TypeKind::Struct { fields } => {
-                // Emit "const struct" if the whole type is const
-                if t.is_const {
-                    self.emit(" const struct {\n");
+                // Empty struct: use single-line format (no space before braces)
+                if fields.is_empty() {
+                    if t.is_const {
+                        self.emit(" const struct{}\n");
+                    } else {
+                        self.emit(" struct{}\n");
+                    }
                 } else {
-                    self.emit(" struct {\n");
+                    // Emit "const struct" if the whole type is const
+                    if t.is_const {
+                        self.emit(" const struct {\n");
+                    } else {
+                        self.emit(" struct {\n");
+                    }
+                    self.indent();
+
+                    // Group fields by contiguous blocks
+                    // A new group starts when there's a blank line, comment, or attribute
+                    // Each group is aligned independently (like gofmt)
+                    let groups = self.group_fields(fields);
+
+                    for (group_idx, group) in groups.iter().enumerate() {
+                        // Emit blank line between groups (except before first)
+                        if group_idx > 0 {
+                            self.output.push('\n');
+                        }
+
+                        // Calculate alignment for this group only
+                        let (max_name_len, max_type_len) = self.calc_field_alignment_refs(group);
+
+                        for field in group {
+                            self.format_field_aligned(field, max_name_len, max_type_len);
+                        }
+                    }
+
+                    self.dedent();
+                    self.emit_line("}");
                 }
-                self.indent();
-                // Calculate alignment widths
-                let (max_name_len, max_type_len) = self.calc_field_alignment(fields);
-                for field in fields {
-                    self.format_field_aligned(field, max_name_len, max_type_len);
-                }
-                self.dedent();
-                self.emit_line("}");
             }
             TypeKind::Interface { methods } => {
                 self.emit(" interface {\n");
@@ -403,7 +452,7 @@ impl Formatter {
             .join(", ")
     }
 
-    fn format_enum_variant(&mut self, variant: &EnumVariant) {
+    fn format_enum_variant_aligned(&mut self, variant: &EnumVariant, max_name_len: usize) {
         match variant {
             EnumVariant::Unit { ident, attributes } => {
                 self.emit_attributes(attributes);
@@ -417,7 +466,9 @@ impl Formatter {
                 self.emit_attributes(attributes);
                 self.emit_indent();
                 self.emit(&ident.name);
-                self.emit(" ");
+                // Pad name to align types
+                let padding = max_name_len - ident.name.len() + 1;
+                self.emit(&" ".repeat(padding));
                 self.emit(&Self::format_type_annotation(ty));
                 self.output.push('\n');
             }
@@ -430,9 +481,9 @@ impl Formatter {
                 self.emit_indent();
                 self.emit(&format!("{} struct {{\n", ident.name));
                 self.indent();
-                let (max_name_len, max_type_len) = self.calc_field_alignment(fields);
+                let (field_max_name_len, max_type_len) = self.calc_field_alignment(fields);
                 for field in fields {
-                    self.format_field_aligned(field, max_name_len, max_type_len);
+                    self.format_field_aligned(field, field_max_name_len, max_type_len);
                 }
                 self.dedent();
                 self.emit_line("}");
@@ -456,6 +507,136 @@ impl Formatter {
             max_type_len = max_type_len.max(type_str.len());
         }
         (max_name_len, max_type_len)
+    }
+
+    /// Calculate alignment widths for a slice of field references
+    fn calc_field_alignment_refs(&self, fields: &[&Field]) -> (usize, usize) {
+        let mut max_name_len = 0;
+        let mut max_type_len = 0;
+        for field in fields {
+            // Account for "const " prefix (6 chars) if the field is const
+            let name_len = if field.is_const {
+                "const ".len() + field.ident.name.len()
+            } else {
+                field.ident.name.len()
+            };
+            max_name_len = max_name_len.max(name_len);
+            let type_str = Self::format_type_annotation(&field.ty);
+            max_type_len = max_type_len.max(type_str.len());
+        }
+        (max_name_len, max_type_len)
+    }
+
+    /// Group fields into alignment groups.
+    /// A new group starts when there's a blank line, comment, or attribute before a field.
+    fn group_fields<'a>(&self, fields: &'a [Field]) -> Vec<Vec<&'a Field>> {
+        let mut groups: Vec<Vec<&'a Field>> = Vec::new();
+        let mut current_group: Vec<&'a Field> = Vec::new();
+
+        for (i, field) in fields.iter().enumerate() {
+            let starts_new_group = if i == 0 {
+                false // First field never starts a new group
+            } else {
+                let prev_field = &fields[i - 1];
+                let prev_end = prev_field.ident.span.end.line;
+
+                // Check for attribute on this field
+                let has_attribute = !field.attributes.is_empty();
+
+                // Check for blank line or comment between previous field and this one
+                let field_start = field
+                    .attributes
+                    .first()
+                    .map(|a| a.span.start.line)
+                    .unwrap_or(field.ident.span.start.line);
+
+                let has_gap = field_start > prev_end + 1;
+
+                // Check for comments between previous field and this one
+                let has_comment = self.comments.iter().any(|c| {
+                    c.span.start.line > prev_end && c.span.start.line < field.ident.span.start.line
+                });
+
+                has_attribute || has_gap || has_comment
+            };
+
+            if starts_new_group && !current_group.is_empty() {
+                groups.push(current_group);
+                current_group = Vec::new();
+            }
+
+            current_group.push(field);
+        }
+
+        if !current_group.is_empty() {
+            groups.push(current_group);
+        }
+
+        groups
+    }
+
+    /// Group enum variants into alignment groups.
+    /// A new group starts when there's a blank line, comment, or attribute before a variant.
+    fn group_enum_variants<'a>(&self, variants: &'a [EnumVariant]) -> Vec<Vec<&'a EnumVariant>> {
+        let mut groups: Vec<Vec<&'a EnumVariant>> = Vec::new();
+        let mut current_group: Vec<&'a EnumVariant> = Vec::new();
+
+        for (i, variant) in variants.iter().enumerate() {
+            let (attrs, ident_line) = match variant {
+                EnumVariant::Unit { ident, attributes } => {
+                    (attributes.as_slice(), ident.span.start.line)
+                }
+                EnumVariant::Single {
+                    ident, attributes, ..
+                } => (attributes.as_slice(), ident.span.start.line),
+                EnumVariant::Struct {
+                    ident, attributes, ..
+                } => (attributes.as_slice(), ident.span.start.line),
+            };
+
+            let starts_new_group = if i == 0 {
+                false // First variant never starts a new group
+            } else {
+                let prev_variant = &variants[i - 1];
+                let prev_end = match prev_variant {
+                    EnumVariant::Unit { ident, .. } => ident.span.end.line,
+                    EnumVariant::Single { ident, .. } => ident.span.end.line,
+                    EnumVariant::Struct { ident, .. } => ident.span.end.line,
+                };
+
+                // Check for attribute on this variant
+                let has_attribute = !attrs.is_empty();
+
+                // Check for blank line between previous variant and this one
+                let variant_start = attrs
+                    .first()
+                    .map(|a| a.span.start.line)
+                    .unwrap_or(ident_line);
+
+                let has_gap = variant_start > prev_end + 1;
+
+                // Check for comments between previous variant and this one
+                let has_comment = self
+                    .comments
+                    .iter()
+                    .any(|c| c.span.start.line > prev_end && c.span.start.line < ident_line);
+
+                has_attribute || has_gap || has_comment
+            };
+
+            if starts_new_group && !current_group.is_empty() {
+                groups.push(current_group);
+                current_group = Vec::new();
+            }
+
+            current_group.push(variant);
+        }
+
+        if !current_group.is_empty() {
+            groups.push(current_group);
+        }
+
+        groups
     }
 
     /// Format a field with alignment (used for struct fields)
@@ -796,6 +977,9 @@ impl Formatter {
             self.format_stmt(stmt);
             prev_end_line = stmt.span.end.line;
         }
+
+        // Emit any comments at the end of the block (e.g., in an otherwise empty block)
+        self.emit_comments_before(block.span.end.line);
     }
 
     fn format_stmt(&mut self, stmt: &Stmt) {
