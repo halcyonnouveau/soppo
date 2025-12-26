@@ -242,6 +242,11 @@ impl Infer {
         self.global_state
     }
 
+    /// Get a reference to the global state
+    pub fn global_state(&self) -> &GlobalCtxt {
+        &self.global_state
+    }
+
     /// Consume the Infer and return the symbol table
     pub fn into_symbols(mut self) -> SymbolTable {
         // Copy soppo imports to symbol table for cross-file completion

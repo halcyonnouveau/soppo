@@ -788,6 +788,34 @@ impl Infer {
     /// Infer an entire file and return a TypedFile.
     /// This performs the two-pass inference: first registering signatures, then inferring bodies.
     pub fn infer_file(&mut self, file: &File) -> TypedFile {
+        self.register_file_declarations(file);
+        self.infer_file_bodies(file)
+    }
+
+    /// Register type definitions and function signatures from a file (Pass 1).
+    /// This allows forward references within and across files in the same package.
+    /// Call this for all files in a package before calling infer_file_bodies.
+    pub fn register_file_declarations(&mut self, file: &File) {
+        for decl in &file.decls {
+            match decl {
+                Decl::Type(type_decl) => {
+                    // Register type in global state (but don't build TypedTypeDecl yet)
+                    self.global_state.register_type(type_decl);
+                }
+                Decl::Func(func) => {
+                    if let Err(e) = self.register_func_signature(func) {
+                        self.emit_error(e);
+                    }
+                }
+                // Consts and vars are processed in pass 2 along with their typed versions
+                Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) => {}
+            }
+        }
+    }
+
+    /// Infer all declaration bodies and return a TypedFile (Pass 2).
+    /// Call register_file_declarations for all files in the package first.
+    pub fn infer_file_bodies(&mut self, file: &File) -> TypedFile {
         // Build typed imports by looking up import kinds from self.imports
         // (populated by process_imports called earlier)
         let typed_imports: Vec<_> = file
@@ -824,25 +852,7 @@ impl Infer {
             })
             .collect();
 
-        // Pass 1: Register type definitions and function signatures
-        // This allows forward references (functions calling each other, types referencing each other)
-        for decl in &file.decls {
-            match decl {
-                Decl::Type(type_decl) => {
-                    // Register type in global state (but don't build TypedTypeDecl yet)
-                    self.global_state.register_type(type_decl);
-                }
-                Decl::Func(func) => {
-                    if let Err(e) = self.register_func_signature(func) {
-                        self.emit_error(e);
-                    }
-                }
-                // Consts and vars are processed in pass 2 along with their typed versions
-                Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) => {}
-            }
-        }
-
-        // Pass 2: Infer all declarations and build typed versions
+        // Infer all declarations and build typed versions
         let typed_decls: Vec<_> = file
             .decls
             .iter()

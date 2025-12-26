@@ -11,6 +11,22 @@ use crate::go::Project;
 use crate::syntax::{Decl, File, FileId, FileRegistry, ModuleId, Parser};
 use crate::types::{GlobalCtxt, Infer, SymbolTable, TypedFile};
 
+/// A parsed file ready for compilation
+struct ParsedFile {
+    path: PathBuf,
+    source: String,
+    filename: String,
+    file: File,
+    module_id: String,
+}
+
+/// Key for grouping files by package (directory + package name)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PackageKey {
+    dir: PathBuf,
+    package: String,
+}
+
 /// Result of compiling a project - maps relative paths to generated Go code
 pub type BuildResult = Vec<(String, String)>;
 
@@ -65,31 +81,11 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
     let dep_graph = DepGraph::build(&sources, &project.root, &project.module_path)?;
     let ordered_sources = dep_graph.topological_sort()?;
 
-    // Compile files in dependency order
-    let mut global_ctxt = GlobalCtxt::new();
-    let mut results = Vec::new();
+    // Parse all files and group by package
+    let mut parsed_files: Vec<ParsedFile> = Vec::new();
+    let mut package_groups: HashMap<PackageKey, Vec<usize>> = HashMap::new();
 
     for source_path in &ordered_sources {
-        // Compute output path
-        let output_path = match output_dir {
-            Some(dir) => project.output_path(source_path, dir),
-            None => {
-                // Output next to source file
-                let mut out = source_path.clone();
-                out.set_extension("go");
-                out
-            }
-        };
-
-        // Compute module ID from package directory
-        let module_id = source_path
-            .strip_prefix(&project.root)
-            .ok()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.to_str())
-            .filter(|s| !s.is_empty())
-            .unwrap_or("main");
-
         let source = fs::read_to_string(source_path)
             .into_diagnostic()
             .map_err(|e| e.context(format!("Failed to read file: {}", source_path.display())))?;
@@ -97,19 +93,154 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
         let filename = source_path
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or("input.sop");
+            .unwrap_or("input.sop")
+            .to_string();
 
-        let (go_code, new_global_ctxt) = compile_with_context(
-            &source,
+        let mut parser = Parser::new(&source, FileId(0));
+        let file = parser.parse_file().map_err(|e| {
+            miette::Report::from(e).with_source_code(NamedSource::new(&filename, source.clone()))
+        })?;
+
+        let module_id = source_path
+            .strip_prefix(&project.root)
+            .ok()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("main")
+            .to_string();
+
+        // Group by directory + package name
+        let dir = source_path.parent().unwrap_or(Path::new("")).to_path_buf();
+        let key = PackageKey {
+            dir,
+            package: file.package.name.clone(),
+        };
+
+        let idx = parsed_files.len();
+        package_groups.entry(key).or_default().push(idx);
+
+        parsed_files.push(ParsedFile {
+            path: source_path.clone(),
+            source,
             filename,
-            global_ctxt,
-            &project.module_path,
-            output_dir_relative.as_deref(),
+            file,
             module_id,
-            &project.root,
+        });
+    }
+
+    // Compile packages in order (packages are ordered by dependency)
+    let mut global_ctxt = GlobalCtxt::new();
+    let mut results = Vec::new();
+
+    // Track which packages we've processed
+    let mut processed_packages: std::collections::HashSet<PackageKey> =
+        std::collections::HashSet::new();
+
+    for source_path in &ordered_sources {
+        let dir = source_path.parent().unwrap_or(Path::new("")).to_path_buf();
+
+        // Find this file's package key
+        let pf_idx = parsed_files
+            .iter()
+            .position(|pf| pf.path == *source_path)
+            .unwrap();
+        let pkg_key = PackageKey {
+            dir: dir.clone(),
+            package: parsed_files[pf_idx].file.package.name.clone(),
+        };
+
+        // Skip if we've already processed this package
+        if processed_packages.contains(&pkg_key) {
+            continue;
+        }
+        processed_packages.insert(pkg_key.clone());
+
+        // Get all files in this package
+        let pkg_file_indices = package_groups.get(&pkg_key).unwrap();
+
+        // Compile this package (all files together)
+        let (pkg_results, new_global_ctxt) = compile_package(
+            pkg_file_indices.iter().map(|&i| &parsed_files[i]).collect(),
+            global_ctxt,
+            &project,
+            output_dir,
+            output_dir_relative.as_deref(),
         )?;
 
-        // Compute relative output path for the result
+        results.extend(pkg_results);
+        global_ctxt = new_global_ctxt;
+    }
+
+    Ok(results)
+}
+
+/// Compile a package (multiple files that share the same package declaration).
+/// All files are processed together so they can reference each other's symbols.
+fn compile_package(
+    files: Vec<&ParsedFile>,
+    mut global_ctxt: GlobalCtxt,
+    project: &Project,
+    output_dir: Option<&Path>,
+    output_dir_relative: Option<&str>,
+) -> Result<(Vec<(String, String)>, GlobalCtxt)> {
+    if files.is_empty() {
+        return Ok((Vec::new(), global_ctxt));
+    }
+
+    let module_id = &files[0].module_id;
+    global_ctxt.set_current_module(ModuleId::new(module_id));
+
+    let mut infer = Infer::with_global_state_and_project(global_ctxt, project.clone())?;
+
+    // Process imports from all files
+    for pf in &files {
+        if !infer.process_imports(&pf.file.imports) {
+            let errors = infer.take_errors();
+            let source_code = NamedSource::new(&pf.filename, pf.source.clone());
+            if let Some(errs) = crate::error::SoppoErrors::new(errors) {
+                return Err(miette::Report::from(errs).with_source_code(source_code));
+            }
+        }
+    }
+
+    // Pass 1: Register all declarations from all files
+    for pf in &files {
+        infer.register_file_declarations(&pf.file);
+    }
+
+    // Pass 2: Infer bodies and generate code for each file
+    let mut results = Vec::new();
+
+    for pf in &files {
+        let mut typed_file = infer.infer_file_bodies(&pf.file);
+
+        // Substitute type variables with their solutions
+        crate::types::infer::bonk_file(&mut typed_file, infer.substitutions());
+
+        // Generate code
+        let global_state = infer.global_state().clone();
+        let mut codegen = Codegen::with_module_info(
+            global_state,
+            project.module_path.clone(),
+            output_dir_relative.map(String::from),
+        );
+
+        codegen.gen_file(&typed_file).map_err(|e| {
+            miette::Report::from(e)
+                .with_source_code(NamedSource::new(&pf.filename, pf.source.clone()))
+        })?;
+
+        // Compute output path
+        let output_path = match output_dir {
+            Some(dir) => project.output_path(&pf.path, dir),
+            None => {
+                let mut out = pf.path.clone();
+                out.set_extension("go");
+                out
+            }
+        };
+
         let relative_path = match output_dir {
             Some(dir) => output_path
                 .strip_prefix(dir)
@@ -123,11 +254,27 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
                 .to_string(),
         };
 
-        results.push((relative_path, go_code));
-        global_ctxt = new_global_ctxt;
+        results.push((relative_path, codegen.output().to_string()));
     }
 
-    Ok(results)
+    // Check for unused imports (once per package, not per file)
+    if let Err(e) = infer.check_unused_imports() {
+        infer.emit_error(e);
+    }
+
+    // Handle any errors
+    if infer.has_errors() {
+        let errors = infer.take_errors();
+        // Use the first file for error reporting
+        let pf = &files[0];
+        let source_code = NamedSource::new(&pf.filename, pf.source.clone());
+
+        if let Some(errs) = crate::error::SoppoErrors::new(errors) {
+            return Err(miette::Report::from(errs).with_source_code(source_code));
+        }
+    }
+
+    Ok((results, infer.into_global_state()))
 }
 
 /// Build a project and write output files to disk.
