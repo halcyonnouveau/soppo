@@ -851,6 +851,14 @@ fn extract_const_specs(
     for child in node.children(&mut cursor) {
         if child.kind() == "const_spec" {
             spec_count += 1;
+        } else if child.kind() == "const_spec_list" {
+            // For const blocks with parens, count inner specs
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "const_spec" {
+                    spec_count += 1;
+                }
+            }
         }
     }
 
@@ -872,6 +880,21 @@ fn extract_const_specs(
                 &inherited_type,
                 parent_doc.as_deref(),
             );
+        } else if child.kind() == "const_spec_list" {
+            // For const blocks with parens, process inner specs with type inheritance
+            let mut inner_cursor = child.walk();
+            for inner_child in child.children(&mut inner_cursor) {
+                if inner_child.kind() == "const_spec" {
+                    inherited_type = extract_const_spec_with_type(
+                        inner_child,
+                        source,
+                        file_path,
+                        pkg,
+                        &inherited_type,
+                        parent_doc.as_deref(),
+                    );
+                }
+            }
         }
     }
 }
@@ -900,7 +923,7 @@ fn extract_const_spec_with_type(
             "expression_list" => {
                 // Try to infer type from value if not explicitly typed and no inherited type
                 if explicit_ty.is_empty() && inherited_type.is_empty() {
-                    explicit_ty = infer_const_type(child);
+                    explicit_ty = infer_const_type(child, source, &pkg.constants);
                 }
             }
             _ => {}
@@ -944,7 +967,11 @@ fn extract_const_spec_with_type(
     }
 }
 
-fn infer_const_type(node: tree_sitter::Node) -> String {
+fn infer_const_type(
+    node: tree_sitter::Node,
+    source: &str,
+    constants: &std::collections::HashMap<String, ConstDef>,
+) -> String {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -954,6 +981,15 @@ fn infer_const_type(node: tree_sitter::Node) -> String {
             "true" | "false" => return "bool".to_string(),
             // Rune literals like '0', '5', '\n' - these are compatible with byte
             "rune_literal" => return "rune".to_string(),
+            // Look up identifier references to other constants
+            "identifier" => {
+                let name = node_text(child, source);
+                if let Some(const_def) = constants.get(name)
+                    && const_def.ty != "untyped"
+                {
+                    return const_def.ty.clone();
+                }
+            }
             _ => {}
         }
     }

@@ -1,0 +1,41 @@
+package main
+
+import "reflect"
+
+// Test 1: Const block type inheritance (const_spec_list)
+// reflect.Kind constants are defined as:
+// const (
+//     Invalid Kind = iota
+//     Bool
+//     Int
+//     ...
+//     Slice
+//     ...
+// )
+// All constants should inherit the Kind type from the first one
+func testConstBlockInheritance() {
+	var kind reflect.Kind = reflect.Int
+
+	// These comparisons should work because reflect.Bool, reflect.Int,
+	// reflect.Slice all inherit Kind type from the const block
+	_ = kind == reflect.Bool
+	_ = kind == reflect.Int
+	_ = kind == reflect.Slice
+}
+
+// Test 2: Const referencing another const
+// reflect.Ptr is defined as:
+// const Ptr = Pointer
+// where Pointer is in the main const block with type Kind
+// Ptr should inherit the Kind type from Pointer
+func testConstReference() {
+	var kind reflect.Kind = reflect.Pointer
+
+	// reflect.Ptr should have type Kind, not untyped
+	_ = kind == reflect.Ptr
+}
+
+func main() {
+	testConstBlockInheritance()
+	testConstReference()
+}
