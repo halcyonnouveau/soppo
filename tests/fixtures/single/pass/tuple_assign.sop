@@ -1,0 +1,31 @@
+package main
+
+func main() {
+	// Simple tuple assignment
+	a := 1
+	b := 2
+	a, b = b, a
+
+	// Tuple assignment with array indexing
+	arr := []int{1, 2, 3, 4, 5}
+	i := 0
+	j := 4
+	arr[i], arr[j] = arr[j], arr[i]
+
+	// Tuple assignment with struct fields
+	type Point struct {
+		X int
+		Y int
+	}
+	p := Point{X: 10, Y: 20}
+	p.X, p.Y = p.Y, p.X
+
+	// Multiple values from function
+	x, y := swap(1, 2)
+	_ = x
+	_ = y
+}
+
+func swap(a, b int) (int, int) {
+	return b, a
+}

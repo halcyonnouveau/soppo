@@ -81,25 +81,14 @@ impl Parser {
                 let first_target = self.parse_expr()?;
 
                 // Check for multi-value declaration/assignment: a, b := ... or a, b = ...
-                if let ExprKind::Ident(first_name) = &first_target.kind
-                    && self.consume(&Token::Comma)
-                {
-                    // Multi-value: collect more identifiers
-                    let mut names = vec![Ident::new(first_name.clone(), first_target.span)];
+                // or tuple assignment: arr[i], arr[j] = arr[j], arr[i]
+                if self.consume(&Token::Comma) {
+                    // Multi-value: collect more targets
                     let mut targets = vec![first_target.clone()];
 
                     loop {
                         let target = self.parse_expr()?;
-                        if let ExprKind::Ident(name) = &target.kind {
-                            names.push(Ident::new(name.clone(), target.span));
-                            targets.push(target);
-                        } else {
-                            return Err(SoppoError::Parse {
-                                message: "Multi-value assignment targets must be identifiers"
-                                    .to_string(),
-                                span: target.span,
-                            });
-                        }
+                        targets.push(target);
 
                         if !self.consume(&Token::Comma) {
                             break;
@@ -108,8 +97,19 @@ impl Parser {
 
                     if self.consume(&Token::ColonAssign) {
                         // Multi-value declaration: a, b := f() or a, b := expr1, expr2
-                        for name in &names {
-                            self.validate_identifier(&name.name, &name.span)?;
+                        // All targets must be simple identifiers for declarations
+                        let mut names = Vec::new();
+                        for target in &targets {
+                            if let ExprKind::Ident(name) = &target.kind {
+                                self.validate_identifier(name, &target.span)?;
+                                names.push(Ident::new(name.clone(), target.span));
+                            } else {
+                                return Err(SoppoError::Parse {
+                                    message: "Left side of := must be simple identifiers"
+                                        .to_string(),
+                                    span: target.span,
+                                });
+                            }
                         }
                         let mut values = vec![self.parse_expr()?];
                         while self.consume(&Token::Comma) {
@@ -135,7 +135,8 @@ impl Parser {
                             },
                         });
                     } else if self.consume(&Token::Assign) {
-                        // Multi-value assignment: a, b = f() or a, b = expr1, expr2
+                        // Multi-value assignment: a, b = f() or arr[i], arr[j] = arr[j], arr[i]
+                        // Any assignable expression is allowed as a target
                         let mut values = vec![self.parse_expr()?];
                         while self.consume(&Token::Comma) {
                             values.push(self.parse_expr()?);
