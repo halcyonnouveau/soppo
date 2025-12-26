@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1766717052754,
+  "lastUpdate": 1766746287716,
   "repoUrl": "https://github.com/halcyonnouveau/soppo",
   "entries": {
     "Benchmark": [
@@ -7637,6 +7637,120 @@ window.BENCHMARK_DATA = {
             "name": "compile/file/basic_go",
             "value": 25191314,
             "range": "± 216678",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "committer": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "distinct": true,
+          "id": "4501eebc34b39784f5e0013f5e2e790110306a4c",
+          "message": "fix: multi-file packages",
+          "timestamp": "2025-12-26T21:24:43+11:00",
+          "tree_id": "5dd1fc301da34621ec3e3caecc0527724eb2d507",
+          "url": "https://github.com/halcyonnouveau/soppo/commit/4501eebc34b39784f5e0013f5e2e790110306a4c"
+        },
+        "date": 1766746286744,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse/file/guessing_game",
+            "value": 133081,
+            "range": "± 4143",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/file_processor",
+            "value": 297110,
+            "range": "± 34734",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/http_server",
+            "value": 267134,
+            "range": "± 1046",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/todo_cli",
+            "value": 1894538,
+            "range": "± 25998",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/basic_go",
+            "value": 21347234,
+            "range": "± 50670",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/guessing_game",
+            "value": 2259125,
+            "range": "± 8808",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/file_processor",
+            "value": 4083172,
+            "range": "± 18812",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/http_server",
+            "value": 8780539,
+            "range": "± 67476",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/todo_cli",
+            "value": 5202109,
+            "range": "± 105549",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/basic_go",
+            "value": 28106318,
+            "range": "± 227620",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/guessing_game",
+            "value": 2302967,
+            "range": "± 11561",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/file_processor",
+            "value": 4165372,
+            "range": "± 77094",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/http_server",
+            "value": 8939286,
+            "range": "± 240386",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/todo_cli",
+            "value": 5258989,
+            "range": "± 17408",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/basic_go",
+            "value": 28328734,
+            "range": "± 483260",
             "unit": "ns/iter"
           }
         ]
