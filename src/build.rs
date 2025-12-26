@@ -101,13 +101,15 @@ pub fn build_project(root: &Path, output_dir: Option<&Path>) -> Result<BuildResu
             miette::Report::from(e).with_source_code(NamedSource::new(&filename, source.clone()))
         })?;
 
+        // Compute module_id from relative path
+        // Root package uses "." to match import resolution
         let module_id = source_path
             .strip_prefix(&project.root)
             .ok()
             .and_then(|p| p.parent())
             .and_then(|p| p.to_str())
             .filter(|s| !s.is_empty())
-            .unwrap_or("main")
+            .unwrap_or(".")
             .to_string();
 
         // Group by directory + package name
@@ -553,13 +555,15 @@ pub fn typecheck_project_to_typed(sources: &[PathBuf]) -> Result<Vec<TypedFileRe
             miette::Report::from(e).with_source_code(NamedSource::new(&filename, source.clone()))
         })?;
 
+        // Compute module_id from relative path
+        // Root package uses "." to match import resolution
         let module_id = source_path
             .strip_prefix(&project.root)
             .ok()
             .and_then(|p| p.parent())
             .and_then(|p| p.to_str())
             .filter(|s| !s.is_empty())
-            .unwrap_or("main")
+            .unwrap_or(".")
             .to_string();
 
         // Group by directory + package name

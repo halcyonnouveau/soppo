@@ -79,7 +79,12 @@ impl Codegen {
                         if let Some(local_path) =
                             crate::deps::get_local_package_path(&import.path, module_path)
                         {
-                            format!("{}/{}/{}", module_path, out_dir, local_path)
+                            // "." means root package - just use module_path/out_dir
+                            if local_path == "." {
+                                format!("{}/{}", module_path, out_dir)
+                            } else {
+                                format!("{}/{}/{}", module_path, out_dir, local_path)
+                            }
                         } else {
                             import.path.clone()
                         }

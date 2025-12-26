@@ -466,10 +466,15 @@ impl Infer {
                 }
 
                 // Use alias if provided, otherwise derive from path
-                let package_name = import
-                    .alias
-                    .as_deref()
-                    .unwrap_or_else(|| local_path.rsplit('/').next().unwrap_or(local_path));
+                // For root package ("."), use the last component of the import path
+                let package_name = import.alias.as_deref().unwrap_or_else(|| {
+                    if local_path == "." {
+                        // Root package - get name from import path
+                        import_path.rsplit('/').next().unwrap_or(import_path)
+                    } else {
+                        local_path.rsplit('/').next().unwrap_or(local_path)
+                    }
+                });
 
                 // Track the Soppo import with its ModuleId for cross-package lookups
                 // The local_path is the module ID (e.g., "helpers" or "util/helpers")

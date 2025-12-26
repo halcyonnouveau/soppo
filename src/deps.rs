@@ -314,8 +314,9 @@ pub fn get_local_package_path<'a>(import_path: &'a str, module_path: &str) -> Op
     if let Some(remainder) = import_path.strip_prefix(module_path) {
         // Strip leading slash if present
         let local_path = remainder.strip_prefix('/').unwrap_or(remainder);
+        // Empty string means root package - use "." to represent it
         if local_path.is_empty() {
-            None
+            Some(".")
         } else {
             Some(local_path)
         }
@@ -327,7 +328,12 @@ pub fn get_local_package_path<'a>(import_path: &'a str, module_path: &str) -> Op
 /// Check if a local path corresponds to a Soppo package (directory with .sop files)
 /// Returns the list of .sop files if it is, None otherwise.
 pub fn resolve_local_package(local_path: &str, project_root: &Path) -> Option<Vec<PathBuf>> {
-    let package_dir = project_root.join(local_path);
+    // Handle "." as the root package
+    let package_dir = if local_path == "." {
+        project_root.to_path_buf()
+    } else {
+        project_root.join(local_path)
+    };
 
     if !package_dir.is_dir() {
         return None;
