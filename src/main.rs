@@ -411,27 +411,23 @@ fn show_diff(file: &Path, original: &str, formatted: &str) -> Result<()> {
 
 /// Lint files for code quality issues
 fn sniff_files(files: &[PathBuf], config: &LintConfig) -> Result<()> {
-    for file in files {
-        let source = fs::read_to_string(file)
-            .into_diagnostic()
-            .map_err(|e| e.context(format!("Failed to read file: {}", file.display())))?;
+    // Typecheck all files together for proper cross-file resolution
+    let typed_files = match build::typecheck_project_to_typed(files) {
+        Ok(f) => f,
+        Err(e) => {
+            // If there are compile errors, report them
+            eprintln!("{:?}", e);
+            return Ok(());
+        }
+    };
 
-        let filename = file
+    // Run lints on each typed file
+    for (path, source, typed_file) in typed_files {
+        let filename = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("input.sop");
 
-        // Parse and typecheck to get the typed AST
-        let typed_file = match build::typecheck_to_typed(&source, filename) {
-            Ok(f) => f,
-            Err(e) => {
-                // If there are compile errors, report them and skip linting
-                eprintln!("{:?}", e);
-                continue;
-            }
-        };
-
-        // Run lints
         let warnings = sniff::lint_file(&typed_file, filename, &source, config);
 
         for warning in warnings {

@@ -514,6 +514,162 @@ pub fn typecheck_project(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(checked)
 }
 
+/// Result of typechecking a file: (path, source, typed AST)
+pub type TypedFileResult = (PathBuf, String, TypedFile);
+
+/// Type-check a project and return typed ASTs for all files.
+/// Used by sniff command for workspace-level linting.
+/// Files in the same package are processed together so they can reference each other's symbols.
+pub fn typecheck_project_to_typed(sources: &[PathBuf]) -> Result<Vec<TypedFileResult>> {
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Find the project root from the first source file
+    let first_source = &sources[0];
+    let project = Project::discover(first_source.parent().unwrap_or_else(|| Path::new(".")))?;
+
+    // Build dependency graph and topologically sort
+    let dep_graph = DepGraph::build(sources, &project.root, &project.module_path)?;
+    let ordered_sources = dep_graph.topological_sort()?;
+
+    // Parse all files and group by package
+    let mut parsed_files: Vec<ParsedFile> = Vec::new();
+    let mut package_groups: HashMap<PackageKey, Vec<usize>> = HashMap::new();
+
+    for source_path in &ordered_sources {
+        let source = fs::read_to_string(source_path)
+            .into_diagnostic()
+            .map_err(|e| e.context(format!("Failed to read file: {}", source_path.display())))?;
+
+        let filename = source_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("input.sop")
+            .to_string();
+
+        let mut parser = Parser::new(&source, FileId(0));
+        let file = parser.parse_file().map_err(|e| {
+            miette::Report::from(e).with_source_code(NamedSource::new(&filename, source.clone()))
+        })?;
+
+        let module_id = source_path
+            .strip_prefix(&project.root)
+            .ok()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("main")
+            .to_string();
+
+        // Group by directory + package name
+        let dir = source_path.parent().unwrap_or(Path::new("")).to_path_buf();
+        let key = PackageKey {
+            dir,
+            package: file.package.name.clone(),
+        };
+
+        let idx = parsed_files.len();
+        package_groups.entry(key).or_default().push(idx);
+
+        parsed_files.push(ParsedFile {
+            path: source_path.clone(),
+            source,
+            filename,
+            file,
+            module_id,
+        });
+    }
+
+    // Process packages in order
+    let mut global_ctxt = GlobalCtxt::new();
+    let mut results: Vec<TypedFileResult> = Vec::new();
+    let mut processed_packages: std::collections::HashSet<PackageKey> =
+        std::collections::HashSet::new();
+
+    for source_path in &ordered_sources {
+        let dir = source_path.parent().unwrap_or(Path::new("")).to_path_buf();
+
+        // Find this file's package key
+        let pf_idx = parsed_files
+            .iter()
+            .position(|pf| pf.path == *source_path)
+            .unwrap();
+        let pkg_key = PackageKey {
+            dir,
+            package: parsed_files[pf_idx].file.package.name.clone(),
+        };
+
+        // Skip if we've already processed this package
+        if processed_packages.contains(&pkg_key) {
+            continue;
+        }
+        processed_packages.insert(pkg_key.clone());
+
+        // Get all files in this package
+        let pkg_file_indices = package_groups.get(&pkg_key).unwrap();
+
+        // Typecheck this package (all files together)
+        let (pkg_results, new_global_ctxt) = typecheck_package(
+            pkg_file_indices.iter().map(|&i| &parsed_files[i]).collect(),
+            global_ctxt,
+            &project,
+        )?;
+
+        results.extend(pkg_results);
+        global_ctxt = new_global_ctxt;
+    }
+
+    Ok(results)
+}
+
+/// Type-check a package (multiple files that share the same package declaration).
+/// All files are processed together so they can reference each other's symbols.
+fn typecheck_package(
+    files: Vec<&ParsedFile>,
+    mut global_ctxt: GlobalCtxt,
+    project: &Project,
+) -> Result<(Vec<TypedFileResult>, GlobalCtxt)> {
+    if files.is_empty() {
+        return Ok((Vec::new(), global_ctxt));
+    }
+
+    let module_id = &files[0].module_id;
+    global_ctxt.set_current_module(ModuleId::new(module_id));
+
+    let mut infer = Infer::with_global_state_and_project(global_ctxt, project.clone())?;
+
+    // Process imports from all files
+    for pf in &files {
+        if !infer.process_imports(&pf.file.imports) {
+            let errors = infer.take_errors();
+            let source_code = NamedSource::new(&pf.filename, pf.source.clone());
+            if let Some(errs) = crate::error::SoppoErrors::new(errors) {
+                return Err(miette::Report::from(errs).with_source_code(source_code));
+            }
+        }
+    }
+
+    // Pass 1: Register all declarations from all files
+    for pf in &files {
+        infer.register_file_declarations(&pf.file);
+    }
+
+    // Pass 2: Infer bodies for each file
+    let mut results = Vec::new();
+
+    for pf in &files {
+        let mut typed_file = infer.infer_file_bodies(&pf.file);
+
+        // Substitute type variables with their solutions
+        crate::types::infer::bonk_file(&mut typed_file, infer.substitutions());
+
+        results.push((pf.path.clone(), pf.source.clone(), typed_file));
+    }
+
+    Ok((results, infer.into_global_state()))
+}
+
 /// Type-check with existing GlobalCtxt, returning the updated GlobalCtxt
 fn typecheck_with_context(
     source: &str,
