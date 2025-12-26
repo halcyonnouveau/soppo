@@ -556,6 +556,8 @@ impl Codegen {
     fn gen_attr_init(&mut self, file: &TypedFile) -> crate::error::SoppoResult<()> {
         // Collect all non-builtin attributes from functions and types
         let mut registrations: Vec<(String, String, String)> = Vec::new();
+        // Collect enum variant registrations: (enumTarget, variantName, valueType)
+        let mut enum_variants: Vec<(String, String, String)> = Vec::new();
 
         for decl in &file.decls {
             match decl {
@@ -594,29 +596,54 @@ impl Codegen {
                         }
                     }
 
-                    // Enum variant attributes
+                    // Enum variant attributes and registration
                     if let TypedTypeKind::Enum { variants } = &type_decl.kind {
+                        let enum_target = format!("{}.{}", file.package, type_decl.ident.name);
+
+                        // Check if enum has Subcommands attribute (for slap CLI)
+                        let has_subcommands_attr = type_decl
+                            .attributes
+                            .iter()
+                            .any(|a| a.name == "Subcommands" || a.name.ends_with(".Subcommands"));
+
                         for variant in variants {
-                            let (variant_name, attrs) = match variant {
-                                TypedEnumVariant::Unit { ident, attributes } => {
-                                    (ident.name.clone(), attributes)
-                                }
+                            let (variant_name, attrs, value_type) = match variant {
+                                TypedEnumVariant::Unit { ident, attributes } => (
+                                    ident.name.clone(),
+                                    attributes,
+                                    format!("{}_{}{{}}", type_decl.ident.name, ident.name),
+                                ),
                                 TypedEnumVariant::Single {
                                     ident, attributes, ..
-                                } => (ident.name.clone(), attributes),
+                                } => (
+                                    ident.name.clone(),
+                                    attributes,
+                                    format!("{}_{}{{}}", type_decl.ident.name, ident.name),
+                                ),
                                 TypedEnumVariant::Struct {
                                     ident, attributes, ..
-                                } => (ident.name.clone(), attributes),
+                                } => (
+                                    ident.name.clone(),
+                                    attributes,
+                                    format!("{}_{}{{}}", type_decl.ident.name, ident.name),
+                                ),
                             };
+
+                            // Only register enum variant if enum has Subcommands attribute
+                            if has_subcommands_attr {
+                                enum_variants.push((
+                                    enum_target.clone(),
+                                    variant_name.clone(),
+                                    value_type,
+                                ));
+                            }
 
                             for attr in attrs {
                                 if !Self::is_builtin_attr(&attr.name) {
                                     // Variant: target is "pkg.EnumName", field is "VariantName"
-                                    let target =
-                                        format!("{}.{}", file.package, type_decl.ident.name);
                                     let attr_literal = self.format_attr_literal(attr)?;
                                     registrations.push((
-                                        target,
+                                        enum_target.clone(),
                                         variant_name.clone(),
                                         attr_literal,
                                     ));
@@ -630,7 +657,7 @@ impl Codegen {
         }
 
         // If no registrations, skip init() generation
-        if registrations.is_empty() {
+        if registrations.is_empty() && enum_variants.is_empty() {
             return Ok(());
         }
 
@@ -646,6 +673,13 @@ impl Codegen {
             self.emit(format!(
                 "runtime.RegisterAttr(\"{}\", \"{}\", {})\n",
                 target, field, attr_literal
+            ));
+        }
+        for (enum_target, variant_name, value_type) in enum_variants {
+            self.emit_indent();
+            self.emit(format!(
+                "runtime.RegisterAttr(\"{}\", \"{}\", runtime.EnumVariant{{WrapperType: {}}})\n",
+                enum_target, variant_name, value_type
             ));
         }
         self.dedent();

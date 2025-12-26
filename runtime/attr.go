@@ -94,3 +94,41 @@ func AllFields(target string) []string {
 	}
 	return nil
 }
+
+// EnumVariant holds metadata about an enum variant.
+// Registered as an attribute with target=EnumName, field=VariantName.
+type EnumVariant struct {
+	WrapperType any // Zero-value instance of the variant wrapper struct
+}
+
+// GetEnumVariants returns all registered variants for an enum type.
+// Looks up EnumVariant attributes registered for the enum.
+func GetEnumVariants(enumTarget string) []struct {
+	Name      string
+	ValueType any
+} {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	var result []struct {
+		Name      string
+		ValueType any
+	}
+
+	if fields, ok := registry[enumTarget]; ok {
+		for fieldName, attrs := range fields {
+			for _, attr := range attrs {
+				if ev, ok := attr.(EnumVariant); ok {
+					result = append(result, struct {
+						Name      string
+						ValueType any
+					}{
+						Name:      fieldName,
+						ValueType: ev.WrapperType,
+					})
+				}
+			}
+		}
+	}
+	return result
+}
