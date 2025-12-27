@@ -8,12 +8,11 @@ use thiserror::Error;
 
 use super::project::Project;
 
-/// Cached Go environment variables (GOROOT, GOMODCACHE).
+/// Cached Go environment variables.
 static GO_ENV: OnceLock<GoEnv> = OnceLock::new();
 
 struct GoEnv {
     goroot: PathBuf,
-    gomodcache: PathBuf,
 }
 
 fn get_cached_go_env() -> Result<&'static GoEnv> {
@@ -22,11 +21,9 @@ fn get_cached_go_env() -> Result<&'static GoEnv> {
     }
 
     let goroot = get_go_env("GOROOT")?;
-    let gomodcache = get_go_env("GOMODCACHE")?;
 
     let _ = GO_ENV.set(GoEnv {
         goroot: PathBuf::from(goroot),
-        gomodcache: PathBuf::from(gomodcache),
     });
 
     Ok(GO_ENV.get().unwrap())
@@ -71,7 +68,6 @@ pub enum ImportKind {
 /// Resolver for import paths
 pub struct Resolver {
     goroot: PathBuf,
-    gomodcache: PathBuf,
 }
 
 impl Resolver {
@@ -80,7 +76,6 @@ impl Resolver {
         let env = get_cached_go_env()?;
         Ok(Self {
             goroot: env.goroot.clone(),
-            gomodcache: env.gomodcache.clone(),
         })
     }
 
@@ -177,37 +172,11 @@ impl Resolver {
         None
     }
 
-    /// Resolve an external Go module
+    /// Resolve an external Go package
     fn resolve_external(&self, import_path: &str, project: &Project) -> Result<ImportKind> {
-        // Use `go list` to get module info
-        let module_info = get_module_info(import_path, &project.root)?;
-
-        // Module path might be a prefix of import path
-        // e.g., import "github.com/foo/bar/pkg" where module is "github.com/foo/bar"
-        let subpath = import_path
-            .strip_prefix(&module_info.path)
-            .unwrap_or("")
-            .trim_start_matches('/');
-
-        // If go list returns a Dir field (e.g., for replace directives), use it directly
-        // Otherwise, build path in module cache: $GOMODCACHE/module@version/subpath
-        let base_dir = if let Some(dir) = &module_info.dir {
-            PathBuf::from(dir)
-        } else {
-            // Note: version is appended directly (no path separator) - e.g., toml@v1.5.0
-            let encoded_path = format!(
-                "{}@{}",
-                encode_module_path(&module_info.path),
-                module_info.version
-            );
-            self.gomodcache.join(encoded_path)
-        };
-
-        let source_dir = if subpath.is_empty() {
-            base_dir
-        } else {
-            base_dir.join(subpath)
-        };
+        // Use `go list -json` to get package info (works for subpackages too)
+        let pkg_info = get_package_info(import_path, &project.root)?;
+        let source_dir = PathBuf::from(&pkg_info.dir);
 
         if !source_dir.exists() {
             return Err(ResolveError::ModuleNotInCache(import_path.to_string()).into());
@@ -235,20 +204,18 @@ fn get_go_env(name: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Module info from `go list -m -json`
+/// Package info from `go list -json`
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct ModuleInfo {
-    path: String,
-    version: String,
-    /// Actual directory for the module (present when using replace directives)
-    dir: Option<String>,
+struct PackageInfo {
+    /// Source directory
+    dir: String,
 }
 
-/// Get module info using `go list -m -json`
-fn get_module_info(import_path: &str, project_root: &Path) -> Result<ModuleInfo> {
+/// Get package info using `go list -json`
+fn get_package_info(import_path: &str, project_root: &Path) -> Result<PackageInfo> {
     let output = Command::new("go")
-        .args(["list", "-m", "-json", import_path])
+        .args(["list", "-json", import_path])
         .current_dir(project_root)
         .output()
         .map_err(|e| ResolveError::ModuleResolution(import_path.to_string(), e.to_string()))?;
@@ -262,21 +229,6 @@ fn get_module_info(import_path: &str, project_root: &Path) -> Result<ModuleInfo>
 
     serde_json::from_slice(&output.stdout)
         .map_err(|e| ResolveError::ModuleResolution(import_path.to_string(), e.to_string()).into())
-}
-
-/// Encode module path for filesystem (handles uppercase)
-/// e.g., "github.com/BurntSushi/toml" -> "github.com/!burnt!sushi/toml"
-fn encode_module_path(path: &str) -> String {
-    let mut result = String::with_capacity(path.len());
-    for c in path.chars() {
-        if c.is_uppercase() {
-            result.push('!');
-            result.push(c.to_lowercase().next().unwrap());
-        } else {
-            result.push(c);
-        }
-    }
-    result
 }
 
 /// Check if directory contains files with the given extension
@@ -293,18 +245,6 @@ fn has_files_with_extension(dir: &Path, ext: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_encode_module_path() {
-        assert_eq!(
-            encode_module_path("github.com/BurntSushi/toml"),
-            "github.com/!burnt!sushi/toml"
-        );
-        assert_eq!(
-            encode_module_path("github.com/user/repo"),
-            "github.com/user/repo"
-        );
-    }
 
     #[test]
     fn test_resolver_stdlib() {
