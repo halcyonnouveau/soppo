@@ -15,4 +15,4 @@ The [Soppo extension](https://github.com/beanpuppy/vscode-soppo) is not yet on t
 If you want to configure another editor:
 
 - **Syntax highlighting:** Use the [Tree-sitter grammar](https://github.com/beanpuppy/tree-sitter-soppo)
-- **LSP:** The `sopls` binary can be downloaded from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases)
+- **LSP:** The `sopls` language server is automatically installed alongside `sop` when using [SOPMOD](https://github.com/halcyonnouveau/sopmod). Alternatively, download from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases).
