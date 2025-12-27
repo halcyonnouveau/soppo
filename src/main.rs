@@ -33,6 +33,24 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Build and run the project
+    Run {
+        /// Additional arguments to pass to the program
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+    /// Add Go dependencies (delegates to go get)
+    Get {
+        /// Packages to get (e.g., "github.com/foo/bar@v1.0.0")
+        #[arg(required = true)]
+        packages: Vec<String>,
+    },
+    /// Module maintenance (delegates to go mod)
+    Mod {
+        /// go mod subcommand and arguments (e.g., "tidy", "download")
+        #[arg(required = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Type-check without generating code
     Check {
         /// Files or glob patterns to check.
@@ -107,7 +125,7 @@ fn main() -> Result<()> {
 
             if files.is_empty() {
                 // No CLI args - try sop.mod
-                build_from_config(&cwd, output)?;
+                build_from_config(&cwd, output, false)?;
             } else {
                 // CLI args provided - resolve globs and build
                 let resolved = resolve_globs(&files, &cwd)?;
@@ -115,6 +133,82 @@ fn main() -> Result<()> {
                     return Err(ConfigError::NoFilesSpecified.into());
                 }
                 build_files(&resolved, output)?;
+            }
+        }
+        Command::Run { args } => {
+            let cwd = std::env::current_dir().into_diagnostic()?;
+
+            // Build first (quietly)
+            build_from_config(&cwd, None, true)?;
+
+            // Get output directory from config
+            let project = Project::discover(&cwd)?;
+            let output_dir = project
+                .config
+                .as_ref()
+                .and_then(|c| c.output.as_ref())
+                .map(|p| cwd.join(p))
+                .unwrap_or_else(|| cwd.join("gen"));
+
+            // Run go run on the output directory
+            let status = ProcessCommand::new("go")
+                .arg("run")
+                .arg(".")
+                .args(&args)
+                .current_dir(&output_dir)
+                .status()
+                .into_diagnostic()?;
+
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+        }
+        Command::Get { packages } => {
+            let cwd = std::env::current_dir().into_diagnostic()?;
+
+            // Get output directory from config (where go.mod lives)
+            let project = Project::discover(&cwd)?;
+            let output_dir = project
+                .config
+                .as_ref()
+                .and_then(|c| c.output.as_ref())
+                .map(|p| cwd.join(p))
+                .unwrap_or_else(|| cwd.join("gen"));
+
+            // Run go get
+            let status = ProcessCommand::new("go")
+                .arg("get")
+                .args(&packages)
+                .current_dir(&output_dir)
+                .status()
+                .into_diagnostic()?;
+
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+        }
+        Command::Mod { args } => {
+            let cwd = std::env::current_dir().into_diagnostic()?;
+
+            // Get output directory from config (where go.mod lives)
+            let project = Project::discover(&cwd)?;
+            let output_dir = project
+                .config
+                .as_ref()
+                .and_then(|c| c.output.as_ref())
+                .map(|p| cwd.join(p))
+                .unwrap_or_else(|| cwd.join("gen"));
+
+            // Run go mod
+            let status = ProcessCommand::new("go")
+                .arg("mod")
+                .args(&args)
+                .current_dir(&output_dir)
+                .status()
+                .into_diagnostic()?;
+
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
             }
         }
         Command::Check { files } => {
@@ -238,7 +332,7 @@ fn main() -> Result<()> {
 }
 
 /// Build using sop.mod configuration
-fn build_from_config(cwd: &std::path::Path, output: Option<PathBuf>) -> Result<()> {
+fn build_from_config(cwd: &std::path::Path, output: Option<PathBuf>, quiet: bool) -> Result<()> {
     let project = Project::discover(cwd)?;
 
     let config = project
@@ -250,10 +344,12 @@ fn build_from_config(cwd: &std::path::Path, output: Option<PathBuf>) -> Result<(
     let output_dir = output.or_else(|| config.output.clone());
     let count = build::build_project_to_disk(cwd, output_dir.as_deref())?;
 
-    if count == 0 {
-        println!("No .sop files found matching patterns");
-    } else {
-        println!("✓ Built {} file(s)", count);
+    if !quiet {
+        if count == 0 {
+            println!("No .sop files found matching patterns");
+        } else {
+            println!("✓ Built {} file(s)", count);
+        }
     }
 
     Ok(())
