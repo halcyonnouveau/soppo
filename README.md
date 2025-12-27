@@ -6,8 +6,6 @@ A language that compiles to Go, adding ergonomic and type safety features that G
 
 **[Take the tour](https://tour.soppolang.dev)** · [Visit the playground](https://play.soppolang.dev) · [See the website](https://soppolang.dev)
 
-Soppo is not production ready.
-
 ## Why Soppo?
 
 - **Enums & pattern matching:** Tagged unions with exhaustive matching
