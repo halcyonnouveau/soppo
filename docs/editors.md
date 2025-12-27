@@ -1,23 +1,18 @@
 # Editor Support
 
-Soppo provides editor integration through the Language Server Protocol (LSP) and Tree-sitter for syntax highlighting. Currently, only Zed is officially supported.
-
-> [!NOTE]
-> Additional editor integrations will not be added until Soppo reaches a stable release.
+Soppo provides editor integration through the Language Server Protocol (LSP) and Tree-sitter for syntax highlighting.
 
 ## Zed
 
-1. Clone the Soppo repository
-2. In Zed, open the command palette and run `zed: install dev extension`
-3. Select the `editors/zed` directory from the cloned repository
+The [Soppo extension](https://github.com/beanpuppy/zed-soppo) is not yet on the Zed extension registry. You will need to build from source.
 
-The extension provides syntax highlighting via Tree-sitter and will automatically download the LSP binary when you first open a `.sop` file.
+## VS Code
 
-See [Zed's documentation](https://zed.dev/docs/extensions/installing-extensions) for more details on dev extensions.
+The [Soppo extension](https://github.com/beanpuppy/vscode-soppo) is not yet on the VS Code marketplace. You will need to build from source.
 
 ## Other Editors
 
 If you want to configure another editor:
 
-- **Syntax highlighting:** The Tree-sitter grammar is located in `editors/tree-sitter`
-- **LSP:** The binary can be downloaded from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases)
+- **Syntax highlighting:** Use the [Tree-sitter grammar](https://github.com/beanpuppy/tree-sitter-soppo)
+- **LSP:** The `sopls` binary can be downloaded from [GitHub Releases](https://github.com/halcyonnouveau/soppo/releases)

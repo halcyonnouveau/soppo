@@ -32,8 +32,7 @@ func main() {
 	http.HandleFunc("/health", handleHealth)
 
 	fmt.Println("Server starting on http://localhost:8080")
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
+	http.ListenAndServe(":8080", nil) ? err {
 		fmt.Println("Server error:", err)
 	}
 }
