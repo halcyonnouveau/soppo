@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0](https://github.com/halcyonnouveau/soppo/compare/v0.9.0...v0.10.0) - 2025-12-27
+
+### Added
+
+- wrap some go commands
+- attr for enums
+- *(lsp)* show const fields
+- add const struct fields
+- *(attrs)* add enum values and type checking for attribute arguments
+- *(tour)* add attributes
+- add attribute system for compile-time validated metadata
+- check const reassignment
+
+### Fixed
+
+- use go list for packages instead of modules
+- soppo import root dir
+- *(formatter)* attr formatting for struct fields/enum variants
+- *(sniff)* sniff entire project
+- multi-file packages
+- external const inference
+- tuple assign
+- emit var for const bindings with runtime values
+
 ## [0.9.0](https://github.com/halcyonnouveau/soppo/compare/v0.8.1...v0.9.0) - 2025-12-22
 
 ### Added
