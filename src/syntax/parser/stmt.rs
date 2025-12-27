@@ -295,7 +295,10 @@ impl Parser {
                         (None, vals, end)
                     } else if matches!(
                         self.peek(),
-                        Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+                        Some(Token::Ident(_))
+                            | Some(Token::LBracket)
+                            | Some(Token::Star)
+                            | Some(Token::Question) // ?*T nilable types
                     ) {
                         // var a, b, c type or var a, b type = 1, 2
                         let ty = self.parse_type()?;
