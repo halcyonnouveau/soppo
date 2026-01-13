@@ -60,9 +60,11 @@ type Column struct {
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/halcyonnouveau/soppo/runtime"
-import "github.com/test/attributes/attrs"
+import (
+	"fmt"
+	"github.com/halcyonnouveau/soppo/runtime"
+	"github.com/test/attributes/attrs"
+)
 
 // Function with attribute using enum value
 func GetUsers() string {

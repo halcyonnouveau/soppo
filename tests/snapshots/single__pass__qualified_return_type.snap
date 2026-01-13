@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "context"
+import (
+	"context"
+)
 
 func iReturnAContextWithAnError(ctx context.Context) (context.Context, error) {
 	return context.Background(), nil

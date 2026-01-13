@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func main() {
 	var x any = "hello"

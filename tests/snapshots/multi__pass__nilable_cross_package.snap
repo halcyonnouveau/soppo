@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/nilable_cross/types"
+import (
+	"fmt"
+	"github.com/test/nilable_cross/types"
+)
 
 func main() {
 	cfg1 := types.Config{Name: "app", Logger: nil}

@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "reflect"
+import (
+	"reflect"
+)
 
 // Test 1: Const block type inheritance (const_spec_list)
 // reflect.Kind constants are defined as:

@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "errors"
+import (
+	"errors"
+)
 
 // Test that `return f()` works when f() returns a tuple matching expected returns.
 // This is a common Go idiom.

@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/iface/interfaces"
+import (
+	"fmt"
+	"github.com/test/iface/interfaces"
+)
 
 type MyReader struct {
 	data string

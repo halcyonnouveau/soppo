@@ -5,9 +5,11 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
-import "strings"
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Constants
 const MAX_SIZE int = 100

@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/output_dir_imports/gen/pkg"
+import (
+	"fmt"
+	"github.com/test/output_dir_imports/gen/pkg"
+)
 
 // sop: import
 func main() {

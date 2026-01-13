@@ -5,8 +5,10 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
-import _ "strings"
+import (
+	"fmt"
+	_ "strings"
+)
 
 func main() {
 	fmt.Println("hello")

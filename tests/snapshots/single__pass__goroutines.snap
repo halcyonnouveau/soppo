@@ -5,8 +5,10 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 /*soppo:enum
 Result {

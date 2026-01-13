@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "os"
+import (
+	"os"
+)
 
 // Test that Go type aliases with numeric underlying types accept integer literals.
 // os.FileMode -> fs.FileMode -> uint32, so int literals should be accepted.

@@ -6,8 +6,10 @@ expression: output
 // Test passing function references as arguments to other functions
 package main
 
-import "fmt"
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 // A simple callback function
 func double(x int) int {

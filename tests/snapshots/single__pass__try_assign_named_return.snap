@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "strconv"
+import (
+	"strconv"
+)
 
 // Test ? operator with assignment to named return parameters
 func parseVersion(version string) (major int, minor int, err error) {

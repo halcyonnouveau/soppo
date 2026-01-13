@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func add(a int, b int) int {
 	return a + b

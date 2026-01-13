@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/import_nilable/models"
+import (
+	"fmt"
+	"github.com/test/import_nilable/models"
+)
 
 func main() {
 	user := models.User{Name: "Test"}

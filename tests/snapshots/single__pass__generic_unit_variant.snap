@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 /*soppo:enum
 Option[T] {

@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // Helper function with multiple parameters
 func createUser(name string, age int, active bool) string {

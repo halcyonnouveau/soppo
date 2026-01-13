@@ -6,9 +6,11 @@ expression: output
 // Tests method calls on Go types from stdlib
 package main
 
-import "bufio"
-import "os"
-import "strings"
+import (
+	"bufio"
+	"os"
+	"strings"
+)
 
 func main() {
 	// Method call on bufio.Reader (returned from bufio.NewReader)

@@ -5,14 +5,16 @@ expression: output
 //soppo:generated v1
 package main
 
-import "bytes"
-import "context"
-import "errors"
-import "fmt"
-import "regexp"
-import "strings"
-import "sync"
-import "time"
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+)
 
 // Test that stdlib function return types are correctly inferred
 // This allows using methods on the returned values

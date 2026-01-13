@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/import_gen_enum/generated"
+import (
+	"fmt"
+	"github.com/test/import_gen_enum/generated"
+)
 
 func describe(s generated.Status) string {
 	result := ""

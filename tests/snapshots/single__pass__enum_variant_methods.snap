@@ -5,8 +5,10 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
-import "encoding/json"
+import (
+	"fmt"
+	"encoding/json"
+)
 
 // Simple enum with data variants
 /*soppo:enum

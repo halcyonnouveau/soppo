@@ -59,16 +59,23 @@ impl Codegen {
 
         if has_imports {
             // Add auto-detected imports that aren't already explicit
-            let auto_imports: Vec<_> = self
+            let mut auto_imports: Vec<_> = self
                 .needed_imports
                 .iter()
                 .filter(|i| !explicit_imports.contains(i.as_str()))
                 .cloned()
                 .collect();
+            auto_imports.sort(); // Sort for consistent output
+
+            // Build list of all imports with their resolved paths and aliases
+            let mut all_imports: Vec<(Option<String>, String)> = Vec::new();
+
+            // Add auto-detected imports first
             for needed in auto_imports {
-                self.emit_line(&format!("import \"{}\"", needed));
+                all_imports.push((None, needed));
             }
 
+            // Add explicit imports
             for import in &file.imports {
                 self.emit_comments_before(import.span.byte_start, import.span.start.line);
 
@@ -92,12 +99,21 @@ impl Codegen {
                     _ => import.path.clone(),
                 };
 
-                if let Some(alias) = &import.alias {
-                    self.emit_line(&format!("import {} \"{}\"", alias, go_path));
+                all_imports.push((import.alias.clone(), go_path));
+            }
+
+            // Emit imports in grouped format
+            self.emit_line("import (");
+            self.indent();
+            for (alias, path) in all_imports {
+                if let Some(alias) = alias {
+                    self.emit_line(&format!("{} \"{}\"", alias, path));
                 } else {
-                    self.emit_line(&format!("import \"{}\"", go_path));
+                    self.emit_line(&format!("\"{}\"", path));
                 }
             }
+            self.dedent();
+            self.emit_line(")");
             self.emit_line("");
         }
 

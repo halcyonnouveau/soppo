@@ -5,7 +5,9 @@ expression: output
 //soppo:generated v1
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // Generic function with any constraint
 func identity[T any](val T) T {

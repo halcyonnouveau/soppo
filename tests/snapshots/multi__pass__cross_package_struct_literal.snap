@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/cross_package_struct_literal/helpers"
+import (
+	"fmt"
+	"github.com/test/cross_package_struct_literal/helpers"
+)
 
 func main() {
 	// Struct literal with cross-package type should mark import as used

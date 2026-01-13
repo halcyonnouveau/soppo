@@ -6,7 +6,9 @@ expression: output
 // Tests rune/character literal support
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func delimTest(delim rune) {
 	fmt.Printf("delimiter: %c\n", delim)

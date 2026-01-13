@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/chain/pkgb"
+import (
+	"fmt"
+	"github.com/test/chain/pkgb"
+)
 
 func main() {
 	fmt.Println(pkgb.GetB())
@@ -29,7 +31,9 @@ func GetA() int {
 //soppo:generated v1
 package pkgb
 
-import "github.com/test/chain/pkga"
+import (
+	"github.com/test/chain/pkga"
+)
 
 func GetB() int {
 	return pkga.GetA() + 1

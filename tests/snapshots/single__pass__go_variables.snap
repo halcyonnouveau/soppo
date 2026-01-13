@@ -6,8 +6,10 @@ expression: output
 // Tests Go package variable lookup (os.Stdin, os.Stdout, os.Stderr)
 package main
 
-import "fmt"
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 func main() {
 	// Package-level variables from os

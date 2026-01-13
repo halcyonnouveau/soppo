@@ -6,8 +6,10 @@ expression: output
 // Tests interface type unification - io.Reader accepts *os.File
 package main
 
-import "bufio"
-import "os"
+import (
+	"bufio"
+	"os"
+)
 
 func main() {
 	// os.Stdin is *File, but bufio.NewReader expects io.Reader interface

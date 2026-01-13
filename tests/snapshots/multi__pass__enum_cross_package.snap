@@ -6,8 +6,10 @@ expression: format_results(&results)
 //soppo:generated v1
 package main
 
-import "fmt"
-import "github.com/test/enum_cross/types"
+import (
+	"fmt"
+	"github.com/test/enum_cross/types"
+)
 
 func describeStatus(s types.Status) string {
 	result := ""
