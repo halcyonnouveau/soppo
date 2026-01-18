@@ -14,7 +14,7 @@ pub enum Token {
     #[regex(r"/\*([^*]|\*[^/])*\*/", allow_greedy = true, callback = |lex| lex.slice().to_string())]
     BlockComment(String),
 
-    #[regex(r"\n+")]
+    #[regex(r"(\r?\n)+")]
     Newline,
 
     // Keywords
@@ -535,6 +535,32 @@ mod tests {
         let (_, foo_span) = &tokens[2];
         assert_eq!(foo_span.start.line, 2);
         assert_eq!(foo_span.start.col, 1);
+    }
+
+    #[test]
+    fn test_crlf_line_endings() {
+        // Windows uses CRLF (\r\n) line endings
+        let source = "package main\r\n\r\nfunc main() {\r\n}\r\n";
+        let mut lexer = Lexer::new(source, FileId(0));
+        let tokens: Vec<_> = lexer.collect_all().into_iter().map(|(t, _)| t).collect();
+
+        // Should parse correctly without errors
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Package,
+                Token::Ident("main".to_string()),
+                Token::Newline,
+                Token::Func,
+                Token::Ident("main".to_string()),
+                Token::LParen,
+                Token::RParen,
+                Token::LBrace,
+                Token::Newline,
+                Token::RBrace,
+                Token::Newline,
+            ]
+        );
     }
 
     #[test]
