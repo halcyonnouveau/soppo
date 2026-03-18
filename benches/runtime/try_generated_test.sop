@@ -1,0 +1,83 @@
+// Soppo-generated ? operator patterns.
+// Benchmarks for the ? operator with various return types.
+package runtime
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
+
+// --- Helpers ---
+
+var errEmpty = errors.New("empty string")
+var errInvalid = errors.New("invalid id")
+
+type UserTry struct {
+	name string
+	age  int
+}
+
+func parsePortTry(s string) (int, error) {
+	if s == "" {
+		return 0, errEmpty
+	}
+	return 8080, nil
+}
+
+func getUserTry(id int) (?*UserTry, error) {
+	if id <= 0 {
+		return nil, errInvalid
+	}
+	return &UserTry{name: "Alice", age: 30}, nil
+}
+
+// --- ? operator patterns ---
+
+func processOrderGenerated(id string) (int, error) {
+	port := parsePortTry(id) ?
+	user := getUserTry(port) ?
+	return user.age, nil
+}
+
+func processOrderGeneratedWrapped(id string) (int, error) {
+	port := parsePortTry(id) ? err {
+		return 0, fmt.Errorf("parse failed: %w", err)
+	}
+	user := getUserTry(port) ? err {
+		return 0, fmt.Errorf("get user failed: %w", err)
+	}
+	return user.age, nil
+}
+
+// --- Benchmarks ---
+
+func BenchmarkTryPropagateGenerated(b *testing.B) {
+	var sinkI int
+	var sinkE ?error
+	for b.Loop() {
+		sinkI, sinkE = processOrderGenerated("8080")
+	}
+	_ = sinkI
+	_ = sinkE
+}
+
+func BenchmarkTryPropagateErrorGenerated(b *testing.B) {
+	var sinkI int
+	var sinkE ?error
+	for b.Loop() {
+		sinkI, sinkE = processOrderGenerated("")
+	}
+	_ = sinkI
+	_ = sinkE
+}
+
+func BenchmarkTryWrappedGenerated(b *testing.B) {
+	var sinkI int
+	var sinkE ?error
+	for b.Loop() {
+		sinkI, sinkE = processOrderGeneratedWrapped("8080")
+	}
+	_ = sinkI
+	_ = sinkE
+}

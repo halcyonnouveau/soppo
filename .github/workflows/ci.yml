@@ -64,7 +64,7 @@ jobs:
         run: cargo fmt --all -- --check
 
   bench:
-    name: Benchmarks
+    name: Compiler Benchmarks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -80,6 +80,33 @@ jobs:
         with:
           tool: "cargo"
           output-file-path: output.txt
+          benchmark-data-dir-path: bench/compiler
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: "150%"
+          comment-on-alert: true
+          fail-on-alert: false
+          auto-push: ${{ github.ref == 'refs/heads/main' }}
+
+  bench-runtime:
+    name: Runtime Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+      - uses: Swatinem/rust-cache@v2
+      - name: Compile .sop benchmarks to Go
+        run: cargo run -- build benches/runtime/*_generated_test.sop
+      - name: Run runtime benchmarks
+        run: cd benches/runtime && go test -bench . -benchmem -count=1 | tee output.txt
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: "go"
+          output-file-path: benches/runtime/output.txt
+          benchmark-data-dir-path: bench/runtime
           github-token: ${{ secrets.GITHUB_TOKEN }}
           alert-threshold: "150%"
           comment-on-alert: true

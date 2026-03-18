@@ -1,0 +1,103 @@
+// Soppo-generated enum patterns.
+// Benchmarks for enums, match expressions, Result, and Option.
+package runtime
+
+import "testing"
+
+// --- Enum: Shape with struct variants ---
+
+type Shape enum {
+	Circle struct {
+		radius float64
+	}
+	Rectangle struct {
+		width  float64
+		height float64
+	}
+	Triangle struct {
+		base   float64
+		height float64
+	}
+}
+
+func areaGenerated(s Shape) float64 {
+	match s {
+	case Shape.Circle{radius: r, ...}:
+		return 3.14159 * r * r
+	case Shape.Rectangle{width: w, height: h}:
+		return w * h
+	case Shape.Triangle{base: b, height: h}:
+		return 0.5 * b * h
+	}
+}
+
+// --- Result enum ---
+
+type Result enum {
+	Ok int
+	Err string
+}
+
+func unwrapOrGenerated(r Result, defaultVal int) int {
+	var result int
+	match r {
+	case Result.Ok(v):
+		result = v
+	case Result.Err(msg):
+		result = defaultVal
+	}
+	return result
+}
+
+// --- Option enum ---
+
+type Option enum {
+	Some int
+	None
+}
+
+func divideGenerated(a int, b int) Option {
+	if b == 0 {
+		return Option.None
+	}
+	return Option.Some(a / b)
+}
+
+// --- Benchmarks ---
+
+func BenchmarkEnumMatchGenerated(b *testing.B) {
+	shapes := []Shape{
+		Shape.Circle{radius: 5.0},
+		Shape.Rectangle{width: 3.0, height: 4.0},
+		Shape.Triangle{base: 6.0, height: 3.0},
+	}
+
+	var sink float64
+	for b.Loop() {
+		for _, s := range shapes {
+			sink = areaGenerated(s)
+		}
+	}
+	_ = sink
+}
+
+func BenchmarkResultUnwrapGenerated(b *testing.B) {
+	ok := Result.Ok(42)
+	err := Result.Err("failed")
+
+	var sink int
+	for b.Loop() {
+		sink = unwrapOrGenerated(ok, 0)
+		sink = unwrapOrGenerated(err, 99)
+	}
+	_ = sink
+}
+
+func BenchmarkOptionDivideGenerated(b *testing.B) {
+	var sink Option
+	for b.Loop() {
+		sink = divideGenerated(10, 2)
+		sink = divideGenerated(10, 0)
+	}
+	_ = sink
+}

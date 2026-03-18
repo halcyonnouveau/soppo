@@ -25,8 +25,23 @@ run = [
 ]
 
 [tasks.bench]
-description = "Run benchmarks"
+description = "Run all benchmarks"
+run = [
+    "cargo bench --bench compiler",
+    "cargo run -- build benches/runtime/*_generated_test.sop",
+    "cd benches/runtime && go test -bench . -benchmem",
+]
+
+[tasks."bench:compiler"]
+description = "Run compiler benchmarks only"
 run = "cargo bench --bench compiler"
+
+[tasks."bench:runtime"]
+description = "Run runtime benchmarks only"
+run = [
+    "cargo run -- build benches/runtime/*_generated_test.sop",
+    "cd benches/runtime && go test -bench . -benchmem",
+]
 
 [tasks."bench:save"]
 description = "Run benchmarks and save baseline"
