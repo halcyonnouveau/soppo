@@ -80,7 +80,6 @@ jobs:
         with:
           tool: "cargo"
           output-file-path: output.txt
-          benchmark-data-dir-path: bench/compiler
           github-token: ${{ secrets.GITHUB_TOKEN }}
           alert-threshold: "150%"
           comment-on-alert: true
@@ -106,7 +105,7 @@ jobs:
         with:
           tool: "go"
           output-file-path: benches/runtime/output.txt
-          benchmark-data-dir-path: bench/runtime
+          benchmark-data-dir-path: dev/bench-runtime
           github-token: ${{ secrets.GITHUB_TOKEN }}
           alert-threshold: "150%"
           comment-on-alert: true

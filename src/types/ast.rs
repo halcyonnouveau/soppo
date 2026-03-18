@@ -571,6 +571,7 @@ pub enum TypedDecl {
     Const(TypedConstDecl),
     ConstBlock(Vec<TypedConstDecl>),
     Var(TypedVarDecl),
+    VarBlock(Vec<TypedVarDecl>),
     Type(TypedTypeDecl),
     Func(TypedFuncDecl),
 }

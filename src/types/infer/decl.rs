@@ -765,6 +765,10 @@ impl Infer {
                 TypedDecl::ConstBlock(typed_consts)
             }
             Decl::Var(var_decl) => TypedDecl::Var(self.infer_var_decl(var_decl)),
+            Decl::VarBlock(vars) => {
+                let typed_vars: Vec<_> = vars.iter().map(|v| self.infer_var_decl(v)).collect();
+                TypedDecl::VarBlock(typed_vars)
+            }
             Decl::Type(type_decl) => match self.infer_type_decl(type_decl) {
                 Ok(typed_type) => TypedDecl::Type(typed_type),
                 Err(e) => {
@@ -808,7 +812,7 @@ impl Infer {
                     }
                 }
                 // Consts and vars are processed in pass 2 along with their typed versions
-                Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) => {}
+                Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) | Decl::VarBlock(_) => {}
             }
         }
     }

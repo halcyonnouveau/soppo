@@ -944,6 +944,52 @@ impl Parser {
         })
     }
 
+    /// Parse a var declaration inside a grouped var block (no `var` keyword)
+    /// Supports: NAME = VALUE, NAME TYPE = VALUE, NAME TYPE
+    fn parse_var_in_group(&mut self) -> SoppoResult<VarDecl> {
+        let start = self.peek_span();
+
+        let (name, name_span) = self.parse_identifier("variable")?;
+        self.validate_identifier(&name, &name_span)?;
+
+        let (ty, value) = if self.consume(&Token::Assign) {
+            // NAME = VALUE (type inference)
+            let value = self.parse_expr()?;
+            (None, Some(value))
+        } else if matches!(
+            self.peek(),
+            Some(Token::Ident(_)) | Some(Token::LBracket) | Some(Token::Star)
+        ) {
+            // NAME TYPE or NAME TYPE = VALUE
+            let ty = self.parse_type()?;
+            if self.consume(&Token::Assign) {
+                let value = self.parse_expr()?;
+                (Some(ty), Some(value))
+            } else {
+                // NAME TYPE (zero value)
+                (Some(ty), None)
+            }
+        } else {
+            return Err(SoppoError::Parse {
+                message: "Expected type or '=' in var declaration".to_string(),
+                span: name_span,
+            });
+        };
+
+        let end_span = value
+            .as_ref()
+            .map(|v| v.span)
+            .or(ty.as_ref().map(|t| t.span))
+            .unwrap_or(name_span);
+
+        Ok(VarDecl {
+            ident: Ident::new(name, name_span),
+            ty,
+            value,
+            span: self.merge_spans(start, end_span),
+        })
+    }
+
     /// Parse a const declaration: const NAME = VALUE or const NAME TYPE = VALUE
     fn parse_const_decl(&mut self) -> SoppoResult<ConstDecl> {
         let start = self.expect(Token::Const)?;
@@ -1206,6 +1252,27 @@ impl Parser {
                     let const_decl = self.parse_const_after_keyword(const_span.start.line)?;
                     decls.push(Decl::Const(const_decl));
                     continue;
+                }
+            }
+
+            // Check for grouped var: var ( ... )
+            if self.peek() == Some(&Token::Var) {
+                let saved_pos = self.pos;
+                self.advance(); // consume 'var'
+                if self.consume(&Token::LParen) {
+                    let mut block_vars = Vec::new();
+                    self.skip_terminators();
+                    while self.peek() != Some(&Token::RParen) {
+                        let var_decl = self.parse_var_in_group()?;
+                        block_vars.push(var_decl);
+                        self.skip_terminators();
+                    }
+                    self.expect(Token::RParen)?;
+                    decls.push(Decl::VarBlock(block_vars));
+                    continue;
+                } else {
+                    // Single var - rewind and let parse_decl handle it
+                    self.pos = saved_pos;
                 }
             }
 

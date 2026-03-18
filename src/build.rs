@@ -761,6 +761,11 @@ fn register_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::SoppoRes
         Decl::Var(var_decl) => {
             infer.infer_var_decl(var_decl);
         }
+        Decl::VarBlock(vars) => {
+            for var_decl in vars {
+                infer.infer_var_decl(var_decl);
+            }
+        }
         Decl::Func(func) => {
             infer.register_func_signature(func)?;
         }
@@ -771,7 +776,8 @@ fn register_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::SoppoRes
 /// Infer a declaration body (pass 2) - returns SoppoError for collection
 fn infer_decl_inner(infer: &mut Infer, decl: &Decl) -> crate::error::SoppoResult<()> {
     match decl {
-        Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) | Decl::Type(_) => {}
+        Decl::Const(_) | Decl::ConstBlock(_) | Decl::Var(_) | Decl::VarBlock(_) | Decl::Type(_) => {
+        }
         Decl::Func(func) => {
             infer.infer_func_decl(func)?;
         }

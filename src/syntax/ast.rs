@@ -110,6 +110,7 @@ pub enum Decl {
     Const(ConstDecl),
     ConstBlock(Vec<ConstDecl>), // Grouped const block for iota support
     Var(VarDecl),
+    VarBlock(Vec<VarDecl>), // Grouped var block: var ( ... )
     Type(TypeDecl),
     Func(FuncDecl),
 }
@@ -121,6 +122,7 @@ impl Decl {
             Decl::Const(c) => &c.span,
             Decl::ConstBlock(cs) => &cs.first().expect("const block should not be empty").span,
             Decl::Var(v) => &v.span,
+            Decl::VarBlock(vs) => &vs.first().expect("var block should not be empty").span,
             Decl::Type(t) => &t.span,
             Decl::Func(f) => &f.span,
         }

@@ -1,0 +1,18 @@
+package main
+
+import "fmt"
+
+var (
+    MaxRetries = 3
+    DefaultName string = "default"
+    Timeout int
+)
+
+const (
+    MaxSize = 100
+    MinSize = 10
+)
+
+func main() {
+    fmt.Println(MaxRetries, DefaultName, Timeout, MaxSize, MinSize)
+}

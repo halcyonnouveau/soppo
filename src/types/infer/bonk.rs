@@ -31,6 +31,11 @@ fn bonk_decl(decl: &mut TypedDecl, subs: &HashMap<i32, Type>) {
             }
         }
         TypedDecl::Var(v) => bonk_var_decl(v, subs),
+        TypedDecl::VarBlock(vars) => {
+            for v in vars {
+                bonk_var_decl(v, subs);
+            }
+        }
         TypedDecl::Type(t) => bonk_type_decl(t, subs),
         TypedDecl::Func(f) => bonk_func_decl(f, subs),
     }

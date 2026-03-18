@@ -542,6 +542,25 @@ impl Codegen {
                 self.emit_line(")");
             }
             TypedDecl::Var(v) => self.gen_var_decl(v),
+            TypedDecl::VarBlock(vars) => {
+                self.emit_line("var (");
+                self.indent();
+                for v in vars {
+                    self.emit_indent();
+                    self.emit(&v.ident.name);
+                    if v.has_explicit_type {
+                        self.emit(" ");
+                        self.emit(type_to_go_string(&v.var_ty));
+                    }
+                    if let Some(value) = &v.value {
+                        self.emit(" = ");
+                        self.gen_expr(value);
+                    }
+                    self.emit("\n");
+                }
+                self.dedent();
+                self.emit_line(")");
+            }
             TypedDecl::Type(t) => self.gen_type_decl(t),
             TypedDecl::Func(f) => self.gen_func_decl(f),
         }
@@ -846,6 +865,7 @@ impl Codegen {
             TypedDecl::Const(c) => c.span,
             TypedDecl::ConstBlock(consts) => consts.first().map(|c| c.span).unwrap_or(zero_span),
             TypedDecl::Var(v) => v.span,
+            TypedDecl::VarBlock(vars) => vars.first().map(|v| v.span).unwrap_or(zero_span),
             TypedDecl::Type(t) => t.span,
             TypedDecl::Func(f) => f.span,
         }

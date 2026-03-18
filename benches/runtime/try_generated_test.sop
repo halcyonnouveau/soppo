@@ -10,8 +10,10 @@ import (
 
 // --- Helpers ---
 
-var errEmpty = errors.New("empty string")
-var errInvalid = errors.New("invalid id")
+var (
+	errEmpty = errors.New("empty string")
+	errInvalid = errors.New("invalid id")
+)
 
 type UserTry struct {
 	name string

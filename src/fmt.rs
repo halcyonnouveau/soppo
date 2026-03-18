@@ -236,6 +236,7 @@ impl Formatter {
                 Decl::Const(c) => c.doc_comment.is_some(),
                 Decl::ConstBlock(_) => false,
                 Decl::Var(_) => false,
+                Decl::VarBlock(_) => false,
                 Decl::Type(t) => t.doc_comment.is_some(),
                 Decl::Func(f) => f.doc_comment.is_some(),
             };
@@ -265,6 +266,7 @@ impl Formatter {
             Decl::Const(c) => self.format_const_decl(c),
             Decl::ConstBlock(cs) => self.format_const_block(cs),
             Decl::Var(v) => self.format_var_decl(v),
+            Decl::VarBlock(vs) => self.format_var_block(vs),
             Decl::Type(t) => self.format_type_decl(t),
             Decl::Func(f) => self.format_func_decl(f),
         }
@@ -326,6 +328,28 @@ impl Formatter {
         }
         self.emit_trailing_comment(v.span.start.line);
         self.output.push('\n');
+    }
+
+    fn format_var_block(&mut self, vars: &[crate::syntax::VarDecl]) {
+        self.emit_line("var (");
+        self.indent();
+        for v in vars {
+            self.emit_comments_before(v.span.start.line);
+            self.emit_indent();
+            self.emit(&v.ident.name);
+            if let Some(ty) = &v.ty {
+                self.emit(" ");
+                self.emit(&Self::format_type_annotation(ty));
+            }
+            if let Some(value) = &v.value {
+                self.emit(" = ");
+                self.emit(&self.format_expr(value));
+            }
+            self.emit_trailing_comment(v.span.start.line);
+            self.output.push('\n');
+        }
+        self.dedent();
+        self.emit_line(")");
     }
 
     fn format_type_decl(&mut self, t: &TypeDecl) {
