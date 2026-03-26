@@ -79,4 +79,14 @@ func main() {
     // Ternary-like with format
     val := 42
     fmt.Println("Result: {val:x}")
+
+    // Interpolation inside fmt.Errorf — should inline into a single call,
+    // not nest fmt.Sprintf inside fmt.Errorf.
+    id := 123
+    err := fmt.Errorf("failed to process {id}: %w", fmt.Errorf("inner"))
+    fmt.Println(err)
+
+    // Interpolation inside fmt.Sprintf — same inlining optimisation
+    msg := fmt.Sprintf("user {name} has {len(nums)} items")
+    fmt.Println(msg)
 }

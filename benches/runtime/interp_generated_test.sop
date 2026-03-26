@@ -1,0 +1,33 @@
+// Soppo-generated string interpolation patterns.
+//
+// Helper functions use //go:noinline to prevent the compiler from inlining and
+// constant-folding them away, which would turn the benchmark into a no-op.
+package runtime
+
+import "testing"
+
+//go:noinline
+func greetGenerated(name string, age int) string {
+	return "hello {name}, you are {age}"
+}
+
+//go:noinline
+func formatHexGenerated(num int) string {
+	return "value: {num:x}, padded: {num:08x}"
+}
+
+func BenchmarkInterpSimpleGenerated(b *testing.B) {
+	var sink string
+	for b.Loop() {
+		sink = greetGenerated("alice", 30)
+	}
+	_ = sink
+}
+
+func BenchmarkInterpFormatGenerated(b *testing.B) {
+	var sink string
+	for b.Loop() {
+		sink = formatHexGenerated(255)
+	}
+	_ = sink
+}

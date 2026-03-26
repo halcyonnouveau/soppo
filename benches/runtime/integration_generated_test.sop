@@ -1,0 +1,103 @@
+// Soppo-generated integration benchmark combining enums, match, ?, nil safety,
+// and string interpolation in a single function.
+//
+// Helper functions use //go:noinline to prevent the compiler from inlining and
+// constant-folding them away, which would turn the benchmark into a no-op.
+package runtime
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
+
+type AccountRole enum {
+	Admin
+	User
+	Guest
+}
+
+type AccountInfo struct {
+	name  string
+	email string
+	role  AccountRole
+}
+
+var (
+	errAccountNotFound    = errors.New("not found")
+	errAccountUnauthorised = errors.New("unauthorised")
+)
+
+//go:noinline
+func fetchAccountInfo(id int) (?*AccountInfo, error) {
+	if id <= 0 {
+		return nil, errAccountNotFound
+	}
+	match id {
+	case 1:
+		return &AccountInfo{name: "Alice", email: "alice@example.com", role: AccountRole.Admin}, nil
+	case 2:
+		return &AccountInfo{name: "Bob", email: "bob@example.com", role: AccountRole.User}, nil
+	default:
+		return &AccountInfo{name: "Guest", email: "", role: AccountRole.Guest}, nil
+	}
+}
+
+//go:noinline
+func fetchAccountSupervisor(account *AccountInfo) ?*AccountInfo {
+	match account.role {
+	case AccountRole.Admin:
+		return nil
+	default:
+		return &AccountInfo{name: "Alice", email: "alice@example.com", role: AccountRole.Admin}
+	}
+}
+
+//go:noinline
+func processAccountGenerated(id int) (string, error) {
+	account := fetchAccountInfo(id) ? err {
+		return "", fmt.Errorf("fetch failed for id {id}: %w", err)
+	}
+
+	var summary string
+	match account.role {
+	case AccountRole.Admin:
+		summary = "admin {account.name} <{account.email}>"
+	case AccountRole.User:
+		sup := fetchAccountSupervisor(account)
+		if sup == nil {
+			return "", errAccountUnauthorised
+		}
+		summary = "user {account.name}, supervised by {sup.name}"
+	case AccountRole.Guest:
+		if account.email == "" {
+			summary = "guest {account.name} (no email)"
+		} else {
+			summary = "guest {account.name} <{account.email}>"
+		}
+	}
+
+	return summary, nil
+}
+
+func BenchmarkIntegrationGenerated(b *testing.B) {
+	var sinkS string
+	var sinkE ?error
+	for b.Loop() {
+		sinkS, sinkE = processAccountGenerated(1)
+		sinkS, sinkE = processAccountGenerated(2)
+		sinkS, sinkE = processAccountGenerated(3)
+	}
+	_ = sinkS
+	_ = sinkE
+}
+
+func BenchmarkIntegrationErrorGenerated(b *testing.B) {
+	var sinkS string
+	var sinkE ?error
+	for b.Loop() {
+		sinkS, sinkE = processAccountGenerated(0)
+	}
+	_ = sinkS
+	_ = sinkE
+}

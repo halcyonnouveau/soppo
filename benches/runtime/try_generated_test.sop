@@ -1,5 +1,8 @@
 // Soppo-generated ? operator patterns.
 // Benchmarks for the ? operator with various return types.
+//
+// Helper functions use //go:noinline to prevent the compiler from inlining and
+// constant-folding them away, which would turn the benchmark into a no-op.
 package runtime
 
 import (
@@ -7,8 +10,6 @@ import (
 	"fmt"
 	"testing"
 )
-
-// --- Helpers ---
 
 var (
 	errEmpty = errors.New("empty string")
@@ -20,6 +21,7 @@ type UserTry struct {
 	age  int
 }
 
+//go:noinline
 func parsePortTry(s string) (int, error) {
 	if s == "" {
 		return 0, errEmpty
@@ -27,6 +29,7 @@ func parsePortTry(s string) (int, error) {
 	return 8080, nil
 }
 
+//go:noinline
 func getUserTry(id int) (?*UserTry, error) {
 	if id <= 0 {
 		return nil, errInvalid
@@ -34,14 +37,14 @@ func getUserTry(id int) (?*UserTry, error) {
 	return &UserTry{name: "Alice", age: 30}, nil
 }
 
-// --- ? operator patterns ---
-
+//go:noinline
 func processOrderGenerated(id string) (int, error) {
 	port := parsePortTry(id) ?
 	user := getUserTry(port) ?
 	return user.age, nil
 }
 
+//go:noinline
 func processOrderGeneratedWrapped(id string) (int, error) {
 	port := parsePortTry(id) ? err {
 		return 0, fmt.Errorf("parse failed: %w", err)
@@ -51,8 +54,6 @@ func processOrderGeneratedWrapped(id string) (int, error) {
 	}
 	return user.age, nil
 }
-
-// --- Benchmarks ---
 
 func BenchmarkTryPropagateGenerated(b *testing.B) {
 	var sinkI int

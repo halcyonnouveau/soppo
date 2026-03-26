@@ -1,9 +1,10 @@
 // Hand-written idiomatic Go equivalents of the soppo-generated enum patterns.
+//
+// Helper functions use //go:noinline to prevent the compiler from inlining and
+// constant-folding them away, which would turn the benchmark into a no-op.
 package runtime
 
 import "testing"
-
-// --- Idiomatic Go: concrete types + iota ---
 
 type ShapeKind int
 
@@ -14,12 +15,13 @@ const (
 )
 
 type ShapeBaseline struct {
-	kind              ShapeKind
-	radius            float64
-	width, height     float64
+	kind               ShapeKind
+	radius             float64
+	width, height      float64
 	triBase, triHeight float64
 }
 
+//go:noinline
 func areaBaseline(s ShapeBaseline) float64 {
 	switch s.kind {
 	case ShapeKindCircle:
@@ -32,8 +34,7 @@ func areaBaseline(s ShapeBaseline) float64 {
 	return 0
 }
 
-// --- Idiomatic Go: (T, error) pattern ---
-
+//go:noinline
 func unwrapOrBaseline(val int, err string, defaultVal int) int {
 	if err != "" {
 		return defaultVal
@@ -41,16 +42,13 @@ func unwrapOrBaseline(val int, err string, defaultVal int) int {
 	return val
 }
 
-// --- Idiomatic Go: (T, bool) pattern ---
-
+//go:noinline
 func divideBaseline(a, b int) (int, bool) {
 	if b == 0 {
 		return 0, false
 	}
 	return a / b, true
 }
-
-// --- Benchmarks ---
 
 func BenchmarkEnumMatchBaseline(b *testing.B) {
 	shapes := []ShapeBaseline{

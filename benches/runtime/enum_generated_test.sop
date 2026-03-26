@@ -1,25 +1,28 @@
 // Soppo-generated enum patterns.
-// Benchmarks for enums, match expressions, Result, and Option.
+//
+// Helper functions use //go:noinline to prevent the compiler from inlining and
+// constant-folding them away, which would turn the benchmark into a no-op.
 package runtime
 
 import "testing"
-
-// --- Enum: Shape with struct variants ---
 
 type Shape enum {
 	Circle struct {
 		radius float64
 	}
+
 	Rectangle struct {
 		width  float64
 		height float64
 	}
+
 	Triangle struct {
 		base   float64
 		height float64
 	}
 }
 
+//go:noinline
 func areaGenerated(s Shape) float64 {
 	match s {
 	case Shape.Circle{radius: r, ...}:
@@ -31,13 +34,12 @@ func areaGenerated(s Shape) float64 {
 	}
 }
 
-// --- Result enum ---
-
 type Result enum {
-	Ok int
+	Ok  int
 	Err string
 }
 
+//go:noinline
 func unwrapOrGenerated(r Result, defaultVal int) int {
 	var result int
 	match r {
@@ -49,21 +51,18 @@ func unwrapOrGenerated(r Result, defaultVal int) int {
 	return result
 }
 
-// --- Option enum ---
-
 type Option enum {
 	Some int
 	None
 }
 
-func divideGenerated(a int, b int) Option {
+//go:noinline
+func divideGenerated(a, b int) Option {
 	if b == 0 {
 		return Option.None
 	}
 	return Option.Some(a / b)
 }
-
-// --- Benchmarks ---
 
 func BenchmarkEnumMatchGenerated(b *testing.B) {
 	shapes := []Shape{

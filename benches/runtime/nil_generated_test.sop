@@ -1,0 +1,23 @@
+// Soppo-generated nil assertion patterns.
+//
+// Helper functions use //go:noinline to prevent the compiler from inlining and
+// constant-folding them away, which would turn the benchmark into a no-op.
+package runtime
+
+import "testing"
+
+//go:noinline
+func maybeUserGenerated(id int) ?*NilUser {
+	if id <= 0 {
+		return nil
+	}
+	return &NilUser{name: "Alice", age: 30}
+}
+
+func BenchmarkNilAssertGenerated(b *testing.B) {
+	var sink ?*NilUser
+	for b.Loop() {
+		sink = maybeUserGenerated(1).(!nil)
+	}
+	_ = sink
+}

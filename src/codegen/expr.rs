@@ -50,31 +50,8 @@ impl Codegen {
 
             TypedExprKind::StringInterpolation(parts) => {
                 self.needed_imports.insert("fmt".to_string());
-                self.emit("fmt.Sprintf(\"");
-
-                let mut exprs: Vec<&TypedExpr> = Vec::new();
-                for part in parts {
-                    match part {
-                        TypedStringPart::Literal(s) => {
-                            self.emit(s.replace('%', "%%"));
-                        }
-                        TypedStringPart::Expr { expr, format } => {
-                            // Use explicit format if provided, otherwise use type-based default
-                            let fmt = format
-                                .as_deref()
-                                .map(|f| format!("%{}", f))
-                                .unwrap_or_else(|| default_format_for_type(&expr.ty));
-                            self.emit(&fmt);
-                            exprs.push(expr);
-                        }
-                    }
-                }
-                self.emit("\"");
-
-                for expr in exprs {
-                    self.emit(", ");
-                    self.gen_expr(expr);
-                }
+                self.emit("fmt.Sprintf(");
+                self.emit_interp_format_and_args(parts, true);
                 self.emit(")");
             }
 
@@ -100,6 +77,33 @@ impl Codegen {
                     self.emit(type_to_go_string(&type_args[0]));
                     // Additional arguments
                     for (_, arg, spread) in args {
+                        self.emit(", ");
+                        self.gen_expr(arg);
+                        if *spread {
+                            self.emit("...");
+                        }
+                    }
+                    self.emit(")");
+                    return;
+                }
+
+                // When fmt.Sprintf/fmt.Errorf is called with an interpolated string
+                // as the first argument, inline the format string and args directly
+                // to avoid a redundant nested fmt.Sprintf call.
+                if let TypedExprKind::PackageMember { pkg, member } = &func.kind
+                    && pkg == "fmt"
+                    && (member == "Sprintf" || member == "Errorf")
+                    && !args.is_empty()
+                    && let TypedExprKind::StringInterpolation(parts) = &args[0].1.kind
+                {
+                    self.emit("fmt.");
+                    self.emit(member);
+                    self.emit("(");
+                    // Don't escape % in literals — the format string is used directly
+                    // by fmt.Errorf/Sprintf, so %w etc. must pass through as-is.
+                    self.emit_interp_format_and_args(parts, false);
+                    // Emit remaining arguments (e.g. the wrapped error in Errorf)
+                    for (_, arg, spread) in &args[1..] {
                         self.emit(", ");
                         self.gen_expr(arg);
                         if *spread {
@@ -661,5 +665,43 @@ impl Codegen {
         }
         // Default: use normal expression generation
         self.gen_expr(expr);
+    }
+
+    /// Emit an interpolation's format string literal and trailing arguments,
+    /// without the surrounding `fmt.Sprintf(...)` wrapper. This allows callers
+    /// like `fmt.Errorf` to inline the format directly instead of nesting a
+    /// redundant `fmt.Sprintf` call.
+    ///
+    /// When `escape_percent` is true, literal `%` characters are escaped to `%%`
+    /// (needed for standalone `fmt.Sprintf` wrappers). When false, `%` passes
+    /// through as-is (needed when inlining into `fmt.Errorf` where `%w` must
+    /// remain unescaped).
+    fn emit_interp_format_and_args(&mut self, parts: &[TypedStringPart], escape_percent: bool) {
+        self.emit("\"");
+        let mut exprs: Vec<&TypedExpr> = Vec::new();
+        for part in parts {
+            match part {
+                TypedStringPart::Literal(s) => {
+                    if escape_percent {
+                        self.emit(s.replace('%', "%%"));
+                    } else {
+                        self.emit(s);
+                    }
+                }
+                TypedStringPart::Expr { expr, format } => {
+                    let fmt = format
+                        .as_deref()
+                        .map(|f| format!("%{}", f))
+                        .unwrap_or_else(|| default_format_for_type(&expr.ty));
+                    self.emit(&fmt);
+                    exprs.push(expr);
+                }
+            }
+        }
+        self.emit("\"");
+        for expr in exprs {
+            self.emit(", ");
+            self.gen_expr(expr);
+        }
     }
 }

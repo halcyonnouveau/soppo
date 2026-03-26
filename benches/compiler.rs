@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use soppo::build;
 use soppo::syntax::{FileId, Parser};
