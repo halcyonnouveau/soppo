@@ -286,7 +286,8 @@ impl Parser {
             .iter()
             .filter(|c| c.span.end.line < decl_start_line)
             .collect();
-        relevant_comments.sort_by(|a, b| b.span.end.line.cmp(&a.span.end.line));
+
+        relevant_comments.sort_by_key(|b| std::cmp::Reverse(b.span.end.line));
 
         for comment in relevant_comments {
             if comment.span.end.line == expected_line {

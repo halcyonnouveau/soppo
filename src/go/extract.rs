@@ -920,12 +920,11 @@ fn extract_const_spec_with_type(
             _ if is_type_node(child.kind()) => {
                 explicit_ty = extract_type_string(child, source);
             }
-            "expression_list" => {
+            "expression_list"
                 // Try to infer type from value if not explicitly typed and no inherited type
-                if explicit_ty.is_empty() && inherited_type.is_empty() {
+                if explicit_ty.is_empty() && inherited_type.is_empty() => {
                     explicit_ty = infer_const_type(child, source, &pkg.constants);
                 }
-            }
             _ => {}
         }
     }
@@ -1057,12 +1056,11 @@ fn extract_var_spec(
             "identifier" => {
                 names.push((node_text(child, source).to_string(), child));
             }
-            "expression_list" => {
+            "expression_list"
                 // Try to infer type from expression (e.g., function call)
-                if ty.is_empty() {
+                if ty.is_empty() => {
                     ty = infer_var_type_from_expr(child, source, pkg);
                 }
-            }
             _ if is_type_node(child.kind()) => {
                 ty = extract_type_string(child, source);
             }
