@@ -2810,9 +2810,9 @@ impl Infer {
                 }
             }
             // Struct literals like Option.Some{Value: ...}
-            ExprKind::StructLit { ty: Some(ty), .. } => {
+            ExprKind::StructLit { ty: Some(ty), .. }
                 // Check if the type name is an enum variant (Type.Variant)
-                if ty.name.contains('.') && ty.args.is_empty() {
+                if ty.name.contains('.') && ty.args.is_empty() => {
                     let parts: Vec<&str> = ty.name.split('.').collect();
                     if parts.len() >= 2 {
                         let enum_name = parts[0];
@@ -2829,7 +2829,6 @@ impl Infer {
                         }
                     }
                 }
-            }
             _ => {}
         }
 
