@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777283933376,
+  "lastUpdate": 1777284343027,
   "repoUrl": "https://github.com/halcyonnouveau/soppo",
   "entries": {
     "Benchmark": [
@@ -9689,6 +9689,120 @@ window.BENCHMARK_DATA = {
             "name": "compile/file/basic_go",
             "value": 25071908,
             "range": "± 225208",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "49699333+dependabot[bot]@users.noreply.github.com",
+            "name": "dependabot[bot]",
+            "username": "dependabot[bot]"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "26e9b9e3ca850129588206ea80630e9c2b98e2d3",
+          "message": "chore(deps): bump the all group across 2 directories with 4 updates (#40)\n\nBumps the all group with 4 updates in the / directory: [toml](https://github.com/toml-rs/toml), [insta](https://github.com/mitsuhiko/insta), [proptest](https://github.com/proptest-rs/proptest) and [tokio](https://github.com/tokio-rs/tokio).\nBumps the all group with 1 update in the /fuzz directory: [toml](https://github.com/toml-rs/toml).\n\n\nUpdates `toml` from 1.0.7+spec-1.1.0 to 1.1.2+spec-1.1.0\n- [Commits](https://github.com/toml-rs/toml/compare/toml-v1.0.7...toml-v1.1.2)\n\nUpdates `insta` from 1.46.3 to 1.47.2\n- [Release notes](https://github.com/mitsuhiko/insta/releases)\n- [Changelog](https://github.com/mitsuhiko/insta/blob/master/CHANGELOG.md)\n- [Commits](https://github.com/mitsuhiko/insta/compare/1.46.3...1.47.2)\n\nUpdates `proptest` from 1.10.0 to 1.11.0\n- [Release notes](https://github.com/proptest-rs/proptest/releases)\n- [Changelog](https://github.com/proptest-rs/proptest/blob/main/CHANGELOG.md)\n- [Commits](https://github.com/proptest-rs/proptest/compare/v1.10.0...v1.11.0)\n\nUpdates `tokio` from 1.50.0 to 1.52.1\n- [Release notes](https://github.com/tokio-rs/tokio/releases)\n- [Commits](https://github.com/tokio-rs/tokio/compare/tokio-1.50.0...tokio-1.52.1)\n\nUpdates `toml` from 1.0.7+spec-1.1.0 to 1.1.2+spec-1.1.0\n- [Commits](https://github.com/toml-rs/toml/compare/toml-v1.0.7...toml-v1.1.2)\n\n---\nupdated-dependencies:\n- dependency-name: toml\n  dependency-version: 1.1.2+spec-1.1.0\n  dependency-type: direct:production\n  update-type: version-update:semver-minor\n  dependency-group: all\n- dependency-name: insta\n  dependency-version: 1.47.2\n  dependency-type: direct:production\n  update-type: version-update:semver-minor\n  dependency-group: all\n- dependency-name: proptest\n  dependency-version: 1.11.0\n  dependency-type: direct:production\n  update-type: version-update:semver-minor\n  dependency-group: all\n- dependency-name: tokio\n  dependency-version: 1.52.1\n  dependency-type: direct:production\n  update-type: version-update:semver-minor\n  dependency-group: all\n- dependency-name: toml\n  dependency-version: 1.1.2+spec-1.1.0\n  dependency-type: direct:production\n  update-type: version-update:semver-minor\n  dependency-group: all\n...\n\nSigned-off-by: dependabot[bot] <support@github.com>\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>\nCo-authored-by: justin <justin@duch.me>",
+          "timestamp": "2026-04-27T20:01:18+10:00",
+          "tree_id": "0e98d52b69d69ee8b4117e8fa7047dcb86a92002",
+          "url": "https://github.com/halcyonnouveau/soppo/commit/26e9b9e3ca850129588206ea80630e9c2b98e2d3"
+        },
+        "date": 1777284342481,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse/file/guessing_game",
+            "value": 133814,
+            "range": "± 1194",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/file_processor",
+            "value": 298489,
+            "range": "± 1467",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/http_server",
+            "value": 257493,
+            "range": "± 7300",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/todo_cli",
+            "value": 1903973,
+            "range": "± 54473",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/basic_go",
+            "value": 21385613,
+            "range": "± 52979",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/guessing_game",
+            "value": 2222872,
+            "range": "± 11765",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/file_processor",
+            "value": 4076983,
+            "range": "± 13761",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/http_server",
+            "value": 9035937,
+            "range": "± 49016",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/todo_cli",
+            "value": 5158975,
+            "range": "± 122316",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/basic_go",
+            "value": 28016591,
+            "range": "± 472676",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/guessing_game",
+            "value": 2310493,
+            "range": "± 12289",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/file_processor",
+            "value": 4197301,
+            "range": "± 65547",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/http_server",
+            "value": 9225471,
+            "range": "± 64740",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/todo_cli",
+            "value": 5259749,
+            "range": "± 100092",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/basic_go",
+            "value": 28258994,
+            "range": "± 1925304",
             "unit": "ns/iter"
           }
         ]
