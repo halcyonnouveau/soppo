@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/halcyonnouveau/soppo/compare/v0.10.1...v0.11.0) - 2026-04-27
+
+### Added
+
+- feat; add var block
+- feat; add runtime benchmarks
+
+### Fixed
+
+- fix; minor optimisation on string interpolation
+
 ## [0.10.1](https://github.com/halcyonnouveau/soppo/compare/v0.10.0...v0.10.1) - 2026-01-28
 
 ### Added
