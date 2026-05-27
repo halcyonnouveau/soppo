@@ -770,6 +770,10 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                     let mut ty = String::new();
                     let mut nullable = false;
                     let mut is_const = false;
+                    // tree-sitter-go represents an embedded pointer field (`*Base`)
+                    // as a `*` anonymous token followed by the type, rather than a
+                    // `pointer_type` node. Track it so we can restore the `*`.
+                    let mut embedded_pointer = false;
 
                     // Get the line number of this field declaration for matching trailing comment
                     let field_end_line = field_decl.end_position().row;
@@ -779,6 +783,9 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
                         match field_child.kind() {
                             "field_identifier" => {
                                 names.push(node_text(field_child, source).to_string());
+                            }
+                            "*" => {
+                                embedded_pointer = true;
                             }
                             "comment" => {
                                 // Check for //soppo:X,Y markers (inline comment within declaration)
@@ -808,8 +815,17 @@ fn extract_struct_fields(node: tree_sitter::Node, source: &str, fields: &mut Vec
 
                     // Handle embedded fields (no names)
                     if names.is_empty() && !ty.is_empty() {
+                        // The promoted field name is the type as written (e.g. `Base`
+                        // for `*Base`); the field type keeps the pointer so the
+                        // embedded value is promoted as `*Base`, not `Base`.
+                        let name = ty.clone();
+                        let ty = if embedded_pointer {
+                            format!("*{ty}")
+                        } else {
+                            ty
+                        };
                         fields.push(Field {
-                            name: ty.clone(),
+                            name,
                             ty,
                             nullable,
                             is_const,

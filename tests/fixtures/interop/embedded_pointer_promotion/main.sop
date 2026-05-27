@@ -1,0 +1,10 @@
+package main
+
+import "embedded_pointer_promotion/model"
+
+func main() {
+	child := model.NewChild().(!nil)
+	// child.Base is promoted through *Mid -> *Base, so it must be passed as a
+	// pointer to AcceptBase.
+	_ = model.AcceptBase(child.Base)
+}
