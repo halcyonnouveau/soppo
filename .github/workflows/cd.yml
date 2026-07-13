@@ -18,7 +18,7 @@ jobs:
     name: Deploy playground
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - run: flyctl deploy -c fly.playground.toml --remote-only
         env:
@@ -28,7 +28,7 @@ jobs:
     name: Deploy tour
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - run: flyctl deploy -c fly.tour.toml --remote-only
         env:
@@ -53,7 +53,7 @@ jobs:
             os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
