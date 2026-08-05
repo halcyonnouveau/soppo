@@ -1,0 +1,70 @@
+package main
+
+import (
+	"io"
+	"strconv"
+	"strings"
+)
+
+// Enums compile to Go interfaces, so the zero value used by `?` must be nil
+// rather than an illegal `Shape{}` composite literal.
+type Shape enum {
+	Circle struct { radius float64 }
+	Square struct { side float64 }
+}
+
+type Describer interface {
+	Describe() string
+}
+
+type Box struct {
+	label string
+}
+
+func (b Box) Describe() string { return b.label }
+
+func parseShape(s string) (Shape, error) {
+	r := strconv.ParseFloat(s, 64) ?
+	return Shape.Circle{radius: r}, nil
+}
+
+func parseNilableShape(s string) (?Shape, error) {
+	r := strconv.ParseFloat(s, 64) ?
+	return Shape.Square{side: r}, nil
+}
+
+// User-defined Soppo interface as the non-error return.
+func parseDescriber(s string) (Describer, error) {
+	n := strconv.Atoi(s) ?
+	_ = n
+	return Box{label: s}, nil
+}
+
+// Interface coming from a Go package.
+func parseReader(s string) (io.Reader, error) {
+	n := strconv.Atoi(s) ?
+	_ = n
+	return strings.NewReader(s), nil
+}
+
+// Structs keep working - `var x T` has the same zero value as `T{}`.
+func parseBox(s string) (Box, error) {
+	n := strconv.Atoi(s) ?
+	_ = n
+	return Box{label: s}, nil
+}
+
+// Multiple non-error returns mixing an interface with a primitive.
+func parseBoth(s string) (Shape, int, error) {
+	n := strconv.Atoi(s) ?
+	return Shape.Circle{radius: 1.0}, n, nil
+}
+
+func main() {
+	_, _ = parseShape("1.5")
+	_, _ = parseNilableShape("2.5")
+	_, _ = parseDescriber("3")
+	_, _ = parseReader("4")
+	_, _ = parseBox("5")
+	_, _, _ = parseBoth("6")
+}

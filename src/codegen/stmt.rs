@@ -889,35 +889,49 @@ impl Codegen {
             // Default: return zero values (+ error if function returns error)
             self.emit("{\n");
             self.indent();
-            self.emit_indent();
-            self.emit("return ");
 
             let return_types = self.current_return_types.clone();
             let returns_error = return_types
                 .last()
                 .is_some_and(|ty| ty == "error" || ty.ends_with(".error"));
 
+            // Types needing a zero value: everything except a trailing `error`,
+            // which is filled in with the captured error variable instead.
+            let value_types = if returns_error {
+                &return_types[..return_types.len().saturating_sub(1)]
+            } else {
+                &return_types[..]
+            };
+
+            // Resolve each zero value. Types we can't write directly get a `var`
+            // declaration so Go computes the zero value - this is what makes
+            // interface-shaped returns (enums, interfaces) come out as nil rather
+            // than an illegal `T{}` composite literal.
+            let mut zero_values: Vec<String> = Vec::with_capacity(value_types.len());
+            for (i, ty) in value_types.iter().enumerate() {
+                match self.zero_value(ty) {
+                    Some(expr) => zero_values.push(expr),
+                    None => {
+                        // Scoped to this `if err != nil { ... }` block, so indexing
+                        // by return position is enough to stay unique.
+                        let var = format!("_zero{}", i);
+                        self.emit_indent();
+                        self.emit(format!("var {} {}\n", var, ty));
+                        zero_values.push(var);
+                    }
+                }
+            }
+
+            self.emit_indent();
+            self.emit("return ");
+            self.emit(zero_values.join(", "));
+
             if returns_error {
-                // Generate zero values for all return types except last (error)
-                let zero_values: Vec<String> = return_types
-                    .iter()
-                    .take(return_types.len().saturating_sub(1))
-                    .map(|ty| self.zero_value(ty))
-                    .collect();
-
-                self.emit(zero_values.join(", "));
-
                 // Add error variable
                 if !zero_values.is_empty() {
                     self.emit(", ");
                 }
                 self.emit(&err_var);
-            } else {
-                // No error return - just return zero values for all return types
-                let zero_values: Vec<String> =
-                    return_types.iter().map(|ty| self.zero_value(ty)).collect();
-
-                self.emit(zero_values.join(", "));
             }
             self.emit("\n");
             self.dedent();
