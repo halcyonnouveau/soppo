@@ -180,6 +180,12 @@
             .string {
                 color: #ce9178;
             }
+            .interpolation {
+                color: #d4d4d4;
+            }
+            .variable {
+                color: #9cdcfe;
+            }
             .function {
                 color: #dcdcaa;
             }
@@ -350,10 +356,10 @@
 
     <span class="comment">// Custom handling with named error</span>
     result := parse(data) <span class="keyword">?</span> err {
-        <span class="keyword">return</span> fmt.Errorf(<span class="string">"parse failed: {err}"</span>)
+        <span class="keyword">return</span> fmt.Errorf(<span class="string">"parse failed: <span class="interpolation">{<span class="variable">err</span>}</span>"</span>)
     }
 
-    fmt.Println(<span class="string">"Processed {len(result)} items"</span>)
+    fmt.Println(<span class="string">"Processed <span class="interpolation">{<span class="function">len</span>(<span class="variable">result</span>)}</span> items"</span>)
     <span class="keyword">return</span> <span class="keyword">nil</span>
 }</pre>
                 </div>
@@ -382,7 +388,7 @@
 
     <span class="keyword">if</span> user != <span class="keyword">nil</span> {
         <span class="comment">// user is *User here, not ?*User</span>
-        fmt.Println(<span class="string">"Hello {user.name}"</span>)
+        fmt.Println(<span class="string">"Hello <span class="interpolation">{<span class="variable">user</span>.<span class="variable">name</span>}</span>"</span>)
     }
 }</pre>
                 </div>
