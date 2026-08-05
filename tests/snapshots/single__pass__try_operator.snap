@@ -216,7 +216,8 @@ func tryWithStringReturn() (string, error) {
 func tryWithStructReturn() (User, error) {
 	user, _err0 := getUser(1)
 	if _err0 != nil {
-		return User{}, _err0
+		var _zero0 User
+		return _zero0, _err0
 	}
 	return (*user), nil
 }

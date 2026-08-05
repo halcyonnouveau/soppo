@@ -80,17 +80,24 @@ impl Codegen {
         self.error_var_counter = 0;
     }
 
-    /// Generate zero value for a type
-    pub(crate) fn zero_value(&self, ty: &str) -> String {
+    /// Generate zero value for a type.
+    ///
+    /// Returns `Some(expr)` when the zero value can be written from the type name
+    /// alone, and `None` when it cannot. `None` covers named types whose
+    /// underlying shape isn't visible here - enums and interfaces compile to Go
+    /// interfaces (zero value `nil`) while structs need `T{}`, and the name alone
+    /// doesn't distinguish them. Callers must declare a `var` of the type instead
+    /// and let Go compute the zero value.
+    pub(crate) fn zero_value(&self, ty: &str) -> Option<String> {
         match ty {
-            "int" | "int8" | "int16" | "int32" | "int64" => "0".to_string(),
+            "int" | "int8" | "int16" | "int32" | "int64" => Some("0".to_string()),
             "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" | "byte" | "rune" => {
-                "0".to_string()
+                Some("0".to_string())
             }
-            "float32" | "float64" => "0".to_string(),
-            "bool" => "false".to_string(),
-            "string" => "\"\"".to_string(),
-            "" | "()" => "".to_string(), // unit type
+            "float32" | "float64" => Some("0".to_string()),
+            "bool" => Some("false".to_string()),
+            "string" => Some("\"\"".to_string()),
+            "" | "()" => Some("".to_string()), // unit type
             _ if ty.starts_with('*')
                 || ty.starts_with("[]")
                 || ty.starts_with("map[")
@@ -99,12 +106,9 @@ impl Codegen {
                 || ty.starts_with("func(") =>
             {
                 // Pointers, slices, maps, channels, error, functions -> nil
-                "nil".to_string()
+                Some("nil".to_string())
             }
-            _ => {
-                // Struct types -> TypeName{}
-                format!("{}{{}}", ty)
-            }
+            _ => None,
         }
     }
 
