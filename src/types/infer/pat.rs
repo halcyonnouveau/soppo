@@ -54,12 +54,7 @@ impl Infer {
                 self.insert_var(binding.name.clone(), binding_ty, Some(binding.span))?;
                 Ok(())
             }
-            PatternKind::StructDestructor {
-                name,
-                fields,
-                rest: _,
-                ..
-            } => {
+            PatternKind::StructDestructor { name, fields, .. } => {
                 // For struct destructor patterns like Circle{radius: r, ...} or Point{x: 0, y}
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
@@ -187,12 +182,7 @@ impl Infer {
 
                 bindings.insert(binding.name.clone(), binding_ty);
             }
-            PatternKind::StructDestructor {
-                name,
-                fields,
-                rest: _,
-                ..
-            } => {
+            PatternKind::StructDestructor { name, fields, .. } => {
                 let variant_name = name.rsplit('.').next().unwrap_or(name);
 
                 if let Type::Con { sym: type_name, .. } = scrutinee_ty
