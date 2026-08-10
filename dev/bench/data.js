@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786332942520,
+  "lastUpdate": 1786334630106,
   "repoUrl": "https://github.com/halcyonnouveau/soppo",
   "entries": {
     "Benchmark": [
@@ -10259,6 +10259,120 @@ window.BENCHMARK_DATA = {
             "name": "compile/file/basic_go",
             "value": 28278966,
             "range": "± 262828",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "committer": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "distinct": true,
+          "id": "a9ba975af8e55a3436ad3512d74210692d83f7eb",
+          "message": "ci: clear stale criterion baselines before compiler benchmarks\n\nSwatinem/rust-cache prunes target/ on save, leaving target/criterion\nbase/ dirs without their sample.json. On restore criterion fails to read\nthe baseline and writes the error mid-line into the bencher output,\nwhich breaks parsing in github-action-benchmark.\n\nAlso disable setup-go's module cache, which warns on every job since\nthere is no go.mod at the repo root.",
+          "timestamp": "2026-08-10T13:59:17+10:00",
+          "tree_id": "dfc5d8266a4d1ea196d4eff61243d1a85918c48b",
+          "url": "https://github.com/halcyonnouveau/soppo/commit/a9ba975af8e55a3436ad3512d74210692d83f7eb"
+        },
+        "date": 1786334628885,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse/file/guessing_game",
+            "value": 104437,
+            "range": "± 1441",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/file_processor",
+            "value": 234948,
+            "range": "± 4504",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/http_server",
+            "value": 200823,
+            "range": "± 1270",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/todo_cli",
+            "value": 1455960,
+            "range": "± 12997",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/basic_go",
+            "value": 16079072,
+            "range": "± 121393",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/guessing_game",
+            "value": 1720262,
+            "range": "± 60841",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/file_processor",
+            "value": 3125593,
+            "range": "± 39367",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/http_server",
+            "value": 7715802,
+            "range": "± 198129",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/todo_cli",
+            "value": 3951346,
+            "range": "± 30473",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/basic_go",
+            "value": 21198377,
+            "range": "± 197608",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/guessing_game",
+            "value": 1762351,
+            "range": "± 17743",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/file_processor",
+            "value": 3214421,
+            "range": "± 116813",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/http_server",
+            "value": 7920755,
+            "range": "± 83975",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/todo_cli",
+            "value": 4063357,
+            "range": "± 44900",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/basic_go",
+            "value": 21398665,
+            "range": "± 345389",
             "unit": "ns/iter"
           }
         ]
