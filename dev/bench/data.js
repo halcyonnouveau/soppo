@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783911633752,
+  "lastUpdate": 1786332942520,
   "repoUrl": "https://github.com/halcyonnouveau/soppo",
   "entries": {
     "Benchmark": [
@@ -10145,6 +10145,120 @@ window.BENCHMARK_DATA = {
             "name": "compile/file/basic_go",
             "value": 28196846,
             "range": "± 185858",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "committer": {
+            "email": "justin@duch.me",
+            "name": "Justin Duch",
+            "username": "beanpuppy"
+          },
+          "distinct": true,
+          "id": "f05696f0f399e742ba7bbac771d2859169522f01",
+          "message": "fix: emit valid zero values for enum/interface/generic returns from `?`\n\nThe try operator generated `return Shape{}, err` for any return type it\ndidn't recognise, which is invalid Go when the type compiles to an\ninterface (enums, soppo interfaces, imported Go interfaces) and never\nvalid for generic parameters. Track return types as `Type` instead of\nGo strings so nilability survives to codegen, and fall back to\n`var _zeroN T` when no literal zero value exists. Also scope\n`current_return_types` to function literals so `?` in a closure\nreturns the closure's zero values, not the enclosing function's.\n\nFixes #52",
+          "timestamp": "2026-08-10T13:29:09+10:00",
+          "tree_id": "679a446d949c8bab3bc1bc485d9726d1eadf5de8",
+          "url": "https://github.com/halcyonnouveau/soppo/commit/f05696f0f399e742ba7bbac771d2859169522f01"
+        },
+        "date": 1786332941960,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "parse/file/guessing_game",
+            "value": 133378,
+            "range": "± 6870",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/file_processor",
+            "value": 297562,
+            "range": "± 9745",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/http_server",
+            "value": 256823,
+            "range": "± 10278",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/todo_cli",
+            "value": 1900555,
+            "range": "± 30591",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "parse/file/basic_go",
+            "value": 21344025,
+            "range": "± 125439",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/guessing_game",
+            "value": 2226646,
+            "range": "± 15716",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/file_processor",
+            "value": 4139024,
+            "range": "± 34241",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/http_server",
+            "value": 9015036,
+            "range": "± 90021",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/todo_cli",
+            "value": 5156073,
+            "range": "± 18427",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "typecheck/file/basic_go",
+            "value": 28065310,
+            "range": "± 976128",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/guessing_game",
+            "value": 2292813,
+            "range": "± 21441",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/file_processor",
+            "value": 4223639,
+            "range": "± 49801",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/http_server",
+            "value": 9077920,
+            "range": "± 76398",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/todo_cli",
+            "value": 5255800,
+            "range": "± 26923",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "compile/file/basic_go",
+            "value": 28278966,
+            "range": "± 262828",
             "unit": "ns/iter"
           }
         ]
