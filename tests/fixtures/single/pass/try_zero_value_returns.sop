@@ -1,0 +1,133 @@
+package main
+
+import (
+    "fmt"
+    "io"
+    "strconv"
+)
+
+// Return types that have no literal zero value in Go. `?` used to emit `T{}` for
+// all of them, which is only valid when T is a struct.
+
+type Shape enum {
+    Circle struct { radius float64 }
+    Square struct { side float64 }
+}
+
+type Describer interface {
+    Describe() string
+}
+
+type Box struct {
+    w int
+}
+
+func (b Box) Describe() string {
+    return "box"
+}
+
+func parse(s string) (int, error) {
+    return strconv.Atoi(s)
+}
+
+// === Enum: compiles to a Go interface, so `Shape{}` is invalid ===
+
+func retEnum(s string) (Shape, error) {
+    n := parse(s) ?
+    return Shape.Circle{radius: float64(n)}, nil
+}
+
+// === Nilable enum: nil is the zero value, matching the explicit return path ===
+
+func retNilableEnum(s string) (?Shape, error) {
+    n := parse(s) ?
+    if n == 0 {
+        return nil, nil
+    }
+    return Shape.Square{side: float64(n)}, nil
+}
+
+// === Soppo interface ===
+
+func retInterface(s string) (Describer, error) {
+    n := parse(s) ?
+    return Box{w: n}, nil
+}
+
+// === Interface from a Go package ===
+
+func retGoInterface(s string) (io.Reader, error) {
+    n := parse(s) ?
+    _ = n
+    return nil, nil
+}
+
+// === any ===
+
+func retAny(s string) (any, error) {
+    n := parse(s) ?
+    return n, nil
+}
+
+// === Generic type parameter: `T{}` is never valid ===
+
+func retGeneric[T any](s string, v T) (T, error) {
+    n := parse(s) ?
+    _ = n
+    return v, nil
+}
+
+// === Struct: `Box{}` would be valid, but a bare name can't be told apart from
+// an interface, so structs take the `var` fallback too ===
+
+func retStruct(s string) (Box, error) {
+    n := parse(s) ?
+    return Box{w: n}, nil
+}
+
+// === Multiple zero values in one return ===
+
+func retEnumAndInterface(s string) (Shape, Describer, error) {
+    n := parse(s) ?
+    return Shape.Circle{radius: float64(n)}, Box{w: n}, nil
+}
+
+// === Mixed with types that do have literals ===
+
+func retMixed(s string) (int, Shape, string, error) {
+    n := parse(s) ?
+    return n, Shape.Circle{radius: 1.0}, "ok", nil
+}
+
+// === No error return: zero values only ===
+
+func retEnumNoError(s string) Shape {
+    n := parse(s) ?
+    return Shape.Circle{radius: float64(n)}
+}
+
+// === Function literal: ? returns from the literal, not the enclosing function ===
+
+func closureReturnTypes() (string, error) {
+    f := func(s string) (Shape, error) {
+        n := parse(s) ?
+        return Shape.Circle{radius: float64(n)}, nil
+    }
+    shape := f("1") ?
+    _ = shape
+    return "ok", nil
+}
+
+func main() {
+    fmt.Println(retEnum("1"))
+    fmt.Println(retNilableEnum("0"))
+    fmt.Println(retInterface("1"))
+    fmt.Println(retGoInterface("1"))
+    fmt.Println(retAny("1"))
+    fmt.Println(retGeneric("1", "v"))
+    fmt.Println(retStruct("1"))
+    fmt.Println(retEnumAndInterface("1"))
+    fmt.Println(retMixed("1"))
+    fmt.Println(retEnumNoError("bad"))
+    fmt.Println(closureReturnTypes())
+}

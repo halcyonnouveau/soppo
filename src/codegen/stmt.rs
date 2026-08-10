@@ -889,36 +889,46 @@ impl Codegen {
             // Default: return zero values (+ error if function returns error)
             self.emit("{\n");
             self.indent();
-            self.emit_indent();
-            self.emit("return ");
 
             let return_types = self.current_return_types.clone();
-            let returns_error = return_types
-                .last()
-                .is_some_and(|ty| ty == "error" || ty.ends_with(".error"));
+            let returns_error = return_types.last().is_some_and(|ty| {
+                let name = type_to_go_string(ty);
+                name == "error" || name.ends_with(".error")
+            });
+
+            // The error is propagated as-is; the rest need zero values
+            let zeroed = if returns_error {
+                &return_types[..return_types.len() - 1]
+            } else {
+                &return_types[..]
+            };
+
+            // Types with no literal zero value (enums, interfaces, generic params)
+            // get a `var` declaration and Go works the zero value out for us.
+            let zero_values: Vec<String> = zeroed
+                .iter()
+                .enumerate()
+                .map(|(i, ty)| {
+                    self.zero_value(ty).unwrap_or_else(|| {
+                        let name = format!("_zero{}", i);
+                        self.emit_indent();
+                        self.emit(format!("var {} {}\n", name, type_to_go_string(ty)));
+                        name
+                    })
+                })
+                .collect();
+
+            self.emit_indent();
+            self.emit("return ");
+            self.emit(zero_values.join(", "));
 
             if returns_error {
-                // Generate zero values for all return types except last (error)
-                let zero_values: Vec<String> = return_types
-                    .iter()
-                    .take(return_types.len().saturating_sub(1))
-                    .map(|ty| self.zero_value(ty))
-                    .collect();
-
-                self.emit(zero_values.join(", "));
-
-                // Add error variable
                 if !zero_values.is_empty() {
                     self.emit(", ");
                 }
                 self.emit(&err_var);
-            } else {
-                // No error return - just return zero values for all return types
-                let zero_values: Vec<String> =
-                    return_types.iter().map(|ty| self.zero_value(ty)).collect();
-
-                self.emit(zero_values.join(", "));
             }
+
             self.emit("\n");
             self.dedent();
             self.emit_indent();

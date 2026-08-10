@@ -16,8 +16,10 @@ pub struct Codegen {
     pub(crate) output: String,
     indent_level: usize,
     pub(crate) global_state: GlobalCtxt,
-    /// Current function's return types (for ? operator zero value generation)
-    pub(crate) current_return_types: Vec<String>,
+    /// Current function's return types (for ? operator zero value generation).
+    /// Kept as `Type` rather than the Go string so `?` can tell a nilable enum from
+    /// a struct - the name alone doesn't say which.
+    pub(crate) current_return_types: Vec<Type>,
     /// Counter for generating unique error variable names (_err0, _err1, etc.)
     pub(crate) error_var_counter: usize,
     comments: Vec<Comment>,
@@ -80,31 +82,38 @@ impl Codegen {
         self.error_var_counter = 0;
     }
 
-    /// Generate zero value for a type
-    pub(crate) fn zero_value(&self, ty: &str) -> String {
-        match ty {
-            "int" | "int8" | "int16" | "int32" | "int64" => "0".to_string(),
+    /// Generate a zero value expression for a type.
+    ///
+    /// Returns `None` when the type isn't one we can write a literal for. That covers
+    /// anything named: enums and interfaces compile to Go interfaces (`Shape{}` is not
+    /// valid Go), generic parameters have no literal form (`T{}`), and a name alone
+    /// can't tell `io.Reader` from `strings.Builder`. Callers fall back to declaring
+    /// `var x T` and letting Go work out the zero value.
+    pub(crate) fn zero_value(&self, ty: &Type) -> Option<String> {
+        // Nilable types (?T) are always nil, whatever T is
+        if ty.is_nullable() || ty.is_nilable_kind() {
+            return Some("nil".to_string());
+        }
+
+        let name = type_to_go_string(ty);
+
+        // Directional channels aren't covered by is_nilable_kind
+        if name.starts_with("<-chan ") || name.starts_with("chan<-") {
+            return Some("nil".to_string());
+        }
+
+        match name.as_str() {
+            "int" | "int8" | "int16" | "int32" | "int64" => Some("0".to_string()),
             "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "uintptr" | "byte" | "rune" => {
-                "0".to_string()
+                Some("0".to_string())
             }
-            "float32" | "float64" => "0".to_string(),
-            "bool" => "false".to_string(),
-            "string" => "\"\"".to_string(),
-            "" | "()" => "".to_string(), // unit type
-            _ if ty.starts_with('*')
-                || ty.starts_with("[]")
-                || ty.starts_with("map[")
-                || ty.starts_with("chan ")
-                || ty == "error"
-                || ty.starts_with("func(") =>
-            {
-                // Pointers, slices, maps, channels, error, functions -> nil
-                "nil".to_string()
-            }
-            _ => {
-                // Struct types -> TypeName{}
-                format!("{}{{}}", ty)
-            }
+            "float32" | "float64" => Some("0".to_string()),
+            "complex64" | "complex128" => Some("0".to_string()),
+            "bool" => Some("false".to_string()),
+            "string" => Some("\"\"".to_string()),
+            "" | "()" => Some("".to_string()), // unit type
+            _ if name.starts_with("func(") => Some("nil".to_string()),
+            _ => None,
         }
     }
 

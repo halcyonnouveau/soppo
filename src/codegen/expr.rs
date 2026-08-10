@@ -563,8 +563,17 @@ impl Codegen {
                     }
                 }
 
+                // `?` inside the body returns from the literal, not the enclosing
+                // function, so swap in its return types for the duration
+                let outer_return_types = std::mem::replace(
+                    &mut self.current_return_types,
+                    returns.iter().map(|r| r.ty.clone()).collect(),
+                );
+
                 self.emit(" ");
                 self.gen_block(body);
+
+                self.current_return_types = outer_return_types;
             }
 
             TypedExprKind::Block(block) => {

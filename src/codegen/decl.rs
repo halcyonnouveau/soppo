@@ -476,11 +476,7 @@ impl Codegen {
         self.emit(")");
 
         // Set up return types for try statement expansion
-        self.current_return_types = decl
-            .returns
-            .iter()
-            .map(|p| type_to_go_string(&p.ty))
-            .collect();
+        self.current_return_types = decl.returns.iter().map(|p| p.ty.clone()).collect();
 
         // Return types
         if !decl.returns.is_empty() {
