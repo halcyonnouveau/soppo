@@ -31,6 +31,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "stable"
+          cache: false
       - uses: Swatinem/rust-cache@v2
       - name: Download Go deps for interop tests
         run: |
@@ -72,7 +73,10 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "stable"
+          cache: false
       - uses: Swatinem/rust-cache@v2
+      - name: Clear stale criterion baselines
+        run: rm -rf target/criterion
       - name: Run benchmarks
         run: cargo bench --bench compiler -- --output-format bencher | tee output.txt
       - name: Store benchmark result
@@ -95,6 +99,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "stable"
+          cache: false
       - uses: Swatinem/rust-cache@v2
       - name: Compile .sop benchmarks to Go
         run: cargo run -- build benches/runtime/*_generated_test.sop
