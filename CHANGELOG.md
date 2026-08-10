@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1](https://github.com/halcyonnouveau/soppo/compare/v0.11.0...v0.11.1) - 2026-08-10
+
+### Fixed
+
+- emit valid zero values for enum/interface/generic returns from `?`
+- resolve embedded pointer fields from imported Go structs
+
+### Other
+
+- clippy fix
+
 ## [0.11.0](https://github.com/halcyonnouveau/soppo/compare/v0.10.1...v0.11.0) - 2026-04-27
 
 ### Added
