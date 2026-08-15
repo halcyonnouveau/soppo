@@ -1395,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "sopls"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "clap",
  "futures",
@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "soppo"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "clap",
  "criterion",
